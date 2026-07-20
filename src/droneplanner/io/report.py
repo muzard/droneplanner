@@ -48,6 +48,23 @@ def report_to_markdown(report: RiskReport) -> str:
     lines.append(f"| Crossings needing manipulation | {report.manipulation_crossings} |")
     lines.append("")
 
+    if report.kinematics is not None:
+        k = report.kinematics
+        lines.append("## Kinematic feasibility")
+        lines.append("")
+        lines.append(f"**Trajectory {'feasible' if k.feasible else 'INFEASIBLE'}**")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | ---: |")
+        lines.append(f"| Min turn radius | {k.min_turn_radius_m:.1f} m |")
+        lines.append(f"| Tightest turn achieved | {k.tightest_turn_radius_m:.1f} m |")
+        lines.append(f"| Turn-radius violations | {k.turn_violations} |")
+        lines.append(f"| Reversals | {k.reversals} |")
+        lines.append(f"| Max climb rate | {k.max_climb_rate_ms:.2f} m/s |")
+        lines.append(f"| Max descent rate | {k.max_descent_rate_ms:.2f} m/s |")
+        lines.append(f"| Climb-rate violations | {k.climb_violations} |")
+        lines.append("")
+
     if report.objective_scores:
         lines.append("## Objective scores")
         lines.append("")

@@ -7,6 +7,7 @@ from droneplanner.model.plan import (
     Crossing,
     CrossingMethod,
     FlyabilityClass,
+    KinematicReport,
     Plan,
     RouteSegment,
     TrajectoryVertex,
@@ -135,6 +136,68 @@ def test_open_crossing_is_review() -> None:
     report = _analyzed(m, _plan_with((seg,), crossings=(crossing,)))
     assert report.recommendation is Recommendation.REVIEW
     assert any(f.code == "open_crossings" for f in report.findings)
+
+
+def _kin(**kw: object) -> KinematicReport:
+    base = dict(feasible=True, min_turn_radius_m=8.0, tightest_turn_radius_m=8.0)
+    base.update(kw)
+    return KinematicReport(**base)  # type: ignore[arg-type]
+
+
+def test_reversal_is_informational_not_no_go() -> None:
+    # Reversals are allowed at low payout speed: surfaced, but not a blocker.
+    m = make_mission()
+    seg = RouteSegment(
+        index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
+    )
+    plan = _plan_with((seg,), kinematics=_kin(feasible=True, reversals=2))
+    report = build_report(m, plan, concealment_analyzed=True, flyability_analyzed=True)
+    assert report.recommendation is Recommendation.GO
+    reversal = next(f for f in report.findings if f.code == "tether_reversal")
+    assert reversal.severity is Severity.INFO
+    assert report.kinematics is not None and report.kinematics.reversals == 2
+
+
+def test_turn_and_climb_violations_are_review() -> None:
+    m = make_mission()
+    seg = RouteSegment(
+        index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
+    )
+    plan = _plan_with(
+        (seg,),
+        kinematics=_kin(
+            feasible=False, turn_violations=2, tightest_turn_radius_m=3.0, climb_violations=1
+        ),
+    )
+    report = build_report(m, plan, concealment_analyzed=True, flyability_analyzed=True)
+    assert report.recommendation is Recommendation.REVIEW
+    codes = {f.code for f in report.findings}
+    assert "turn_radius" in codes
+    assert "climb_rate" in codes
+
+
+def test_feasible_kinematics_no_findings() -> None:
+    m = make_mission()
+    seg = RouteSegment(
+        index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
+    )
+    plan = _plan_with((seg,), kinematics=_kin(feasible=True))
+    report = build_report(m, plan, concealment_analyzed=True, flyability_analyzed=True)
+    assert report.recommendation is Recommendation.GO
+
+
+def test_report_markdown_shows_kinematics() -> None:
+    m = make_mission()
+    seg = RouteSegment(
+        index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
+    )
+    report = build_report(
+        m,
+        _plan_with((seg,), kinematics=_kin()),
+        concealment_analyzed=True,
+        flyability_analyzed=True,
+    )
+    assert "Kinematic feasibility" in report_to_markdown(report)
 
 
 def test_report_serialization_roundtrips() -> None:

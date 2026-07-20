@@ -1,26 +1,39 @@
-"""2.5D corridor planner (Software-Spec §5.3 v0, milestone M1).
+"""2.5D corridor planner (Software-Spec §5.3, milestones M1/M2).
 
 Ties the composite cost surface to the any-angle Theta* search and packages the
 result as a ``Plan``: a concealment- and defilade-aware route with per-segment
-exposure and route-level objective scores. No forest (3D) refinement yet — that
-is M2 — so flyability is left UNKNOWN and altitude is constant-AGL terrain
-following.
+exposure, flyability class, road crossings, and route-level objective scores.
+When a forest flyability field is present (M2) the search treats non-navigable
+cells as obstacles, segments carry their FLYABLE/MARGINAL class, and vertices
+fly the max-flyable-altitude band. The OMPL 3D kinodynamic refinement inside the
+corridor is future work (see SHORTFALLS.md).
 """
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 
+from droneplanner.crossings.detect import detect_crossings
 from droneplanner.fields.composite import CostSurface, build_cost_surface
+from droneplanner.forest.navigability import CLASS_TO_ENUM, FlyabilityField
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import Mission
 from droneplanner.model.plan import (
+    Crossing,
     FlightBand,
     FlyabilityClass,
+    KinematicReport,
     Plan,
     RouteSegment,
     TrajectoryVertex,
+)
+from droneplanner.planner.kinematics import (
+    KinematicLimits,
+    fillet_path,
+    smooth_altitudes,
 )
 from droneplanner.planner.theta_star import path_cost, plan_path
 from droneplanner.raster_lines import bresenham
@@ -39,15 +52,43 @@ def _mean_over(field: np.ndarray, cells: list[tuple[int, int]]) -> float:
     return float(np.mean([field[r, c] for r, c in cells]))
 
 
+def _segment_flyability(
+    flyability: FlyabilityField | None, cells: list[tuple[int, int]]
+) -> FlyabilityClass:
+    """Worst (highest-code) flyability class along a segment's cells."""
+    if flyability is None:
+        return FlyabilityClass.UNKNOWN
+    worst = max(int(flyability.navigable_class[r, c]) for r, c in cells)
+    return CLASS_TO_ENUM[worst]
+
+
+def _altitude_band(
+    flyability: FlyabilityField | None, rc: tuple[int, int], cruise_agl_m: float
+) -> tuple[float, float, float, FlightBand]:
+    """Return (preferred, floor, ceil, band) altitude for a cell.
+
+    Without forest: a fixed cruise-AGL band. With forest: the navigable vertical
+    window (altitude is free to vary within it to find/keep the gap).
+    """
+    if flyability is None:
+        return cruise_agl_m, cruise_agl_m, cruise_agl_m, FlightBand.OPEN
+    floor = float(flyability.nav_floor_m[rc])
+    ceil = float(flyability.nav_ceil_m[rc])
+    pref = float(flyability.max_flyable_altitude_m[rc])
+    if ceil <= 0.0:
+        return cruise_agl_m, cruise_agl_m, cruise_agl_m, FlightBand.OPEN
+    return min(max(pref, floor), ceil), floor, ceil, FlightBand.UPPER_TRUNK
+
+
 def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) -> Plan:
-    """Plan the M1 concealment-aware corridor route over a cost surface."""
+    """Plan the concealment-aware corridor route over a cost surface."""
     grid = surface.grid
     start_rc = grid.world_to_pixel(mission.start)
     goal_rc = grid.world_to_pixel(mission.end)
 
-    cell_path = plan_path(surface.cost, start_rc, goal_rc)
+    cell_path = plan_path(surface.cost, start_rc, goal_rc, obstacle=surface.obstacle)
     exposure = surface.components["exposure"]
-    agl = mission.cruise_agl_m  # M1 flies constant AGL (terrain following is M2)
+    flyability = surface.flyability
     speed = mission.drone.cruise_speed_ms
 
     # World coordinates: exact mission endpoints, cell centers for turning points.
@@ -60,18 +101,58 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
 
     coords = [world_of(i, rc) for i, rc in enumerate(cell_path)]
 
-    vertices = tuple(
-        TrajectoryVertex(
-            x=coord.x,
-            y=coord.y,
-            z=agl,
-            altitude_agl_m=agl,
-            flight_band=FlightBand.OPEN,
-            speed_hint_ms=speed,
+    # --- Kinematic feasibility pass (Software-Spec §3.6) ---
+    limits = KinematicLimits.from_drone(mission.drone)
+
+    def _blocked(x: float, y: float) -> bool:
+        if surface.obstacle is None:
+            return False
+        return bool(surface.obstacle[grid.world_to_pixel(Coordinate(x=x, y=y))])
+
+    filleted, turn_violations, reversals, tightest = fillet_path(
+        [(c.x, c.y) for c in coords], limits, _blocked
+    )
+    fpts = [Coordinate(x=x, y=y) for x, y in filleted]
+    prefs, floors, ceils, bands = [], [], [], []
+    for p in fpts:
+        pref, floor, ceil, band = _altitude_band(
+            flyability, grid.world_to_pixel(p), mission.cruise_agl_m
         )
-        for coord in coords
+        prefs.append(pref)
+        floors.append(floor)
+        ceils.append(ceil)
+        bands.append(band)
+    seg_dists = [a.distance_to(b) for a, b in pairwise(fpts)]
+    alts, climb_violations, max_climb, max_descent = smooth_altitudes(
+        prefs, floors, ceils, seg_dists, limits
     )
 
+    vertices = tuple(
+        TrajectoryVertex(
+            x=p.x,
+            y=p.y,
+            z=alt,
+            altitude_agl_m=alt,
+            flight_band=band,
+            speed_hint_ms=speed,
+        )
+        for p, alt, band in zip(fpts, alts, bands, strict=True)
+    )
+    kinematics = KinematicReport(
+        # Reversals are allowed (low payout speed mitigates snag), so they do not
+        # break feasibility — only turn-radius and climb-rate violations do.
+        feasible=(turn_violations == 0 and climb_violations == 0),
+        min_turn_radius_m=limits.min_turn_radius_m,
+        tightest_turn_radius_m=tightest,
+        turn_violations=turn_violations,
+        reversals=reversals,
+        max_climb_rate_ms=max_climb,
+        max_descent_rate_ms=max_descent,
+        climb_violations=climb_violations,
+    )
+    trajectory_length = sum(seg_dists)
+
+    seg_band = FlightBand.UPPER_TRUNK if flyability is not None else FlightBand.OPEN
     segments: list[RouteSegment] = []
     all_cells: list[tuple[int, int]] = []
     for i in range(len(cell_path) - 1):
@@ -84,13 +165,17 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
                 start=coords[i],
                 end=coords[i + 1],
                 length_m=coords[i].distance_to(coords[i + 1]),
-                flyability=FlyabilityClass.UNKNOWN,
-                flight_band=FlightBand.OPEN,
+                flyability=_segment_flyability(flyability, seg_cells),
+                flight_band=seg_band,
                 exposed=seg_exposed,
             )
         )
 
-    total_length = sum(s.length_m for s in segments)
+    crossings: tuple[Crossing, ...] = ()
+    if surface.road_mask is not None:
+        crossings = detect_crossings(cell_path, surface.road_mask, grid)
+
+    total_length = trajectory_length
     fiber_used = total_length * mission.fiber_slack_factor
 
     path_exposures = [float(exposure[r, c]) for r, c in all_cells]
@@ -105,9 +190,9 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         crs=mission.crs,
         route_index=route_index,
         seed=mission.seed,
-        vertices=vertices,
+        vertices=tuple(vertices),
         segments=tuple(segments),
-        crossings=(),
+        crossings=crossings,
         total_length_m=total_length,
         fiber_used_m=fiber_used,
         objective_scores={
@@ -117,6 +202,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             "max_exposure": max_exposure,
             "exposed_fraction": exposed_fraction,
         },
+        kinematics=kinematics,
     )
 
 
@@ -125,10 +211,15 @@ def plan_over_terrain(
     dtm: np.ndarray,
     dsm: np.ndarray,
     grid: Grid,
+    *,
+    road_mask: np.ndarray | None = None,
+    flyability: FlyabilityField | None = None,
     route_index: int = 0,
 ) -> tuple[Plan, CostSurface]:
     """Build the cost surface for a terrain and plan the corridor over it."""
-    surface = build_cost_surface(dtm, dsm, grid, mission)
+    surface = build_cost_surface(
+        dtm, dsm, grid, mission, road_mask=road_mask, flyability=flyability
+    )
     plan = plan_corridor(mission, surface, route_index=route_index)
     return plan, surface
 

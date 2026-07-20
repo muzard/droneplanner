@@ -14,11 +14,16 @@ from pathlib import Path
 
 import numpy as np
 
+from droneplanner.crossings.roads import rasterize_roads
+from droneplanner.forest.navigability import FlyabilityConfig, FlyabilityField, build_flyability
+from droneplanner.forest.voxelize import voxelize
 from droneplanner.io.mavlink import write_plan
 from droneplanner.io.mission import load_mission
+from droneplanner.io.pointcloud import read_pointcloud
 from droneplanner.io.raster import read_raster
 from droneplanner.io.report import write_report
 from droneplanner.io.trajectory import write_trajectory
+from droneplanner.io.vector import read_vector
 from droneplanner.logging_config import get_logger
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import Mission
@@ -29,6 +34,9 @@ from droneplanner.planner.stub import straight_line_plan
 from droneplanner.report.build import build_report
 
 _log = get_logger(__name__)
+
+# Vertical voxel size for the forest occupancy grid (meters).
+VOXEL_SIZE_Z = 0.5
 
 
 @dataclass(frozen=True)
@@ -63,18 +71,54 @@ def _load_terrain(mission: Mission) -> tuple[np.ndarray, np.ndarray, Grid] | Non
     return dtm_r.data, dsm_r.data, grid
 
 
-def _plan_route(mission: Mission, route_index: int) -> tuple[Plan, bool]:
-    """Plan one route, returning (plan, concealment_analyzed).
+def _load_road_mask(mission: Mission, grid: Grid) -> np.ndarray | None:
+    """Rasterize the roads layer to an on-road mask, or None if not supplied."""
+    if mission.layers.roads is None:
+        return None
+    return rasterize_roads(read_vector(mission.layers.roads), grid)
 
-    Runs the M1 concealment-aware corridor planner when a DTM+DSM is supplied,
-    otherwise the M0 straight-line stub. (Forest/3D flyability is M2.)
+
+def _load_flyability(mission: Mission, grid: Grid) -> FlyabilityField | None:
+    """Voxelize the lidar layer and build the forest flyability field, or None."""
+    if mission.layers.point_cloud is None:
+        return None
+    pc = read_pointcloud(mission.layers.point_cloud)
+    if pc.count == 0:
+        return None
+    z = pc.xyz[:, 2]
+    voxels = voxelize(
+        pc.xyz,
+        grid,
+        z_min=float(z.min()),
+        z_max=float(z.max()) + VOXEL_SIZE_Z,
+        voxel_size_z=VOXEL_SIZE_Z,
+    )
+    return build_flyability(voxels, FlyabilityConfig.from_drone(mission.drone))
+
+
+def _plan_route(mission: Mission, route_index: int) -> tuple[Plan, bool, bool]:
+    """Plan one route, returning (plan, concealment_analyzed, flyability_analyzed).
+
+    Runs the M1/M2 corridor planner when a DTM+DSM is supplied (adding road
+    crossings and forest flyability when those layers exist), otherwise the M0
+    straight-line stub.
     """
     terrain = _load_terrain(mission)
     if terrain is None:
-        return straight_line_plan(mission, route_index=route_index), False
+        return straight_line_plan(mission, route_index=route_index), False, False
     dtm, dsm, grid = terrain
-    plan, _surface = plan_over_terrain(mission, dtm, dsm, grid, route_index=route_index)
-    return plan, True
+    road_mask = _load_road_mask(mission, grid)
+    flyability = _load_flyability(mission, grid)
+    plan, _surface = plan_over_terrain(
+        mission,
+        dtm,
+        dsm,
+        grid,
+        road_mask=road_mask,
+        flyability=flyability,
+        route_index=route_index,
+    )
+    return plan, True, flyability is not None
 
 
 def plan_mission(
@@ -95,13 +139,13 @@ def plan_mission(
     results: list[PlanResult] = []
     multi = mission.k_routes > 1
     for route_index in range(mission.k_routes):
-        plan, concealment_analyzed = _plan_route(mission, route_index)
+        plan, concealment_analyzed, flyability_analyzed = _plan_route(mission, route_index)
         report = build_report(
             mission,
             plan,
             generated_at=generated_at,
             concealment_analyzed=concealment_analyzed,
-            flyability_analyzed=False,  # forest/3D flyability is M2
+            flyability_analyzed=flyability_analyzed,
         )
 
         suffix = f".route{route_index}" if multi else ""

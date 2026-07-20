@@ -87,6 +87,21 @@ class Crossing(BaseModel):
     label: str | None = None
 
 
+class KinematicReport(BaseModel):
+    """Tether/airframe feasibility of the trajectory (Software-Spec §3.6)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    feasible: bool
+    min_turn_radius_m: float = Field(ge=0)
+    tightest_turn_radius_m: float = Field(ge=0)
+    turn_violations: int = Field(default=0, ge=0)
+    reversals: int = Field(default=0, ge=0)
+    max_climb_rate_ms: float = Field(default=0.0, ge=0)
+    max_descent_rate_ms: float = Field(default=0.0, ge=0)
+    climb_violations: int = Field(default=0, ge=0)
+
+
 class Plan(BaseModel):
     """A single planned route (one of ``k`` for redundancy)."""
 
@@ -102,6 +117,7 @@ class Plan(BaseModel):
     total_length_m: float = Field(ge=0)
     fiber_used_m: float = Field(ge=0)
     objective_scores: dict[str, float] = Field(default_factory=dict)
+    kinematics: KinematicReport | None = None
 
     @property
     def start(self) -> Coordinate:

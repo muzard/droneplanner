@@ -126,6 +126,44 @@ def build_report(
             )
         )
 
+    # --- Kinematic / tether feasibility (Software-Spec §3.6) ---
+    if plan.kinematics is not None:
+        kin = plan.kinematics
+        if kin.reversals > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    code="tether_reversal",
+                    message=(
+                        f"{kin.reversals} route reversal(s) — acceptable at low payout speed; "
+                        "the flight layer must slow through them to avoid slackening/snagging"
+                    ),
+                )
+            )
+        if kin.turn_violations > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.WARNING,
+                    code="turn_radius",
+                    message=(
+                        f"{kin.turn_violations} corner(s) tighter than the "
+                        f"{kin.min_turn_radius_m:.0f} m min turn radius "
+                        f"(tightest achievable {kin.tightest_turn_radius_m:.1f} m)"
+                    ),
+                )
+            )
+        if kin.climb_violations > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.WARNING,
+                    code="climb_rate",
+                    message=(
+                        f"{kin.climb_violations} altitude change(s) exceed the climb/descent limit "
+                        "to stay in the navigable band"
+                    ),
+                )
+            )
+
     # --- Analysis coverage: how far up the M0->M2 ladder did we get? ---
     if not concealment_analyzed:
         findings.append(
@@ -164,6 +202,7 @@ def build_report(
         non_navigable_count=len(non_navigable),
         marginal_count=len(marginal),
         manipulation_crossings=len(manipulation),
+        kinematics=plan.kinematics,
         segments=tuple(
             SegmentReport(
                 index=s.index,

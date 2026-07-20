@@ -80,15 +80,19 @@ def plan(
 def viz(
     out: Path = typer.Option(Path("demo_route.png"), "--out", "-o", help="Output PNG path."),
     size: int = typer.Option(160, "--size", help="Demo grid size (cells per side)."),
+    forest: bool = typer.Option(
+        True, "--forest/--no-forest", help="Include the M2 forest flyability layer."
+    ),
 ) -> None:
     """Render the built-in demo AO: fields + concealment-aware route (PNG)."""
-    from droneplanner.demo import build_demo
+    from droneplanner.demo import build_demo, demo_flyability
     from droneplanner.planner.corridor import plan_over_terrain
     from droneplanner.viz import save_figure
 
     configure_logging()
     mission, dtm, dsm, grid = build_demo(size=size)
-    plan, surface = plan_over_terrain(mission, dtm, dsm, grid)
+    flyability = demo_flyability(grid, mission.drone) if forest else None
+    plan, surface = plan_over_terrain(mission, dtm, dsm, grid, flyability=flyability)
     save_figure(out, mission, surface, plan)
     typer.secho(
         f"wrote {out}  (mean exposure {plan.objective_scores['mean_exposure']:.2f}, "

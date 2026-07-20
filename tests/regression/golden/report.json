@@ -16,6 +16,7 @@
     }
   ],
   "generated_at": null,
+  "kinematics": null,
   "manipulation_crossings": 0,
   "marginal_count": 0,
   "mission_name": "golden-ao",

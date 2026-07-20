@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from droneplanner.demo import build_demo, demo_mission, demo_terrain
+from droneplanner.demo import build_demo, demo_flyability, demo_mission, demo_terrain
+from droneplanner.forest.navigability import NON_NAVIGABLE
 from droneplanner.planner.corridor import plan_over_terrain
 from droneplanner.viz import LAYERS, render_interactive, save_figure
 
@@ -40,3 +41,20 @@ def test_render_interactive_returns_png_bytes() -> None:
     for layer in LAYERS:
         png = render_interactive(mission, surface, plan, layer=layer, size_px=320)
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_demo_flyability_has_non_navigable_patch() -> None:
+    _, _, grid = demo_terrain(size=70)
+    mission = demo_mission(grid)
+    field = demo_flyability(grid, mission.drone)
+    assert (field.navigable_class == NON_NAVIGABLE).sum() > 0
+    assert field.non_navigable.shape == (70, 70)
+
+
+def test_viz_with_forest_flyability_layer() -> None:
+    mission, dtm, dsm, grid = build_demo(size=70)
+    field = demo_flyability(grid, mission.drone)
+    plan, surface = plan_over_terrain(mission, dtm, dsm, grid, flyability=field)
+    assert "flyability_class" in surface.components
+    png = render_interactive(mission, surface, plan, layer="flyability", size_px=320)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"

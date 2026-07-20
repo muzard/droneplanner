@@ -12,7 +12,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from droneplanner.model.plan import CrossingMethod, FlyabilityClass
+from droneplanner.model.plan import CrossingMethod, FlyabilityClass, KinematicReport
 
 
 class Recommendation(StrEnum):
@@ -78,5 +78,6 @@ class RiskReport(BaseModel):
 
     segments: tuple[SegmentReport, ...] = ()
     crossings: tuple[CrossingReport, ...] = ()
+    kinematics: KinematicReport | None = None
     objective_scores: dict[str, float] = Field(default_factory=dict)
     findings: tuple[Finding, ...] = ()

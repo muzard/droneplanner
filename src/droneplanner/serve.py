@@ -17,7 +17,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from droneplanner.demo import demo_mission, demo_terrain
+from droneplanner.demo import demo_flyability, demo_mission, demo_terrain
 from droneplanner.logging_config import get_logger
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.mission import Mission, ThreatModel, Weights
@@ -37,6 +37,8 @@ class _Scene:
     def __init__(self, size: int) -> None:
         self.dtm, self.dsm, self.grid = demo_terrain(size=size)
         self.base = demo_mission(self.grid)
+        # Fixed forest flyability (terrain-only, independent of observers/weights).
+        self.flyability = demo_flyability(self.grid, self.base.drone)
 
     def extent(self) -> list[float]:
         a, _, c, _, e, f = self.grid.transform
@@ -74,7 +76,9 @@ def _plan_response(scene: _Scene, params: dict[str, Any]) -> dict[str, Any]:
     try:
         mission = _mission_from_params(scene, params)
         with _RENDER_LOCK:
-            plan, surface = plan_over_terrain(mission, scene.dtm, scene.dsm, scene.grid)
+            plan, surface = plan_over_terrain(
+                mission, scene.dtm, scene.dsm, scene.grid, flyability=scene.flyability
+            )
             png = render_interactive(mission, surface, plan, layer=layer, size_px=_IMAGE_PX)
         report = build_report(mission, plan, concealment_analyzed=True)
         scores = plan.objective_scores

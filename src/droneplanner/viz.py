@@ -81,6 +81,21 @@ def render(mission: Mission, surface: CostSurface, plan: Plan) -> Figure:
         fontsize=13,
     )
 
+    if "flyability_class" in surface.components:
+        fourth = (
+            axes[1, 1],
+            surface.components["flyability_class"],
+            "forest flyability (green=flyable, red=non-navigable)",
+            "RdYlGn_r",
+        )
+    else:
+        fourth = (
+            axes[1, 1],
+            surface.components["survivability"],
+            "cable survivability cost",
+            "magma",
+        )
+
     panels = [
         (
             axes[0, 0],
@@ -90,7 +105,7 @@ def render(mission: Mission, surface: CostSurface, plan: Plan) -> Figure:
         ),
         (axes[0, 1], surface.components["exposure"], "drone visual exposure (viewshed)", "inferno"),
         (axes[1, 0], surface.components["cost_normalized"], "composite cost surface", "viridis"),
-        (axes[1, 1], surface.components["survivability"], "cable survivability cost", "magma"),
+        fourth,
     ]
     for ax, data, title, cmap in panels:
         im = ax.imshow(data, extent=extent, origin="upper", cmap=cmap, aspect="equal")
@@ -110,7 +125,7 @@ def save_figure(path: str | Path, mission: Mission, surface: CostSurface, plan: 
     plt.close(fig)
 
 
-LAYERS = ("exposure", "cost", "terrain", "survivability")
+LAYERS = ("exposure", "cost", "terrain", "survivability", "flyability")
 
 
 def layer_data(surface: CostSurface, layer: str) -> tuple[np.ndarray, str]:
@@ -121,6 +136,9 @@ def layer_data(surface: CostSurface, layer: str) -> tuple[np.ndarray, str]:
         return hillshade(surface.dtm, surface.grid.cell_size_m), "gray"
     if layer == "survivability":
         return surface.components["survivability"], "magma"
+    if layer == "flyability" and "flyability_class" in surface.components:
+        # 0 flyable (green) -> 1 marginal -> 2 non-navigable (red)
+        return surface.components["flyability_class"], "RdYlGn_r"
     return surface.components["exposure"], "inferno"  # default
 
 

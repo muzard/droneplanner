@@ -9,40 +9,53 @@ stack is a separate, hardware-dependent effort (see `../Software-Spec.md` §1, �
 This repository implements the module specified in **`../Software-Spec.md`** with
 algorithmic rationale in **`../Preflight-Planning-Module-Design.md`**.
 
-## Status — milestone M1 (2.5D concealment planner)
+## Status — through milestone M2 (forest flyability)
 
-`droneplanner plan` runs end-to-end. When a DTM+DSM is supplied it plans a
-**concealment- and defilade-aware route**: it builds the field stack (in-house
-line-of-sight viewshed, terrain TPI/slope/drainage, cable survivability, snag
-proxy), combines them into a weighted composite cost surface, and runs a
-**cost-aware any-angle Theta\*** search that bends the route around observed
-ridgelines toward cover. Without terrain it falls back to the M0 straight-line
-stub. Forest (3D) flyability is M2, so the report still caps at **REVIEW** (never
-a blind GO) with a `flyability_not_analyzed` flag.
+`droneplanner plan` runs end-to-end. Given a DTM+DSM it plans a **concealment-
+and defilade-aware route** (in-house viewshed + terrain TPI/slope/drainage +
+survivability, combined into a composite cost surface, solved by a **cost-aware
+any-angle Theta\***). Add a **lidar point cloud** and it builds the **forest
+flyability** field (voxelize → vertical segmentation → 3D EDT clearance →
+FLYABLE/MARGINAL/NON_NAVIGABLE), routes around non-navigable clutter, and flies
+the upper-trunk band. Add a **roads** layer and each route/road crossing is
+flagged as an OPEN (fly-over) crossing. Without terrain it falls back to the M0
+straight-line stub.
 
-Try it with **zero data** on the built-in demo terrain:
+A **kinematic feasibility pass** then makes the trajectory flyable: corners are
+rounded to arcs within the airframe's `min_turn_radius`, altitude varies within
+the navigable band under the climb/descent-rate limits, and reversals (which
+would slacken the paying-out fiber) are flagged. The report carries a
+`KinematicReport` — a reversal is NO-GO, turn/climb violations are REVIEW.
+
+The report caps at **REVIEW** (never a blind GO) until the open gaps in
+[SHORTFALLS.md](SHORTFALLS.md) are closed — read that before trusting a plan or
+moving to sims.
+
+Try it with **zero data** on the built-in demo terrain (now with a forest patch):
 
 ```bash
-droneplanner viz   --out route.png      # static multi-panel figure of the route + fields
+droneplanner viz   --out route.png      # static multi-panel figure (fields + flyability + route)
 droneplanner serve                      # interactive explorer at http://127.0.0.1:8765
 ```
 
 The explorer lets you drag observers and the start/end, move the objective-weight
-sliders, and switch display layers while the route re-plans live — the fastest way
-to build intuition for the cost function.
+sliders, and switch display layers (incl. flyability) while the route re-plans
+live — the fastest way to build intuition for the cost function.
 
 | Milestone | Scope | State |
 |---|---|---|
 | **M0** | scaffold, data contracts, I/O, CLI, straight-line stub + report | ✅ |
-| **M1** | `fields/` (viewshed, terrain, survivability, snag) + cost-aware Theta\* corridor + viz | ✅ this repo |
-| M1.1 | road/linear-obstacle crossings to existing culverts/bridges | next |
-| M2 | `forest/` voxel flyability + 3D (OMPL) refinement | later |
+| **M1** | `fields/` (viewshed, terrain, survivability, snag) + cost-aware Theta\* corridor + viz | ✅ |
+| **M1.1** | road crossings (open-terrain fly-over stub) | ✅ |
+| **M2** | `forest/` voxel flyability (2.5D navigability + non-navigable mask + altitude band) | ✅ |
+| **Kinematics** | turn-radius filleting + climb-limited altitude + reversal flagging | ✅ this repo |
+| M2 (3D) | OMPL BIT\*/RRT\* refinement (full 3D kinodynamic) | ⏳ see SHORTFALLS.md |
 | M3 | laydown + k-diverse survivability routing | later |
 | M4 | PX4 SITL / Isaac Sim validation | later |
 
-> **M1 remaining sub-item:** the `crossings/` solver (route to existing
-> culverts/bridges, flag open/overhead-span crossings) is scaffolded but not yet
-> implemented — the concealment/defilade route is complete.
+> **Before sims:** evaluate the viewshed at flight altitude, wire land cover +
+> threat sectors, and voxelize at fine resolution — see
+> [SHORTFALLS.md](SHORTFALLS.md) for the prioritized list.
 
 ## Install
 

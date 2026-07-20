@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from droneplanner.forest.navigability import FlyabilityConfig, FlyabilityField, build_flyability
+from droneplanner.forest.voxelize import VoxelGrid
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import DroneSpec, Mission, SpoolSpec, ThreatModel, Weights
@@ -94,3 +96,34 @@ def build_demo(size: int = 160) -> tuple[Mission, np.ndarray, np.ndarray, Grid]:
     dtm, dsm, grid = demo_terrain(size=size)
     mission = demo_mission(grid)
     return mission, dtm, dsm, grid
+
+
+def demo_flyability(grid: Grid, drone: DroneSpec) -> FlyabilityField:
+    """A synthetic forest flyability field for the demo AO (M2 demonstration).
+
+    Canopy everywhere plus a dense, non-navigable clutter patch straddling the
+    concealment corridor, so the M2 route has to divert around it. This is
+    illustrative scenery built directly at the demo grid resolution — real runs
+    voxelize an actual lidar survey.
+    """
+    rows, cols = grid.rows, grid.cols
+    nz, vz = 26, 0.5
+    yy, xx = np.mgrid[0:rows, 0:cols].astype(np.float64)
+
+    occ = np.zeros((nz, rows, cols), dtype=bool)
+    occ[0, :, :] = True  # ground plane (so clearance peaks in the upper trunk space)
+    # Canopy base varies across the AO (lower on the left) so the navigable band
+    # shifts and the drone's altitude has to vary (climb-limited) to follow it.
+    canopy_base = (16.0 + 8.0 * (xx / cols)).astype(np.int64)  # levels 16..24
+    levels = np.arange(nz)[:, None, None]
+    occ |= levels >= canopy_base[None, :, :]
+
+    # Dense trunk-space clutter (fills the flight band -> non-navigable) as an
+    # ellipse placed on the lower-right stretch of the route.
+    cy, cx = 0.60 * rows, 0.56 * cols
+    ry, rx = 0.15 * rows, 0.12 * cols
+    dense = ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1.0
+    occ[0:22] |= dense[None, :, :]
+
+    voxels = VoxelGrid(occupancy=occ, grid=grid, z0=0.0, voxel_size_z=vz)
+    return build_flyability(voxels, FlyabilityConfig.from_drone(drone))
