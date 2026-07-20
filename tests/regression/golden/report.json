@@ -11,7 +11,7 @@
     },
     {
       "code": "analysis_not_performed",
-      "message": "concealment/flyability analysis not performed (missing input layers: dsm, dtm, point_cloud); straight-line stub route \u2014 do not execute without review",
+      "message": "no concealment/flyability analysis performed (straight-line stub route); do not execute without review",
       "severity": "warning"
     }
   ],

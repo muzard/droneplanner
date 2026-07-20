@@ -16,12 +16,15 @@ import numpy as np
 
 from droneplanner.io.mavlink import write_plan
 from droneplanner.io.mission import load_mission
+from droneplanner.io.raster import read_raster
 from droneplanner.io.report import write_report
 from droneplanner.io.trajectory import write_trajectory
 from droneplanner.logging_config import get_logger
+from droneplanner.model.grid import Grid
 from droneplanner.model.mission import Mission
 from droneplanner.model.plan import Plan
 from droneplanner.model.report import RiskReport
+from droneplanner.planner.corridor import plan_over_terrain
 from droneplanner.planner.stub import straight_line_plan
 from droneplanner.report.build import build_report
 
@@ -46,9 +49,32 @@ def _seed_everything(seed: int) -> None:
     np.random.seed(seed % (2**32))
 
 
-def _plan_route(mission: Mission, route_index: int) -> Plan:
-    """Plan a single route. M0 = straight-line stub; M1+ swaps this in place."""
-    return straight_line_plan(mission, route_index=route_index)
+def _load_terrain(mission: Mission) -> tuple[np.ndarray, np.ndarray, Grid] | None:
+    """Load aligned DTM+DSM from the mission's layers, or None if not supplied."""
+    if mission.layers.dtm is None or mission.layers.dsm is None:
+        return None
+    dtm_r = read_raster(mission.layers.dtm)
+    dsm_r = read_raster(mission.layers.dsm)
+    if dtm_r.shape != dsm_r.shape or dtm_r.transform != dsm_r.transform:
+        raise ValueError("DTM and DSM must share the same grid (shape + transform)")
+    grid = Grid(
+        transform=dtm_r.transform, rows=dtm_r.shape[0], cols=dtm_r.shape[1], crs=mission.crs
+    )
+    return dtm_r.data, dsm_r.data, grid
+
+
+def _plan_route(mission: Mission, route_index: int) -> tuple[Plan, bool]:
+    """Plan one route, returning (plan, concealment_analyzed).
+
+    Runs the M1 concealment-aware corridor planner when a DTM+DSM is supplied,
+    otherwise the M0 straight-line stub. (Forest/3D flyability is M2.)
+    """
+    terrain = _load_terrain(mission)
+    if terrain is None:
+        return straight_line_plan(mission, route_index=route_index), False
+    dtm, dsm, grid = terrain
+    plan, _surface = plan_over_terrain(mission, dtm, dsm, grid, route_index=route_index)
+    return plan, True
 
 
 def plan_mission(
@@ -69,8 +95,14 @@ def plan_mission(
     results: list[PlanResult] = []
     multi = mission.k_routes > 1
     for route_index in range(mission.k_routes):
-        plan = _plan_route(mission, route_index)
-        report = build_report(mission, plan, generated_at=generated_at)
+        plan, concealment_analyzed = _plan_route(mission, route_index)
+        report = build_report(
+            mission,
+            plan,
+            generated_at=generated_at,
+            concealment_analyzed=concealment_analyzed,
+            flyability_analyzed=False,  # forest/3D flyability is M2
+        )
 
         suffix = f".route{route_index}" if multi else ""
         trajectory_path = out / f"trajectory{suffix}.geojson"

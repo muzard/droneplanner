@@ -17,20 +17,33 @@ from droneplanner.report.build import build_report
 from tests.fixtures.synthetic import make_mission
 
 
+def _analyzed(mission, plan):  # type: ignore[no-untyped-def]
+    """build_report as if concealment + flyability analysis both ran."""
+    return build_report(mission, plan, concealment_analyzed=True, flyability_analyzed=True)
+
+
 def test_stub_report_is_review_not_go() -> None:
-    # No analysis layers -> the stub can never certify concealment -> REVIEW.
+    # No analysis performed -> the stub can never certify concealment -> REVIEW.
     m = make_mission()
     plan = straight_line_plan(m)
     report = build_report(m, plan)
     assert report.recommendation is Recommendation.REVIEW
-    codes = {f.code for f in report.findings}
-    assert "analysis_not_performed" in codes
+    assert "analysis_not_performed" in {f.code for f in report.findings}
+
+
+def test_concealment_only_is_review_flyability_flag() -> None:
+    # M1: concealment analyzed but forest flyability not -> REVIEW with its flag.
+    m = make_mission()
+    plan = straight_line_plan(m)
+    report = build_report(m, plan, concealment_analyzed=True, flyability_analyzed=False)
+    assert report.recommendation is Recommendation.REVIEW
+    assert "flyability_not_analyzed" in {f.code for f in report.findings}
 
 
 def test_fiber_insufficient_is_no_go() -> None:
     m = make_mission(spool={"length_m": 100.0, "mass_kg": 1.0})
     plan = straight_line_plan(m)  # ~1.28 km route >> 100 m spool
-    report = build_report(m, plan)
+    report = _analyzed(m, plan)
     assert report.recommendation is Recommendation.NO_GO
     assert any(f.code == "fiber_insufficient" for f in report.findings)
     assert any(f.severity is Severity.CRITICAL for f in report.findings)
@@ -52,8 +65,7 @@ def _plan_with(segments: tuple[RouteSegment, ...], **overrides: object) -> Plan:
 
 
 def test_non_navigable_segment_is_no_go() -> None:
-    # Give the mission the analysis layers so the only finding is the hard one.
-    m = make_mission(layers={"dsm": "x.tif", "dtm": "y.tif", "point_cloud": "z.laz"})
+    m = make_mission()
     seg = RouteSegment(
         index=0,
         start=m.start,
@@ -61,33 +73,33 @@ def test_non_navigable_segment_is_no_go() -> None:
         length_m=50.0,
         flyability=FlyabilityClass.NON_NAVIGABLE,
     )
-    report = build_report(m, _plan_with((seg,)))
+    report = _analyzed(m, _plan_with((seg,)))
     assert report.recommendation is Recommendation.NO_GO
     assert report.non_navigable_count == 1
 
 
 def test_marginal_segment_is_review() -> None:
-    m = make_mission(layers={"dsm": "x.tif", "dtm": "y.tif", "point_cloud": "z.laz"})
+    m = make_mission()
     seg = RouteSegment(
         index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.MARGINAL
     )
-    report = build_report(m, _plan_with((seg,)))
+    report = _analyzed(m, _plan_with((seg,)))
     assert report.recommendation is Recommendation.REVIEW
     assert report.marginal_count == 1
 
 
-def test_all_flyable_with_layers_is_go() -> None:
-    m = make_mission(layers={"dsm": "x.tif", "dtm": "y.tif", "point_cloud": "z.laz"})
+def test_all_flyable_fully_analyzed_is_go() -> None:
+    m = make_mission()
     seg = RouteSegment(
         index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
     )
-    report = build_report(m, _plan_with((seg,)))
+    report = _analyzed(m, _plan_with((seg,)))
     assert report.recommendation is Recommendation.GO
     assert report.findings == ()
 
 
 def test_exposed_cable_is_review() -> None:
-    m = make_mission(layers={"dsm": "x.tif", "dtm": "y.tif", "point_cloud": "z.laz"})
+    m = make_mission()
     seg = RouteSegment(
         index=0,
         start=m.start,
@@ -96,33 +108,31 @@ def test_exposed_cable_is_review() -> None:
         flyability=FlyabilityClass.FLYABLE,
         exposed=True,
     )
-    report = build_report(m, _plan_with((seg,)))
+    report = _analyzed(m, _plan_with((seg,)))
     assert report.recommendation is Recommendation.REVIEW
     assert report.exposed_length_m == 50.0
 
 
 def test_manipulation_crossing_flagged_and_review() -> None:
-    m = make_mission(layers={"dsm": "x.tif", "dtm": "y.tif", "point_cloud": "z.laz"})
+    m = make_mission()
     seg = RouteSegment(
         index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
     )
     crossing = Crossing(
-        location=m.start,
-        method=CrossingMethod.OVERHEAD_SPAN,
-        needs_manipulation=True,
+        location=m.start, method=CrossingMethod.OVERHEAD_SPAN, needs_manipulation=True
     )
-    report = build_report(m, _plan_with((seg,), crossings=(crossing,)))
+    report = _analyzed(m, _plan_with((seg,), crossings=(crossing,)))
     assert report.recommendation is Recommendation.REVIEW
     assert report.manipulation_crossings == 1
 
 
 def test_open_crossing_is_review() -> None:
-    m = make_mission(layers={"dsm": "x.tif", "dtm": "y.tif", "point_cloud": "z.laz"})
+    m = make_mission()
     seg = RouteSegment(
         index=0, start=m.start, end=m.end, length_m=50.0, flyability=FlyabilityClass.FLYABLE
     )
     crossing = Crossing(location=m.start, method=CrossingMethod.OPEN)
-    report = build_report(m, _plan_with((seg,), crossings=(crossing,)))
+    report = _analyzed(m, _plan_with((seg,), crossings=(crossing,)))
     assert report.recommendation is Recommendation.REVIEW
     assert any(f.code == "open_crossings" for f in report.findings)
 

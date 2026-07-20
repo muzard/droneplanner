@@ -77,6 +77,41 @@ def plan(
 
 
 @app.command()
+def viz(
+    out: Path = typer.Option(Path("demo_route.png"), "--out", "-o", help="Output PNG path."),
+    size: int = typer.Option(160, "--size", help="Demo grid size (cells per side)."),
+) -> None:
+    """Render the built-in demo AO: fields + concealment-aware route (PNG)."""
+    from droneplanner.demo import build_demo
+    from droneplanner.planner.corridor import plan_over_terrain
+    from droneplanner.viz import save_figure
+
+    configure_logging()
+    mission, dtm, dsm, grid = build_demo(size=size)
+    plan, surface = plan_over_terrain(mission, dtm, dsm, grid)
+    save_figure(out, mission, surface, plan)
+    typer.secho(
+        f"wrote {out}  (mean exposure {plan.objective_scores['mean_exposure']:.2f}, "
+        f"{plan.total_length_m:.0f} m)",
+        fg=typer.colors.GREEN,
+    )
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(8765, "--port", "-p", help="Port to listen on."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host/interface to bind."),
+    size: int = typer.Option(130, "--size", help="Demo grid size (cells per side)."),
+) -> None:
+    """Launch the interactive route explorer (open http://HOST:PORT in a browser)."""
+    from droneplanner.serve import serve as run_server
+
+    configure_logging()
+    typer.secho(f"explorer running at http://{host}:{port}  (Ctrl-C to stop)", fg=typer.colors.CYAN)
+    run_server(host=host, port=port, size=size)
+
+
+@app.command()
 def version() -> None:
     """Print the droneplanner version."""
     typer.echo(__version__)

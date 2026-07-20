@@ -9,21 +9,40 @@ stack is a separate, hardware-dependent effort (see `../Software-Spec.md` §1, �
 This repository implements the module specified in **`../Software-Spec.md`** with
 algorithmic rationale in **`../Preflight-Planning-Module-Design.md`**.
 
-## Status — milestone M0 (scaffold)
+## Status — milestone M1 (2.5D concealment planner)
 
-`droneplanner plan` runs end-to-end and emits a **straight-line stub** plan plus a
-report. It performs **no** viewshed / terrain / forest analysis yet, so the report
-always returns at least **REVIEW** (never a blind GO). M1 adds the 2.5D cost-surface
-planner (viewshed + TPI + land cover + crossings); see the milestone table in the
-spec (§7).
+`droneplanner plan` runs end-to-end. When a DTM+DSM is supplied it plans a
+**concealment- and defilade-aware route**: it builds the field stack (in-house
+line-of-sight viewshed, terrain TPI/slope/drainage, cable survivability, snag
+proxy), combines them into a weighted composite cost surface, and runs a
+**cost-aware any-angle Theta\*** search that bends the route around observed
+ridgelines toward cover. Without terrain it falls back to the M0 straight-line
+stub. Forest (3D) flyability is M2, so the report still caps at **REVIEW** (never
+a blind GO) with a `flyability_not_analyzed` flag.
+
+Try it with **zero data** on the built-in demo terrain:
+
+```bash
+droneplanner viz   --out route.png      # static multi-panel figure of the route + fields
+droneplanner serve                      # interactive explorer at http://127.0.0.1:8765
+```
+
+The explorer lets you drag observers and the start/end, move the objective-weight
+sliders, and switch display layers while the route re-plans live — the fastest way
+to build intuition for the cost function.
 
 | Milestone | Scope | State |
 |---|---|---|
-| **M0** | scaffold, data contracts, I/O, CLI, straight-line stub + report | ✅ this repo |
-| M1 | `fields/` + Theta\* corridor search + crossings + report | next |
-| M2 | `forest/` voxel flyability + 3D refinement | later |
+| **M0** | scaffold, data contracts, I/O, CLI, straight-line stub + report | ✅ |
+| **M1** | `fields/` (viewshed, terrain, survivability, snag) + cost-aware Theta\* corridor + viz | ✅ this repo |
+| M1.1 | road/linear-obstacle crossings to existing culverts/bridges | next |
+| M2 | `forest/` voxel flyability + 3D (OMPL) refinement | later |
 | M3 | laydown + k-diverse survivability routing | later |
 | M4 | PX4 SITL / Isaac Sim validation | later |
+
+> **M1 remaining sub-item:** the `crossings/` solver (route to existing
+> culverts/bridges, flag open/overhead-span crossings) is scaffolded but not yet
+> implemented — the concealment/defilade route is complete.
 
 ## Install
 
@@ -41,10 +60,12 @@ point-cloud path additionally needs the system PDAL library:
 
 ```bash
 droneplanner plan --mission configs/mission.example.yaml --out out/
+droneplanner viz  --out route.png            # demo terrain: fields + route figure
+droneplanner serve --port 8765               # interactive explorer (demo terrain)
 droneplanner version
 ```
 
-Writes into `out/`:
+`plan` writes into `out/`:
 
 | File | Contents |
 |---|---|

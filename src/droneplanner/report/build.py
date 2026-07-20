@@ -10,8 +10,10 @@ recommendation. The recommendation is deterministic and conservative:
   or (as in the M0 stub) concealment/flyability analysis that was not performed.
 * **GO** only if the plan is feasible and no reviewable risk remains.
 
-The M0 stub always yields at least REVIEW: it never runs viewshed/forest
-analysis, so it can never certify concealment. This keeps the human in the loop.
+Analysis coverage gates the recommendation: the M0 stub runs no analysis (caps
+at REVIEW), M1 adds concealment/defilade but no forest flyability (still caps at
+REVIEW until the M2 forest model), and only a fully-analyzed, low-risk plan can
+reach GO. This keeps the human in the loop.
 """
 
 from __future__ import annotations
@@ -29,9 +31,6 @@ from droneplanner.model.report import (
     Severity,
 )
 
-# Methods that cannot certify concealment/flyability without the analysis fields.
-_ANALYSIS_FIELDS = ("dsm", "dtm", "point_cloud")
-
 
 def _decide(findings: list[Finding]) -> Recommendation:
     severities = {f.severity for f in findings}
@@ -47,9 +46,13 @@ def build_report(
     plan: Plan,
     *,
     generated_at: datetime | None = None,
+    concealment_analyzed: bool = False,
+    flyability_analyzed: bool = False,
 ) -> RiskReport:
     """Build the risk report for a plan.
 
+    ``concealment_analyzed`` is True when the M1 viewshed/terrain fields drove
+    the route; ``flyability_analyzed`` is True when the M2 forest model ran.
     ``generated_at`` is injected (the CLI passes the wall clock); left ``None``
     for deterministic/test runs so output is reproducible.
     """
@@ -123,17 +126,26 @@ def build_report(
             )
         )
 
-    # --- Analysis coverage: did we have the layers to certify concealment/flyability? ---
-    missing_layers = [f for f in _ANALYSIS_FIELDS if getattr(mission.layers, f) is None]
-    if missing_layers:
+    # --- Analysis coverage: how far up the M0->M2 ladder did we get? ---
+    if not concealment_analyzed:
         findings.append(
             Finding(
                 severity=Severity.WARNING,
                 code="analysis_not_performed",
                 message=(
-                    "concealment/flyability analysis not performed "
-                    f"(missing input layers: {', '.join(missing_layers)}); "
-                    "straight-line stub route — do not execute without review"
+                    "no concealment/flyability analysis performed (straight-line stub route); "
+                    "do not execute without review"
+                ),
+            )
+        )
+    elif not flyability_analyzed:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="flyability_not_analyzed",
+                message=(
+                    "concealment/defilade analyzed, but forest flyability was not "
+                    "(no lidar/voxel model); route assumes open flight — confirm before execution"
                 ),
             )
         )
