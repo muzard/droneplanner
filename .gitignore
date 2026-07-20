@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Large geospatial data (keep AO samples out of git; use a fetch script)
+data/**
+!data/.gitkeep
+!data/README.md
+
+# Planner outputs
+out/
+*.plan
+!configs/*.plan

@@ -1,0 +1,58 @@
+# Example mission for the droneplanner CLI (Software-Spec §4).
+#   droneplanner plan --mission configs/mission.example.yaml --out out/
+#
+# Coordinates may be given either as projected {x, y} in `crs` (as below) or as
+# WGS84 {lon, lat} (converted to `crs` on load). `crs` MUST be a projected
+# metric CRS (meters) — here UTM zone 33N.
+
+name: example-ao
+crs: EPSG:32633
+
+# Projected easting/northing in the working CRS (meters). ~3.6 km apart.
+start: { x: 500000.0, y: 5200000.0 }
+end: { x: 502500.0, y: 5202600.0 }
+
+drone:
+  rotor_span_m: 0.9
+  mass_kg: 6.5
+  min_turn_radius_m: 8.0
+  climb_rate_max_ms: 3.0
+  descent_rate_max_ms: 2.0
+  cruise_speed_ms: 6.0
+
+spool:
+  length_m: 5000.0
+  mass_kg: 1.2
+  payout_side: drone
+
+# Passive survivability input only (Software-Spec §8): no targeting logic.
+threat:
+  observers:
+    - { x: 501200.0, y: 5201000.0 }
+  sectors:
+    - azimuth_start_deg: 30.0
+      azimuth_end_deg: 90.0
+      label: ridge-observer
+
+weights:
+  exposure: 1.0
+  cover: 1.0
+  length: 0.5
+  survivability: 1.0
+  snag: 0.5
+
+# Map layers are omitted here — the M0 stub plans a straight line and the report
+# flags that concealment/flyability analysis was not performed. Add from M1:
+# layers:
+#   dtm: data/example/dtm.tif
+#   dsm: data/example/dsm.tif
+#   point_cloud: data/example/ao.laz
+#   roads: data/example/roads.geojson
+
+k_routes: 1
+seed: 42
+
+# Planner defaults (tunable):
+waypoint_spacing_m: 100.0
+cruise_agl_m: 30.0
+fiber_slack_factor: 1.05

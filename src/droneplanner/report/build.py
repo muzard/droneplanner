@@ -1,0 +1,175 @@
+"""Risk/feasibility report builder (Software-Spec §5.4, §5.5).
+
+Turns a ``Mission`` + ``Plan`` into a ``RiskReport`` with a GO / REVIEW / NO-GO
+recommendation. The recommendation is deterministic and conservative:
+
+* **NO-GO** if the plan is infeasible on a hard constraint — the route needs
+  more fiber than the spool holds, or a segment is classified NON_NAVIGABLE.
+* **REVIEW** if the plan is feasible but carries reviewable risk — marginal
+  forest legs, visually exposed cable, crossings that need aerial manipulation,
+  or (as in the M0 stub) concealment/flyability analysis that was not performed.
+* **GO** only if the plan is feasible and no reviewable risk remains.
+
+The M0 stub always yields at least REVIEW: it never runs viewshed/forest
+analysis, so it can never certify concealment. This keeps the human in the loop.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from droneplanner.model.mission import Mission
+from droneplanner.model.plan import CrossingMethod, FlyabilityClass, Plan
+from droneplanner.model.report import (
+    CrossingReport,
+    Finding,
+    Recommendation,
+    RiskReport,
+    SegmentReport,
+    Severity,
+)
+
+# Methods that cannot certify concealment/flyability without the analysis fields.
+_ANALYSIS_FIELDS = ("dsm", "dtm", "point_cloud")
+
+
+def _decide(findings: list[Finding]) -> Recommendation:
+    severities = {f.severity for f in findings}
+    if Severity.CRITICAL in severities:
+        return Recommendation.NO_GO
+    if Severity.WARNING in severities:
+        return Recommendation.REVIEW
+    return Recommendation.GO
+
+
+def build_report(
+    mission: Mission,
+    plan: Plan,
+    *,
+    generated_at: datetime | None = None,
+) -> RiskReport:
+    """Build the risk report for a plan.
+
+    ``generated_at`` is injected (the CLI passes the wall clock); left ``None``
+    for deterministic/test runs so output is reproducible.
+    """
+    findings: list[Finding] = []
+
+    # --- Hard feasibility: fiber budget ---
+    if plan.fiber_used_m > mission.spool.length_m:
+        findings.append(
+            Finding(
+                severity=Severity.CRITICAL,
+                code="fiber_insufficient",
+                message=(
+                    f"route needs {plan.fiber_used_m:.0f} m of fiber but the spool holds "
+                    f"{mission.spool.length_m:.0f} m"
+                ),
+            )
+        )
+
+    # --- Forest navigability ---
+    non_navigable = [s for s in plan.segments if s.flyability is FlyabilityClass.NON_NAVIGABLE]
+    marginal = [s for s in plan.segments if s.flyability is FlyabilityClass.MARGINAL]
+    if non_navigable:
+        findings.append(
+            Finding(
+                severity=Severity.CRITICAL,
+                code="non_navigable_segments",
+                message=f"{len(non_navigable)} segment(s) classified non-navigable",
+            )
+        )
+    if marginal:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="marginal_segments",
+                message=f"{len(marginal)} segment(s) classified marginal — review flyability",
+            )
+        )
+
+    # --- Cable exposure ---
+    exposed_segments = [s for s in plan.segments if s.exposed]
+    exposed_length = sum(s.length_m for s in exposed_segments)
+    if exposed_segments:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="exposed_cable",
+                message=f"{exposed_length:.0f} m of cable is visually/fire exposed",
+            )
+        )
+
+    # --- Crossings needing unsolved aerial manipulation ---
+    manipulation = [c for c in plan.crossings if c.needs_manipulation]
+    if manipulation:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="manipulation_crossings",
+                message=(
+                    f"{len(manipulation)} crossing(s) require aerial manipulation "
+                    "(unsolved R&D) — human decision required"
+                ),
+            )
+        )
+    open_crossings = [c for c in plan.crossings if c.method is CrossingMethod.OPEN]
+    if open_crossings:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="open_crossings",
+                message=f"{len(open_crossings)} open surface crossing(s) — mechanical/visual risk",
+            )
+        )
+
+    # --- Analysis coverage: did we have the layers to certify concealment/flyability? ---
+    missing_layers = [f for f in _ANALYSIS_FIELDS if getattr(mission.layers, f) is None]
+    if missing_layers:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="analysis_not_performed",
+                message=(
+                    "concealment/flyability analysis not performed "
+                    f"(missing input layers: {', '.join(missing_layers)}); "
+                    "straight-line stub route — do not execute without review"
+                ),
+            )
+        )
+
+    recommendation = _decide(findings)
+
+    return RiskReport(
+        mission_name=mission.name,
+        route_index=plan.route_index,
+        recommendation=recommendation,
+        generated_at=generated_at,
+        total_length_m=plan.total_length_m,
+        fiber_used_m=plan.fiber_used_m,
+        fiber_available_m=mission.spool.length_m,
+        exposed_length_m=exposed_length,
+        non_navigable_count=len(non_navigable),
+        marginal_count=len(marginal),
+        manipulation_crossings=len(manipulation),
+        segments=tuple(
+            SegmentReport(
+                index=s.index,
+                length_m=s.length_m,
+                flyability=s.flyability,
+                exposed=s.exposed,
+            )
+            for s in plan.segments
+        ),
+        crossings=tuple(
+            CrossingReport(
+                method=c.method,
+                feasible=c.feasible,
+                needs_manipulation=c.needs_manipulation,
+                label=c.label,
+            )
+            for c in plan.crossings
+        ),
+        objective_scores=dict(plan.objective_scores),
+        findings=tuple(findings),
+    )

@@ -1,0 +1,233 @@
+{
+  "crs": {
+    "properties": {
+      "name": "EPSG:32633"
+    },
+    "type": "name"
+  },
+  "geometry": {
+    "coordinates": [
+      [
+        500000.0,
+        5200000.0,
+        30.0
+      ],
+      [
+        500150.0,
+        5200200.0,
+        30.0
+      ],
+      [
+        500300.0,
+        5200400.0,
+        30.0
+      ],
+      [
+        500450.0,
+        5200600.0,
+        30.0
+      ],
+      [
+        500600.0,
+        5200800.0,
+        30.0
+      ],
+      [
+        500750.0,
+        5201000.0,
+        30.0
+      ],
+      [
+        500900.0,
+        5201200.0,
+        30.0
+      ],
+      [
+        501050.0,
+        5201400.0,
+        30.0
+      ],
+      [
+        501200.0,
+        5201600.0,
+        30.0
+      ],
+      [
+        501350.0,
+        5201800.0,
+        30.0
+      ],
+      [
+        501500.0,
+        5202000.0,
+        30.0
+      ],
+      [
+        501650.0,
+        5202200.0,
+        30.0
+      ],
+      [
+        501800.0,
+        5202400.0,
+        30.0
+      ],
+      [
+        501950.0,
+        5202600.0,
+        30.0
+      ],
+      [
+        502100.0,
+        5202800.0,
+        30.0
+      ],
+      [
+        502250.0,
+        5203000.0,
+        30.0
+      ],
+      [
+        502400.0,
+        5203200.0,
+        30.0
+      ],
+      [
+        502550.0,
+        5203400.0,
+        30.0
+      ],
+      [
+        502700.0,
+        5203600.0,
+        30.0
+      ],
+      [
+        502850.0,
+        5203800.0,
+        30.0
+      ],
+      [
+        503000.0,
+        5204000.0,
+        30.0
+      ]
+    ],
+    "type": "LineString"
+  },
+  "properties": {
+    "crs": "EPSG:32633",
+    "fiber_used_m": 5250.0,
+    "mission": "golden-ao",
+    "route_index": 0,
+    "total_length_m": 5000.0,
+    "vertices": [
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "unknown",
+        "speed_hint_ms": 6.0
+      }
+    ]
+  },
+  "type": "Feature"
+}

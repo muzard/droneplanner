@@ -1,0 +1,151 @@
+{
+  "crossings": [],
+  "exposed_length_m": 0.0,
+  "fiber_available_m": 5000.0,
+  "fiber_used_m": 5250.0,
+  "findings": [
+    {
+      "code": "fiber_insufficient",
+      "message": "route needs 5250 m of fiber but the spool holds 5000 m",
+      "severity": "critical"
+    },
+    {
+      "code": "analysis_not_performed",
+      "message": "concealment/flyability analysis not performed (missing input layers: dsm, dtm, point_cloud); straight-line stub route \u2014 do not execute without review",
+      "severity": "warning"
+    }
+  ],
+  "generated_at": null,
+  "manipulation_crossings": 0,
+  "marginal_count": 0,
+  "mission_name": "golden-ao",
+  "non_navigable_count": 0,
+  "objective_scores": {
+    "length_m": 5000.0
+  },
+  "recommendation": "NO-GO",
+  "route_index": 0,
+  "segments": [
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 0,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 1,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 2,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 3,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 4,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 5,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 6,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 7,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 8,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 9,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 10,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 11,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 12,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 13,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 14,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 15,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 16,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 17,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 18,
+      "length_m": 250.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 19,
+      "length_m": 250.0
+    }
+  ],
+  "total_length_m": 5000.0
+}
