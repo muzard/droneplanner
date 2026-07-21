@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -122,6 +123,14 @@ def gz_world(
             "Defaults to the local --dtm path, which is wrong if you run the sim elsewhere."
         ),
     ),
+    flat: bool = typer.Option(
+        False,
+        "--flat",
+        help=(
+            "DIAGNOSTIC: emit a structurally identical world with an effectively FLAT DEM. "
+            "Bisects 'heightmap present' from 'terrain has slopes' when the vehicle is unstable."
+        ),
+    ),
 ) -> None:
     """Generate a Gazebo world whose heightmap is the planned terrain.
 
@@ -140,6 +149,24 @@ def gz_world(
     configure_logging()
     raster = read_raster(dtm)
     home = json.loads(plan.read_text())["mission"]["plannedHomePosition"]
+    if flat:
+        # Same extent/pose/world, but no relief: a 1 m ramp over 4 km (~0.02%).
+        # If the vehicle is stable here but not over real terrain, the problem is
+        # slope/normals; if it is unstable here too, it is the heightmap itself.
+        import numpy as np
+
+        from droneplanner.io.raster import write_raster
+
+        base = float(home[2])
+        rows, cols = raster.shape
+        ramp = np.linspace(base, base + 1.0, rows * cols, dtype="float32").reshape(rows, cols)
+        flat_path = out.parent / "dtm_flat.tif"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        write_raster(flat_path, replace(raster, data=ramp))
+        raster = read_raster(flat_path)
+        typer.secho(f"--flat: wrote diagnostic DEM {flat_path}", fg=typer.colors.YELLOW)
+        if dem_path is not None:
+            dem_path = dem_path.parent / "dtm_flat.tif"
     home_lat, home_lon, home_elev = float(home[0]), float(home[1]), float(home[2])
     to_crs = Transformer.from_crs("EPSG:4326", raster.crs, always_xy=True)
     home_x, home_y = to_crs.transform(home_lon, home_lat)

@@ -24,11 +24,13 @@ cd /Users/arttu/Claude/Projects/DroneAutomation/droneplanner
 droneplanner plan --mission configs/mission.example.yaml --out out/   # stub (no terrain) -> REVIEW
 droneplanner demo-ao --out demo_ao/                    # export demo AO as GeoTIFFs + mission YAML
 droneplanner plan --mission demo_ao/mission.yaml --out out_demo/      # REAL terrain route (turns!)
-droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan --out worlds/t.sdf
-                                                       # Gazebo world = the planned terrain
+droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
+    --base-world <PX4>/Tools/simulation/gz/worlds/default.sdf --out worlds/t.sdf
+                        # Gazebo world = PX4's own world + the planned terrain
+                        # add --flat for the diagnostic flat-DEM world
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 132 tests, ~96% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 142 tests, ~96% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -47,6 +49,12 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   tests vacuous. `droneplanner demo-ao` writes the procedural AO as real
   GeoTIFFs + mission YAML, so `plan` runs the true ingestion path (and rehearses
   real DTM/DSM ingest).
+- **`gz-world` injects into PX4's `default.sdf`; never hand-write a world.** A
+  from-scratch world loses gz-sim's default plugin set (loaded only if the world
+  declares *no* `<plugin>`) and PX4's `<magnetic_field>` — sensors die and the EKF
+  yaw diverges. `<world name>` must equal the .sdf file stem or PX4 hangs on
+  "Waiting for Gazebo world...". Open bug: terrain worlds tumble on translation —
+  see droneflight RUNBOOK §2b for what's already been eliminated.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
