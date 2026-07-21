@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -66,7 +67,10 @@ _BASE_WORLD = """<?xml version="1.0" encoding="UTF-8"?>
     <gravity>0 0 -9.8</gravity>
     <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
     <atmosphere type="adiabatic"/>
-    <model name="ground_plane"><static>true</static></model>
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link"><collision name="collision"/></link>
+    </model>
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
       <world_frame_orientation>ENU</world_frame_orientation>
@@ -117,6 +121,37 @@ def test_injection_replaces_ground_plane_with_terrain() -> None:
     assert 'name="ground_plane"' not in sdf  # would floor the terrain at z=0
     assert '<model name="terrain">' in sdf
     assert "<heightmap>" in sdf
+
+
+def test_visual_only_terrain_keeps_a_ground_plane_to_stand_on() -> None:
+    """The --no-collision diagnostic must still leave collision geometry.
+
+    Dropping both the terrain collision and PX4's ground_plane leaves a world
+    with nothing to stand on: the vehicle falls through and PX4 reports
+    "ekf2 missing data", never becoming ready.
+    """
+    sdf = build_world_sdf(
+        _dtm(),
+        Path("/dem.tif"),
+        _BASE_WORLD,
+        home_lat=46.9,
+        home_lon=15.0,
+        home_x=_X0,
+        home_y=_Y0,
+        home_elev_m=124.68,
+        world_name="planner_nocol",
+        collision=False,
+    )
+    root = ET.fromstring(sdf)
+    world = root.find("world")
+    assert world is not None
+    names = {m.get("name") for m in world.findall("model")}
+    assert "ground_plane" in names  # something to take off from
+    assert "terrain" in names
+    terrain = next(m for m in world.findall("model") if m.get("name") == "terrain")
+    # The terrain itself must contribute no collision - that is the diagnostic.
+    assert terrain.find(".//collision") is None
+    assert terrain.find(".//visual") is not None
 
 
 def test_injection_retargets_world_origin_to_plan_home() -> None:

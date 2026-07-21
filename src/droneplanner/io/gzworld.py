@@ -174,10 +174,17 @@ def build_world_sdf(
         raise ValueError("base world SDF has no <world> element")
     world.set("name", world_name)
 
-    # 1. The flat ground plane would shadow the terrain below z=0.
-    for model in world.findall("model"):
-        if model.get("name") == "ground_plane":
-            world.remove(model)
+    # 1. The flat ground plane would shadow terrain below z=0 — but only drop it
+    #    when the terrain actually provides collision. With `collision=False`
+    #    (the visual-only diagnostic) removing it too would leave the world with
+    #    NO collision geometry at all: the vehicle falls through, and PX4 reports
+    #    "ekf2 missing data" and never becomes ready. Keeping the plane is also
+    #    what makes that diagnostic valid — known-good flat collision underneath,
+    #    heightmap present only visually.
+    if collision:
+        for model in world.findall("model"):
+            if model.get("name") == "ground_plane":
+                world.remove(model)
 
     # 2. World origin := the plan's home, so it agrees with PX4_HOME_*.
     sph = world.find("spherical_coordinates")
