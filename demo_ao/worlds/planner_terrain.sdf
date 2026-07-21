@@ -44,7 +44,7 @@
         <collision name="collision">
           <geometry>
             <heightmap>
-              <uri>file:///home/arttudrone/drone/worlds/dtm.tif</uri>
+              <uri>file:///home/arttudrone/droneplanner/demo_ao/dtm.tif</uri>
               <size>4000.00 4000.00 110.32</size>
               <pos>0 0 0</pos>
             </heightmap>
@@ -58,7 +58,7 @@
           <geometry>
             <heightmap>
               <use_terrain_paging>false</use_terrain_paging>
-              <uri>file:///home/arttudrone/drone/worlds/dtm.tif</uri>
+              <uri>file:///home/arttudrone/droneplanner/demo_ao/dtm.tif</uri>
               <size>4000.00 4000.00 110.32</size>
               <pos>0 0 0</pos>
             </heightmap>
