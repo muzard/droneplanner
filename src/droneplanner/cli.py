@@ -123,6 +123,14 @@ def gz_world(
             "Defaults to the local --dtm path, which is wrong if you run the sim elsewhere."
         ),
     ),
+    no_collision: bool = typer.Option(
+        False,
+        "--no-collision",
+        help=(
+            "DIAGNOSTIC: visual-only terrain (no collision geometry). If the vehicle is "
+            "stable here but not with collision on, the heightmap's collision is the culprit."
+        ),
+    ),
     flat: bool = typer.Option(
         False,
         "--flat",
@@ -183,6 +191,7 @@ def gz_world(
             home_y=home_y,
             home_elev_m=home_elev,
             world_name=out.stem,
+            collision=not no_collision,
         ),
         encoding="utf-8",
     )

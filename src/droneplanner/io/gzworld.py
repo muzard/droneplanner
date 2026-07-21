@@ -22,10 +22,16 @@ Frames, and how the pieces line up
   centre — so the model is offset by (dtm_centre - home) in projected meters,
   placing home over the world origin.
 
-✅ **Vertical datum confirmed in SITL** (2026-07-21): Gazebo places a DEM's
-*minimum* elevation at the model pose's z, so offsetting by
-``-(home_elev - dtm_min)`` puts the ground at home at exactly z=0 — the vehicle
-was measured resting at z = -0.00 m with ``dist_bottom`` 0.01.
+⚠️ **Vertical datum still UNVERIFIED.** An earlier note here claimed it was
+confirmed because the vehicle rested at ``z = -0.00`` — that reasoning was
+circular: PX4 sets its local-position origin *at the spawn point*, so ``z = 0``
+at rest is tautological and says nothing about where the terrain sits in world
+coordinates. Corroborating evidence that it may be wrong: ODE reports
+``AABB max z = 150.32`` (the DEM's max **elevation**) rather than the 110.32
+**relief** passed as ``<size>``, which would put the surface ~40 m high.
+To measure it properly, compare Gazebo's own model pose
+(``gz model -m terrain -p``) against a ``gz topic`` height query — do not infer
+it from PX4's local z.
 
 **We inject into PX4's own world rather than writing one.** See
 :func:`build_world_sdf`; a from-scratch world silently loses the default gz-sim
@@ -41,14 +47,7 @@ from pathlib import Path
 
 from droneplanner.io.raster import RasterGrid
 
-_TERRAIN_MODEL = """
-<model name="terrain">
-  <static>true</static>
-  <!-- x,y: (DTM centre - home) so home lands on the world origin.
-       z: vertical datum offset - if the vehicle spawns buried, increase;
-          if it spawns hovering, decrease. -->
-  <pose>{off_x:.3f} {off_y:.3f} {off_z:.3f} 0 0 0</pose>
-  <link name="link">
+_COLLISION = """
     <collision name="collision">
       <geometry>
         <heightmap>
@@ -57,7 +56,16 @@ _TERRAIN_MODEL = """
           <pos>0 0 0</pos>
         </heightmap>
       </geometry>
-    </collision>
+    </collision>"""
+
+_TERRAIN_MODEL = """
+<model name="terrain">
+  <static>true</static>
+  <!-- x,y: (DTM centre - home) so home lands on the world origin.
+       z: vertical datum offset - if the vehicle spawns buried, increase;
+          if it spawns hovering, decrease. -->
+  <pose>{off_x:.3f} {off_y:.3f} {off_z:.3f} 0 0 0</pose>
+  <link name="link">{collision}
     <visual name="visual">
       <geometry>
         <heightmap>
@@ -127,6 +135,7 @@ def build_world_sdf(
     home_y: float,
     home_elev_m: float,
     world_name: str,
+    collision: bool = True,
 ) -> str:
     """Inject the terrain heightmap into PX4's own world SDF.
 
@@ -187,15 +196,19 @@ def build_world_sdf(
         node.text = value
 
     # 3. The terrain itself.
+    geom_fields = {
+        "dem_uri": dem_path,
+        "size_x": geom.size_x_m,
+        "size_y": geom.size_y_m,
+        "size_z": geom.relief_m,
+    }
     terrain = ET.fromstring(
         _TERRAIN_MODEL.format(
+            collision=_COLLISION.format(**geom_fields) if collision else "",
             off_x=geom.offset_x_m,
             off_y=geom.offset_y_m,
             off_z=geom.offset_z_m,
-            size_x=geom.size_x_m,
-            size_y=geom.size_y_m,
-            size_z=geom.relief_m,
-            dem_uri=dem_path,
+            **geom_fields,
         )
     )
     world.append(terrain)
