@@ -89,6 +89,7 @@ def _build(dem: Path = Path("/dem.tif")) -> str:
         home_x=_X0,
         home_y=_Y0,
         home_elev_m=124.68,
+        world_name="planner_terrain",
     )
 
 
@@ -105,8 +106,10 @@ def test_injection_preserves_px4_world_config() -> None:
     assert 'type="ode"' in sdf
     # Declaring ANY <plugin> would disable gz-sim's defaults - so declare none.
     assert "<plugin" not in sdf
-    # The world name must stay as PX4 expects for its gz bridge topics.
-    assert '<world name="default">' in sdf
+    # The world name MUST match the .sdf file stem PX4 selects with
+    # PX4_GZ_WORLD, or PX4 hangs on "Waiting for Gazebo world...".
+    assert '<world name="planner_terrain">' in sdf
+    assert '<world name="default">' not in sdf
 
 
 def test_injection_replaces_ground_plane_with_terrain() -> None:
@@ -135,6 +138,7 @@ def test_injection_rejects_a_world_without_a_world_element() -> None:
             home_x=_X0,
             home_y=_Y0,
             home_elev_m=0.0,
+            world_name="x",
         )
     except ValueError:
         pass

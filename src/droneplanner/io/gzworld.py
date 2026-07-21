@@ -126,6 +126,7 @@ def build_world_sdf(
     home_x: float,
     home_y: float,
     home_elev_m: float,
+    world_name: str,
 ) -> str:
     """Inject the terrain heightmap into PX4's own world SDF.
 
@@ -148,16 +149,21 @@ def build_world_sdf(
     1. remove the flat ``ground_plane`` (our terrain is the ground; leaving it in
        puts a floor at z=0 that low-lying terrain would sit beneath),
     2. point ``<spherical_coordinates>`` at the plan's home,
-    3. append the terrain heightmap model.
+    3. append the terrain heightmap model,
+    4. rename the world to ``world_name``.
 
-    The world's ``name`` attribute is left untouched, so PX4's gz bridge keeps
-    resolving the topics it expects.
+    (4) is not cosmetic: PX4 selects a world by **file name** via ``PX4_GZ_WORLD``
+    and then waits for a Gazebo world of that same name. Leaving the base file's
+    ``name="default"`` in a file called ``planner_terrain.sdf`` makes PX4 hang on
+    *"Waiting for Gazebo world..."* forever — the world loads fine, PX4 just never
+    recognises it. Pass the output file's stem.
     """
     geom = compute_geometry(dtm, home_x, home_y, home_elev_m)
     root = ET.fromstring(base_world)
     world = root.find("world")
     if world is None:
         raise ValueError("base world SDF has no <world> element")
+    world.set("name", world_name)
 
     # 1. The flat ground plane would shadow the terrain below z=0.
     for model in world.findall("model"):

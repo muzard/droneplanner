@@ -155,6 +155,7 @@ def gz_world(
             home_x=home_x,
             home_y=home_y,
             home_elev_m=home_elev,
+            world_name=out.stem,
         ),
         encoding="utf-8",
     )
