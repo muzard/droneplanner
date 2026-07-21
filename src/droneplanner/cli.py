@@ -106,6 +106,13 @@ def gz_world(
     plan: Path = typer.Option(
         ..., "--plan", exists=True, dir_okay=False, help="The .plan whose home anchors the world."
     ),
+    base_world: Path = typer.Option(
+        ...,
+        "--base-world",
+        exists=True,
+        dir_okay=False,
+        help="PX4's Tools/simulation/gz/worlds/default.sdf — the terrain is injected into it.",
+    ),
     out: Path = typer.Option(Path("terrain.sdf"), "--out", "-o", help="Output SDF world path."),
     dem_path: Path | None = typer.Option(
         None,
@@ -142,12 +149,12 @@ def gz_world(
         build_world_sdf(
             raster,
             dem_path or dtm.resolve(),
+            base_world.read_text(encoding="utf-8"),
             home_lat=home_lat,
             home_lon=home_lon,
             home_x=home_x,
             home_y=home_y,
             home_elev_m=home_elev,
-            world_name=out.stem,
         ),
         encoding="utf-8",
     )
