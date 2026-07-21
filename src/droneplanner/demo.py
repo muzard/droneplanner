@@ -11,10 +11,15 @@ This is synthetic scenery for demonstration only; real runs supply a DTM/DSM.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
+import yaml
 
 from droneplanner.forest.navigability import FlyabilityConfig, FlyabilityField, build_flyability
 from droneplanner.forest.voxelize import VoxelGrid
+from droneplanner.io.raster import RasterGrid, write_raster
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import DroneSpec, Mission, SpoolSpec, ThreatModel, Weights
@@ -127,3 +132,65 @@ def demo_flyability(grid: Grid, drone: DroneSpec) -> FlyabilityField:
 
     voxels = VoxelGrid(occupancy=occ, grid=grid, z0=0.0, voxel_size_z=vz)
     return build_flyability(voxels, FlyabilityConfig.from_drone(drone))
+
+
+def _mission_doc(mission: Mission, grid: Grid, dtm_path: Path, dsm_path: Path) -> dict[str, Any]:
+    """Serialize a Mission (plus layer paths) into mission-YAML form."""
+    return {
+        "name": "demo-ao",
+        "crs": grid.crs,
+        "start": {"x": float(mission.start.x), "y": float(mission.start.y)},
+        "end": {"x": float(mission.end.x), "y": float(mission.end.y)},
+        "drone": mission.drone.model_dump(mode="json"),
+        "spool": mission.spool.model_dump(mode="json"),
+        "threat": {
+            "observers": [{"x": float(o.x), "y": float(o.y)} for o in mission.threat.observers]
+        },
+        "weights": mission.weights.model_dump(mode="json"),
+        # Absolute: the mission loader resolves layer paths against the process
+        # CWD, not the YAML's directory.
+        "layers": {"dtm": str(dtm_path), "dsm": str(dsm_path)},
+        "k_routes": mission.k_routes,
+        "seed": mission.seed,
+        "waypoint_spacing_m": mission.waypoint_spacing_m,
+        "cruise_agl_m": mission.cruise_agl_m,
+    }
+
+
+def export_demo_ao(out_dir: str | Path, size: int = 160) -> Path:
+    """Write the procedural demo AO as real GeoTIFF layers + a mission YAML.
+
+    The demo AO is otherwise consumed in-memory by ``viz``/``serve`` only, so the
+    sole way to get a ``.plan`` was ``configs/mission.example.yaml`` — which
+    supplies *no terrain* and therefore emits the straight-line M0 stub (constant
+    altitude, zero turns). Flying that in SITL exercises none of the mission
+    profile: the tether-safe speed policy never engages, and the altitude band is
+    never tested.
+
+    Exporting the AO as actual layers means ``droneplanner plan --mission
+    <out>/mission.yaml`` takes the **same ingestion path a real AO does**
+    (``read_raster`` → cost surface → cost-aware Theta\\* → kinematics), yielding
+    a route with genuine turns and a terrain-following altitude profile. It is
+    also a rehearsal for real DTM/DSM data, which enters by exactly this route.
+
+    Returns the path to the written mission YAML.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    dtm, dsm, grid = demo_terrain(size=size)
+    mission = demo_mission(grid)
+
+    dtm_path = (out / "dtm.tif").resolve()
+    dsm_path = (out / "dsm.tif").resolve()
+    for path, data in ((dtm_path, dtm), (dsm_path, dsm)):
+        write_raster(
+            path,
+            RasterGrid(data=data, transform=grid.transform, crs=grid.crs, nodata=None),
+        )
+
+    mission_path = out / "mission.yaml"
+    mission_path.write_text(
+        yaml.safe_dump(_mission_doc(mission, grid, dtm_path, dsm_path), sort_keys=False),
+        encoding="utf-8",
+    )
+    return mission_path

@@ -9,6 +9,20 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Recently closed
 
+- ✅ **Altitude-frame CFIT bug at the `.plan` boundary** (2026-07-21, found by the
+  first real-terrain run). The writer emitted the planner's terrain-relative AGL
+  directly as a **relative-to-home** altitude; over the demo AO's 73.5 m of relief
+  that put **57 of 77 waypoints below ground** (min clearance −66 m), and
+  `plannedHomePosition[2]` was an AGL value rather than ground AMSL. Fixed:
+  `TrajectoryVertex.ground_elev_m` + conversion in `io/mavlink.py`; clearance is
+  now a constant 30 m AGL, 0 waypoints underground. *It hid behind two degenerate
+  layers — the no-terrain stub is flat, and Gazebo's default world is flat — a
+  reminder that green tests over synthetic flat inputs prove very little.*
+- ✅ **`droneplanner demo-ao`** exports the procedural AO as real GeoTIFF layers +
+  a mission YAML, so `plan` produces a genuine cost-aware route (tortuosity 1.068,
+  6 turns >5°) instead of the straight-line stub — and exercises the same
+  ingestion path real DTM/DSM data will use.
+
 - ✅ **Kinematic / tether feasibility** (`planner/kinematics.py`): corners are
   filleted to arcs ≤ `min_turn_radius`, altitude is smoothed to respect the
   climb/descent-rate limits, and reversals are detected. The report carries a

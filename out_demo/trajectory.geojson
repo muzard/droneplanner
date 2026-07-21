@@ -1,0 +1,793 @@
+{
+  "crs": {
+    "properties": {
+      "name": "EPSG:32633"
+    },
+    "type": "name"
+  },
+  "geometry": {
+    "coordinates": [
+      [
+        500312.5,
+        5200287.5,
+        30.0
+      ],
+      [
+        500386.2017787187,
+        5200287.5,
+        30.0
+      ],
+      [
+        500386.84458612034,
+        5200287.474133097,
+        30.0
+      ],
+      [
+        500387.48323666275,
+        5200287.396699661,
+        30.0
+      ],
+      [
+        500388.113600368,
+        5200287.268200434,
+        30.0
+      ],
+      [
+        500388.7316008468,
+        5200287.089466385,
+        30.0
+      ],
+      [
+        500460.4845076319,
+        5200263.171830789,
+        30.0
+      ],
+      [
+        500461.48803207075,
+        5200262.908245833,
+        30.0
+      ],
+      [
+        500462.51723022765,
+        5200262.776756357,
+        30.0
+      ],
+      [
+        500463.55479005177,
+        5200262.779574134,
+        30.0
+      ],
+      [
+        500464.5832588412,
+        5200262.916651769,
+        30.0
+      ],
+      [
+        500712.01161004085,
+        5200312.402322008,
+        30.0
+      ],
+      [
+        500712.2546928345,
+        5200312.454880853,
+        30.0
+      ],
+      [
+        500712.4960244411,
+        5200312.514970223,
+        30.0
+      ],
+      [
+        500712.7353716298,
+        5200312.582532046,
+        30.0
+      ],
+      [
+        500712.9725030879,
+        5200312.657501029,
+        30.0
+      ],
+      [
+        500786.96063323086,
+        5200337.320211077,
+        30.0
+      ],
+      [
+        500787.2282158714,
+        5200337.414710714,
+        30.0
+      ],
+      [
+        500787.4922785616,
+        5200337.518641202,
+        30.0
+      ],
+      [
+        500787.75248903356,
+        5200337.631871767,
+        30.0
+      ],
+      [
+        500788.0085198667,
+        5200337.754259934,
+        30.0
+      ],
+      [
+        500986.7914740368,
+        5200437.145737018,
+        30.0
+      ],
+      [
+        500987.1400871073,
+        5200437.330932395,
+        30.0
+      ],
+      [
+        500987.47914029576,
+        5200437.533098998,
+        30.0
+      ],
+      [
+        500987.8078080691,
+        5200437.75174459,
+        30.0
+      ],
+      [
+        500988.12529018096,
+        5200437.986336808,
+        30.0
+      ],
+      [
+        501212.4446111236,
+        5200612.456919763,
+        30.0
+      ],
+      [
+        501212.47235199367,
+        5200612.478398535,
+        30.0
+      ],
+      [
+        501212.5001867923,
+        5200612.499755442,
+        30.0
+      ],
+      [
+        501212.5281149839,
+        5200612.520990076,
+        30.0
+      ],
+      [
+        501212.55613603175,
+        5200612.542102024,
+        30.0
+      ],
+      [
+        501312.04516600404,
+        5200687.158874503,
+        30.0
+      ],
+      [
+        501312.26913377707,
+        5200687.333141791,
+        30.0
+      ],
+      [
+        501312.4867799348,
+        5200687.515242863,
+        30.0
+      ],
+      [
+        501312.69783061463,
+        5200687.704948586,
+        30.0
+      ],
+      [
+        501312.90202025353,
+        5200687.902020253,
+        30.0
+      ],
+      [
+        501387.411633221,
+        5200762.411633221,
+        30.0
+      ],
+      [
+        501387.4556400477,
+        5200762.455985089,
+        30.0
+      ],
+      [
+        501387.49929914955,
+        5200762.500679292,
+        30.0
+      ],
+      [
+        501387.5426078636,
+        5200762.545713103,
+        30.0
+      ],
+      [
+        501387.58556354826,
+        5200762.591083777,
+        30.0
+      ],
+      [
+        502162.41443645174,
+        5201587.408916223,
+        30.0
+      ],
+      [
+        502162.45739213616,
+        5201587.454286898,
+        30.0
+      ],
+      [
+        502162.5007008502,
+        5201587.499320709,
+        30.0
+      ],
+      [
+        502162.5443599521,
+        5201587.544014912,
+        30.0
+      ],
+      [
+        502162.588366779,
+        5201587.588366779,
+        30.0
+      ],
+      [
+        502187.1722173776,
+        5201612.172217377,
+        30.0
+      ],
+      [
+        502187.3382714601,
+        5201612.333534106,
+        30.0
+      ],
+      [
+        502187.5089238342,
+        5201612.489978384,
+        30.0
+      ],
+      [
+        502187.68403158645,
+        5201612.641419198,
+        30.0
+      ],
+      [
+        502187.86344807217,
+        5201612.787729723,
+        30.0
+      ],
+      [
+        502787.30180206895,
+        5202087.343093305,
+        30.0
+      ],
+      [
+        502787.4002446245,
+        5202087.422299607,
+        30.0
+      ],
+      [
+        502787.49742396653,
+        5202087.50305077,
+        30.0
+      ],
+      [
+        502787.593315854,
+        5202087.585326652,
+        30.0
+      ],
+      [
+        502787.687896367,
+        5202087.66910673,
+        30.0
+      ],
+      [
+        503037.34362523974,
+        5202312.359262716,
+        30.0
+      ],
+      [
+        503037.42132994044,
+        5202312.430126908,
+        30.0
+      ],
+      [
+        503037.49809639,
+        5202312.502006435,
+        30.0
+      ],
+      [
+        503037.5739113224,
+        5202312.574888877,
+        30.0
+      ],
+      [
+        503037.6487616362,
+        5202312.648761637,
+        30.0
+      ],
+      [
+        503635.8907650513,
+        5202910.890765051,
+        30.0
+      ],
+      [
+        503636.61793868896,
+        5202911.726396641,
+        30.0
+      ],
+      [
+        503637.22271239205,
+        5202912.654464753,
+        30.0
+      ],
+      [
+        503637.6934909322,
+        5202913.657175688,
+        30.0
+      ],
+      [
+        503638.02124814846,
+        5202914.715304631,
+        30.0
+      ],
+      [
+        503737.28733734664,
+        5203336.596183724,
+        30.0
+      ],
+      [
+        503737.380143965,
+        5203337.048885734,
+        30.0
+      ],
+      [
+        503737.446656491,
+        5203337.506191171,
+        30.0
+      ],
+      [
+        503737.4866529888,
+        5203337.9665741185,
+        30.0
+      ],
+      [
+        503737.5,
+        5203338.428498393,
+        30.0
+      ],
+      [
+        503737.5,
+        5203611.201778718,
+        30.0
+      ],
+      [
+        503737.47413309675,
+        5203611.84458612,
+        30.0
+      ],
+      [
+        503737.3966996611,
+        5203612.483236662,
+        30.0
+      ],
+      [
+        503737.26820043393,
+        5203613.113600368,
+        30.0
+      ],
+      [
+        503737.0894663844,
+        5203613.731600847,
+        30.0
+      ],
+      [
+        503712.5,
+        5203687.5,
+        30.0
+      ]
+    ],
+    "type": "LineString"
+  },
+  "properties": {
+    "crs": "EPSG:32633",
+    "fiber_used_m": 5135.567099291089,
+    "mission": "demo-ao",
+    "route_index": 0,
+    "total_length_m": 5135.567099291089,
+    "vertices": [
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      },
+      {
+        "altitude_agl_m": 30.0,
+        "flight_band": "open",
+        "speed_hint_ms": 6.0
+      }
+    ]
+  },
+  "type": "Feature"
+}

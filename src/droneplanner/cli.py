@@ -76,6 +76,91 @@ def plan(
     )
 
 
+@app.command("demo-ao")
+def demo_ao(
+    out: Path = typer.Option(
+        Path("demo_ao"), "--out", "-o", help="Directory for the layers + mission YAML."
+    ),
+    size: int = typer.Option(160, "--size", help="Demo grid size (cells per side)."),
+) -> None:
+    """Export the built-in demo AO as GeoTIFF layers + a mission YAML.
+
+    Gives `plan` real terrain to work with, so it produces a cost-aware route
+    with turns and a varying altitude profile instead of the no-terrain
+    straight-line stub — and exercises the same ingestion path real DTM/DSM data
+    will use.
+    """
+    from droneplanner.demo import export_demo_ao
+
+    configure_logging()
+    mission_path = export_demo_ao(out, size=size)
+    typer.secho(f"wrote demo AO layers + mission -> {mission_path}", fg=typer.colors.GREEN)
+    typer.echo(f"next: droneplanner plan --mission {mission_path} --out out/")
+
+
+@app.command("gz-world")
+def gz_world(
+    dtm: Path = typer.Option(
+        ..., "--dtm", exists=True, dir_okay=False, help="DTM GeoTIFF the route was planned over."
+    ),
+    plan: Path = typer.Option(
+        ..., "--plan", exists=True, dir_okay=False, help="The .plan whose home anchors the world."
+    ),
+    out: Path = typer.Option(Path("terrain.sdf"), "--out", "-o", help="Output SDF world path."),
+    dem_path: Path | None = typer.Option(
+        None,
+        "--dem-path",
+        help=(
+            "Path the DEM will have on the machine running Gazebo (e.g. the VM). "
+            "Defaults to the local --dtm path, which is wrong if you run the sim elsewhere."
+        ),
+    ),
+) -> None:
+    """Generate a Gazebo world whose heightmap is the planned terrain.
+
+    PX4's default world is flat, so a terrain-aware plan flown in SITL proves
+    nothing about nap-of-the-earth flight (and hides altitude-frame bugs). Copy
+    the result into `PX4-Autopilot/Tools/simulation/gz/worlds/` and select it with
+    `PX4_GZ_WORLD=<name>`.
+    """
+    import json
+
+    from pyproj import Transformer
+
+    from droneplanner.io.gzworld import build_world_sdf
+    from droneplanner.io.raster import read_raster
+
+    configure_logging()
+    raster = read_raster(dtm)
+    home = json.loads(plan.read_text())["mission"]["plannedHomePosition"]
+    home_lat, home_lon, home_elev = float(home[0]), float(home[1]), float(home[2])
+    to_crs = Transformer.from_crs("EPSG:4326", raster.crs, always_xy=True)
+    home_x, home_y = to_crs.transform(home_lon, home_lat)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        build_world_sdf(
+            raster,
+            dem_path or dtm.resolve(),
+            home_lat=home_lat,
+            home_lon=home_lon,
+            home_x=home_x,
+            home_y=home_y,
+            home_elev_m=home_elev,
+            world_name=out.stem,
+        ),
+        encoding="utf-8",
+    )
+    typer.secho(
+        f"wrote {out}  (world '{out.stem}', home {home_lat:.5f},{home_lon:.5f})",
+        fg=typer.colors.GREEN,
+    )
+    typer.echo(
+        f"next: cp {out} $PX4_DIR/Tools/simulation/gz/worlds/ && "
+        f"PX4_GZ_WORLD={out.stem} ./sitl/run_sitl.sh <plan> $PX4_DIR"
+    )
+
+
 @app.command()
 def viz(
     out: Path = typer.Option(Path("demo_route.png"), "--out", "-o", help="Output PNG path."),

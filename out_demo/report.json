@@ -1,0 +1,141 @@
+{
+  "crossings": [],
+  "exposed_length_m": 154.05694150420948,
+  "fiber_available_m": 8000.0,
+  "fiber_used_m": 5135.567099291089,
+  "findings": [
+    {
+      "code": "exposed_cable",
+      "message": "154 m of cable is visually/fire exposed",
+      "severity": "warning"
+    },
+    {
+      "code": "flyability_not_analyzed",
+      "message": "concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight \u2014 confirm before execution",
+      "severity": "warning"
+    }
+  ],
+  "generated_at": "2026-07-21T12:49:17.496717Z",
+  "kinematics": {
+    "climb_violations": 0,
+    "feasible": true,
+    "max_climb_rate_ms": 0.0,
+    "max_descent_rate_ms": 0.0,
+    "min_turn_radius_m": 8.0,
+    "reversals": 0,
+    "tightest_turn_radius_m": 8.0,
+    "turn_violations": 0
+  },
+  "manipulation_crossings": 0,
+  "marginal_count": 0,
+  "mission_name": "demo-ao",
+  "non_navigable_count": 0,
+  "objective_scores": {
+    "exposed_fraction": 0.03592814371257485,
+    "length_m": 5135.567099291089,
+    "max_exposure": 1.0,
+    "mean_exposure": 0.218562874251497,
+    "path_cost": 264.016869143051
+  },
+  "recommendation": "REVIEW",
+  "route_index": 0,
+  "segments": [
+    {
+      "exposed": true,
+      "flyability": "unknown",
+      "index": 0,
+      "length_m": 75.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 1,
+      "length_m": 79.05694150420949
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 2,
+      "length_m": 254.95097567963924
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 3,
+      "length_m": 79.05694150420949
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 4,
+      "length_m": 223.60679774997897
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 5,
+      "length_m": 285.0438562747845
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 6,
+      "length_m": 125.0
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 7,
+      "length_m": 106.06601717798213
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 8,
+      "length_m": 1131.9231422671771
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 9,
+      "length_m": 35.35533905932738
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 10,
+      "length_m": 765.2613932506983
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 11,
+      "length_m": 336.34060117684277
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 12,
+      "length_m": 848.5281374238571
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 13,
+      "length_m": 436.6062299143245
+    },
+    {
+      "exposed": false,
+      "flyability": "unknown",
+      "index": 14,
+      "length_m": 275.0
+    },
+    {
+      "exposed": true,
+      "flyability": "unknown",
+      "index": 15,
+      "length_m": 79.05694150420949
+    }
+  ],
+  "total_length_m": 5135.567099291089
+}

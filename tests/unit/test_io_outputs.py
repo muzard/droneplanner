@@ -46,8 +46,36 @@ def test_qgc_plan_structure() -> None:
     exp_lon, exp_lat = crs_to_lonlat(plan.start, plan.crs)
     assert first["params"][4] == exp_lat
     assert first["params"][5] == exp_lon
+    # Home altitude is the GROUND elevation at home (AMSL), never an AGL value.
     home = doc["mission"]["plannedHomePosition"]
-    assert home == [exp_lat, exp_lon, plan.vertices[0].altitude_agl_m]
+    assert home == [exp_lat, exp_lon, plan.vertices[0].ground_elev_m]
+
+
+def test_qgc_altitudes_are_relative_to_home_not_agl() -> None:
+    """Terrain-relative AGL must be converted to relative-to-home altitudes.
+
+    Regression guard: emitting the planner's AGL verbatim is a CFIT bug — over
+    73.5 m of relief on the demo AO it put 57 of 77 waypoints *below ground*.
+    A vertex 40 m higher up the hill than home, flown at the same 30 m AGL, must
+    come out as 70 m relative — not 30.
+    """
+    base = straight_line_plan(make_mission())
+    v0, v1 = base.vertices[0], base.vertices[1]
+    plan = base.model_copy(
+        update={
+            "vertices": (
+                v0.model_copy(update={"ground_elev_m": 100.0, "altitude_agl_m": 30.0, "z": 30.0}),
+                v1.model_copy(update={"ground_elev_m": 140.0, "altitude_agl_m": 30.0, "z": 30.0}),
+                *base.vertices[2:],
+            )
+        }
+    )
+    doc = plan_to_qgc(plan)
+    items = doc["mission"]["items"]
+    assert doc["mission"]["plannedHomePosition"][2] == 100.0  # ground AMSL at home
+    assert items[0]["params"][6] == 30.0  # (100+30) - 100
+    assert items[1]["params"][6] == 70.0  # (140+30) - 100  <- would be 30 if buggy
+    assert items[1]["Altitude"] == 70.0
 
 
 def test_qgc_plan_written_and_valid_json(tmp_path: Path) -> None:

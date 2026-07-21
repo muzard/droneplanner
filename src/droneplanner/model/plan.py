@@ -49,9 +49,22 @@ class TrajectoryVertex(BaseModel):
     x: float
     y: float
     z: float = Field(description="Altitude AGL (meters) — same value as altitude_agl_m.")
-    altitude_agl_m: float
+    altitude_agl_m: float = Field(description="Height above the ground *beneath this vertex*.")
+    ground_elev_m: float = Field(
+        default=0.0,
+        description=(
+            "Terrain elevation (AMSL) under this vertex, sampled from the DTM. Needed to "
+            "convert terrain-relative AGL into the relative-to-home altitude a QGC .plan "
+            "carries; 0.0 when no terrain was supplied (the M0 stub)."
+        ),
+    )
     flight_band: FlightBand = FlightBand.UNKNOWN
     speed_hint_ms: float = Field(gt=0)
+
+    @property
+    def altitude_amsl_m(self) -> float:
+        """Absolute altitude above sea level."""
+        return self.ground_elev_m + self.altitude_agl_m
 
     @property
     def coordinate(self) -> Coordinate:

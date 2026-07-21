@@ -127,12 +127,16 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         prefs, floors, ceils, seg_dists, limits
     )
 
+    # Carry the terrain elevation under each vertex: AGL alone is not enough to
+    # emit a correct .plan (the writer must convert to relative-to-home, and on
+    # sloping ground those differ by the full relief).
     vertices = tuple(
         TrajectoryVertex(
             x=p.x,
             y=p.y,
             z=alt,
             altitude_agl_m=alt,
+            ground_elev_m=float(surface.dtm[grid.world_to_pixel(p)]),
             flight_band=band,
             speed_hint_ms=speed,
         )

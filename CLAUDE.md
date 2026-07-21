@@ -22,6 +22,10 @@ plan or moving to sim).
 cd /Users/arttu/Claude/Projects/DroneAutomation/droneplanner
 . /Users/arttu/Claude/Projects/DroneAutomation/.venv/bin/activate
 droneplanner plan --mission configs/mission.example.yaml --out out/   # stub (no terrain) -> REVIEW
+droneplanner demo-ao --out demo_ao/                    # export demo AO as GeoTIFFs + mission YAML
+droneplanner plan --mission demo_ao/mission.yaml --out out_demo/      # REAL terrain route (turns!)
+droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan --out worlds/t.sdf
+                                                       # Gazebo world = the planned terrain
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
 ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 132 tests, ~96% cov
@@ -29,6 +33,20 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
 ```
 
 ## Key design decisions (don't regress; some came from user feedback)
+- **Altitude frame at the `.plan` boundary (2026-07-21 — don't regress):** the
+  planner thinks in **AGL above the terrain under each vertex**; a QGC `.plan`
+  waypoint is **relative to home**. Emitting AGL verbatim was a CFIT bug — on the
+  demo AO (73.5 m relief) **57 of 77 waypoints were below ground**. Now
+  `TrajectoryVertex.ground_elev_m` carries the DTM elevation and `io/mavlink.py`
+  emits `(ground+agl) − home_ground`, with `plannedHomePosition[2]` = ground AMSL
+  at home. Frame choice (relative-to-home, `MAV_FRAME 3`) is deliberate and
+  documented in that module — revisit there if AMSL or terrain-frame is ever
+  needed. Guarded by `test_qgc_altitudes_are_relative_to_home_not_agl`.
+- **`demo-ao` exists so `plan` has real terrain.** `configs/mission.example.yaml`
+  has no layers → straight-line stub (zero turns, flat altitude), which makes SITL
+  tests vacuous. `droneplanner demo-ao` writes the procedural AO as real
+  GeoTIFFs + mission YAML, so `plan` runs the true ingestion path (and rehearses
+  real DTM/DSM ingest).
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is

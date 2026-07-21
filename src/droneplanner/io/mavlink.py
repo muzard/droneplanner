@@ -1,9 +1,30 @@
 """MAVLink mission writer — QGroundControl ``.plan`` JSON (Software-Spec §4, §5.3).
 
-QGC ``.plan`` files carry waypoints in WGS84 lat/lon with a relative altitude,
-so this writer converts the plan's projected vertices back to lon/lat via
-pyproj. Altitudes are AGL, interpreted as relative-to-home (MAV_FRAME 3,
-``AltitudeMode`` = relative).
+QGC ``.plan`` files carry waypoints in WGS84 lat/lon with a **relative-to-home**
+altitude, so this writer converts the plan's projected vertices back to lon/lat
+via pyproj *and* converts altitudes out of the planner's terrain-relative frame.
+
+**Altitude frame — read before changing.** The planner thinks in **AGL above the
+terrain beneath each vertex** (nap-of-the-earth flight). A `.plan` waypoint under
+`MAV_FRAME_GLOBAL_RELATIVE_ALT` is **height above the home point**, which is a
+different thing the moment the ground is not flat. Emitting AGL directly is a
+controlled-flight-into-terrain bug: on the demo AO (73.5 m of relief) it put
+**57 of 77 waypoints below ground**. It stayed invisible because the no-terrain
+stub is flat *and* Gazebo's default world is flat.
+
+So each vertex carries `ground_elev_m` (DTM elevation under it) and we emit::
+
+    alt_rel_home = (ground_elev + agl) - home_ground_elev
+
+`plannedHomePosition` altitude is the **ground elevation AMSL at home**, not an
+AGL value.
+
+*Chosen frame (revisit if needed):* relative-to-home keeps `MAV_FRAME 3` and
+needs no change in `droneflight` (MAVSDK's `MissionItem` takes
+`relative_altitude_m`). The alternatives, if this ever proves limiting, are
+absolute AMSL (`MAV_FRAME_GLOBAL` — unambiguous, but the flight stack must switch
+frames too) or `MAV_FRAME_GLOBAL_TERRAIN_ALT` (closest to the nap-of-the-earth
+intent, but PX4 support is limited and it needs onboard terrain data).
 """
 
 from __future__ import annotations
@@ -38,12 +59,20 @@ def _simple_item(lat: float, lon: float, alt_m: float, jump_id: int) -> dict[str
 def plan_to_qgc(plan: Plan) -> dict[str, Any]:
     """Build a QGroundControl ``.plan`` (v1 file / v2 mission) dict from a plan."""
     lonlat = [crs_to_lonlat(v.coordinate, plan.crs) for v in plan.vertices]
+    # Home is the first vertex; its GROUND elevation is the datum every relative
+    # altitude is measured from (see the module docstring on altitude frames).
+    home_ground_m = plan.vertices[0].ground_elev_m if plan.vertices else 0.0
     items = [
-        _simple_item(lat=lat, lon=lon, alt_m=v.altitude_agl_m, jump_id=i + 1)
+        _simple_item(
+            lat=lat,
+            lon=lon,
+            alt_m=v.altitude_amsl_m - home_ground_m,
+            jump_id=i + 1,
+        )
         for i, (v, (lon, lat)) in enumerate(zip(plan.vertices, lonlat, strict=True))
     ]
     home_lon, home_lat = lonlat[0]
-    home_alt = plan.vertices[0].altitude_agl_m
+    home_alt = home_ground_m
     cruise = plan.vertices[0].speed_hint_ms if plan.vertices else 5.0
     return {
         "fileType": "Plan",
