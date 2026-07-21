@@ -116,6 +116,21 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 - 🔴 **No real-AO validation.** Everything is exercised on synthetic fixtures and
   the procedural demo. The spec's small real lidar tile + DEM (§6.1) is not yet
   wired in, so field correctness on real data is unverified.
+- 🟠 **Reference-data fidelity is assumed, not modeled — the corridor and the
+  flight-time fixes share one shaky input.** The whole corridor is built from
+  geospatial reference (DTM/DSM, lidar, land cover). That reference is **uneven in
+  fidelity globally** and **perishable in conflict zones** (new craters, rubble,
+  defoliation, construction, seasonal canopy). Two consequences, one root cause:
+  (a) the planned corridor may not match the present world; (b) the flight stack's
+  **VTRN drift-correction leans on the same class of basemap** and fails exactly
+  where this drone hides (low-texture forest canopy) or where the map is stale.
+  The flight side now quantifies this in `droneflight/correction.py` +
+  [`droneflight/NAV-FIDELITY.md`](../droneflight/NAV-FIDELITY.md). **Planner-side
+  fix (unbuilt):** ingest a per-cell **basemap matchability / currency** layer and
+  add a *navigation-risk* term to `fields/composite.py`, so the route balances
+  concealment against staying in reach of trustworthy optical fixes — otherwise a
+  maximally-concealed route is a maximally-blind one. Ties into the M2 "lidar
+  currency / DSM-vs-canopy coupling" 🟡 and land-cover (currently unwired) items.
 - 🟠 **Cable-laydown prediction (M3) is absent** — where the fiber settles, and
   its per-segment survivability, are not modeled; the report's survivability is a
   placement heuristic, not a laydown result.
