@@ -53,6 +53,17 @@ _SDF_TEMPLATE = """<?xml version="1.0" ?>
     <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
+    <!-- Sensor systems: in gz-sim a sensor declared on a MODEL only produces
+         data if the WORLD loads the matching system plugin. Omit these and PX4
+         reports "No valid data from Accel 0 / Gyro 0", "barometer 0 missing",
+         "Found 0 compass" and never arms — the vehicle is present but blind.
+         This set mirrors PX4's own default.sdf; keep them in sync with it. -->
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-air-pressure-system" name="gz::sim::systems::AirPressure"/>
+    <plugin filename="gz-sim-magnetometer-system" name="gz::sim::systems::Magnetometer"/>
+    <plugin filename="gz-sim-navsat-system" name="gz::sim::systems::NavSat"/>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-forcetorque-system" name="gz::sim::systems::ForceTorque"/>
 
     <!-- World origin == the plan's home, so PX4_HOME_* and the terrain agree. -->
     <spherical_coordinates>

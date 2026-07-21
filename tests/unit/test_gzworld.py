@@ -78,3 +78,30 @@ def test_sdf_carries_home_spherical_coordinates_and_dem_uri(tmp_path: Path) -> N
     assert "<world_frame_orientation>ENU</world_frame_orientation>" in sdf
     # Heightmap extents come from the raster.
     assert "2500.00 2500.00 80.00" in sdf
+
+
+def test_sdf_loads_the_sensor_system_plugins() -> None:
+    """Without these, the vehicle spawns blind and PX4 never arms.
+
+    In gz-sim a sensor on a model only produces data if the *world* loads the
+    matching system plugin; omitting them yields "No valid data from Accel 0",
+    "barometer 0 missing", "Found 0 compass".
+    """
+    sdf = build_world_sdf(
+        _dtm(),
+        Path("/dem.tif"),
+        home_lat=46.9,
+        home_lon=15.0,
+        home_x=_X0,
+        home_y=_Y0,
+        home_elev_m=100.0,
+    )
+    for system in (
+        "gz::sim::systems::Imu",
+        "gz::sim::systems::AirPressure",
+        "gz::sim::systems::Magnetometer",
+        "gz::sim::systems::NavSat",
+        "gz::sim::systems::Physics",
+        "gz::sim::systems::Sensors",
+    ):
+        assert system in sdf, f"world is missing the {system} plugin"
