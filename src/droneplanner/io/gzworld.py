@@ -22,16 +22,39 @@ Frames, and how the pieces line up
   centre — so the model is offset by (dtm_centre - home) in projected meters,
   placing home over the world origin.
 
-⚠️ **Vertical datum still UNVERIFIED.** An earlier note here claimed it was
-confirmed because the vehicle rested at ``z = -0.00`` — that reasoning was
-circular: PX4 sets its local-position origin *at the spawn point*, so ``z = 0``
-at rest is tautological and says nothing about where the terrain sits in world
-coordinates. Corroborating evidence that it may be wrong: ODE reports
-``AABB max z = 150.32`` (the DEM's max **elevation**) rather than the 110.32
-**relief** passed as ``<size>``, which would put the surface ~40 m high.
-To measure it properly, compare Gazebo's own model pose
-(``gz model -m terrain -p``) against a ``gz topic`` height query — do not infer
-it from PX4's local z.
+Vertical datum — the tumble bug, diagnosed and fixed (2026-07-23)
+----------------------------------------------------------------
+**Terrain worlds tumbled on translation because the vehicle spawned buried.**
+
+The heightmap's vertical placement depends on whether Gazebo *rescales* a DEM's
+elevations into ``<size>``'s z, or uses the DEM's **raw** elevation values. The
+old code assumed rescaling. ODE said otherwise: it reported ``AABB max z =
+150.32``, the demo DEM's max **elevation**, not the ``110.32`` **relief** passed
+as ``<size>`` — so Gazebo was using raw elevations.
+
+With raw elevations and the old offset ``-(home_elev - min_elev)``, the surface
+at home landed at world ``z = min_elev`` instead of 0::
+
+    real DEM: home 124.68, min 40.00  ->  surface at world z = +40.0 m
+    flat DEM: home 124.68, min 124.68 ->  surface at world z = +124.7 m
+
+PX4 spawns the vehicle at the world origin (z = 0), so it started **40 m (real)
+or 125 m (flat) underneath the terrain**, held in permanent collision
+penetration. That reads as a stable hover — and then flings the vehicle as soon
+as it translates. It also explains why the ``--flat`` bisection tumbled too: not
+"the heightmap itself", just the *same* datum bug, worse. That earlier bisection
+conclusion was measuring this bug twice.
+
+**The fix: hand Gazebo a zero-based DEM.** :func:`normalise_dem` subtracts the
+minimum elevation so the written DEM spans ``0 .. relief``. Then the surface at
+home sits at world z = 0 under *either* interpretation — raw values and
+rescale-to-``size.z`` become numerically identical — so the datum no longer
+depends on a Gazebo behaviour we cannot pin down from the Mac. ``size.z`` is
+still the relief, and the model pose keeps ``-(home_elev - min_elev)``.
+
+To *verify* on the VM, compare Gazebo's own model pose (``gz model -m terrain
+-p``) against a height query — never infer it from PX4's local z, which is zeroed
+at the spawn point and therefore tautological.
 
 **We inject into PX4's own world rather than writing one.** See
 :func:`build_world_sdf`; a from-scratch world silently loses the default gz-sim
@@ -42,7 +65,7 @@ attitude estimate. Pass PX4's ``Tools/simulation/gz/worlds/default.sdf``.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from droneplanner.io.raster import RasterGrid
@@ -81,17 +104,46 @@ _TERRAIN_MODEL = """
 """
 
 
+# A heightmap needs a strictly positive vertical scale; a perfectly flat DEM has
+# relief 0, and `<size ... 0>` is degenerate (Gazebo divides by it when scaling).
+_MIN_RELIEF_M = 1.0
+
+
 @dataclass(frozen=True)
 class WorldGeometry:
     """The computed placement of a DTM heightmap relative to the plan's home."""
 
     size_x_m: float  # DTM width in meters
     size_y_m: float  # DTM height in meters
-    relief_m: float  # elevation range (max - min)
+    relief_m: float  # elevation range (max - min), floored at _MIN_RELIEF_M
     min_elev_m: float
     offset_x_m: float  # model pose x: DTM centre - home (projected meters)
     offset_y_m: float
     offset_z_m: float  # vertical datum offset
+
+
+def normalise_dem(dtm: RasterGrid) -> RasterGrid:
+    """Zero-base a DTM's elevations so the DEM Gazebo loads spans ``0 .. relief``.
+
+    This is what makes the vertical datum independent of whether Gazebo rescales
+    a DEM into ``<size>``'s z or uses its raw elevation values: once the minimum
+    is 0 and ``size.z`` is the relief, the two interpretations coincide. See the
+    module docstring — assuming the wrong one is what buried the vehicle and made
+    terrain worlds tumble.
+    """
+    import numpy as np
+
+    data = dtm.data.astype(np.float32)
+    if dtm.nodata is not None:
+        valid = data != np.float32(dtm.nodata)
+        if not valid.any():
+            raise ValueError("DTM has no valid (non-nodata) cells")
+        floor = float(data[valid].min())
+        shifted = np.where(valid, data - np.float32(floor), data)
+    else:
+        floor = float(data.min())
+        shifted = data - np.float32(floor)
+    return replace(dtm, data=shifted.astype(np.float32))
 
 
 def compute_geometry(
@@ -111,7 +163,7 @@ def compute_geometry(
     centre_y = f + (e * rows) / 2.0
 
     min_elev = float(dtm.data.min())
-    relief = float(dtm.data.max()) - min_elev
+    relief = max(float(dtm.data.max()) - min_elev, _MIN_RELIEF_M)
     return WorldGeometry(
         size_x_m=size_x,
         size_y_m=size_y,
@@ -119,9 +171,20 @@ def compute_geometry(
         min_elev_m=min_elev,
         offset_x_m=centre_x - home_x,
         offset_y_m=centre_y - home_y,
-        # Put the ground at home at world z=0 (see the module docstring caveat).
+        # Ground at home -> world z = 0. Valid because the DEM handed to Gazebo is
+        # zero-based (`normalise_dem`): home's surface sits at (home_elev -
+        # min_elev) in the heightmap's own frame, and this cancels it exactly.
         offset_z_m=-(home_elev_m - min_elev),
     )
+
+
+def surface_z_at_home(geom: WorldGeometry, home_elev_m: float) -> float:
+    """World z of the terrain surface under home — must be 0.0.
+
+    The regression guard for the tumble bug: any non-zero value means the vehicle
+    spawns buried (positive) or hovering above the ground (negative).
+    """
+    return (home_elev_m - geom.min_elev_m) + geom.offset_z_m
 
 
 def build_world_sdf(
@@ -138,6 +201,12 @@ def build_world_sdf(
     collision: bool = True,
 ) -> str:
     """Inject the terrain heightmap into PX4's own world SDF.
+
+    ⚠️ **Contract:** ``dtm`` is the *original* DTM (its true elevations set the
+    relief and the datum offset), while ``dem_path`` must point at the
+    **zero-based** DEM produced by :func:`normalise_dem` — that is what Gazebo
+    loads. Pointing it at the raw DEM re-introduces the tumble bug (module
+    docstring); ``droneplanner gz-world`` writes the normalised file for you.
 
     ``base_world`` is the text of PX4's ``Tools/simulation/gz/worlds/default.sdf``.
     We start from it rather than writing a world from scratch because a

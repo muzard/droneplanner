@@ -173,17 +173,33 @@ def gz_world(
         write_raster(flat_path, replace(raster, data=ramp))
         raster = read_raster(flat_path)
         typer.secho(f"--flat: wrote diagnostic DEM {flat_path}", fg=typer.colors.YELLOW)
-        if dem_path is not None:
-            dem_path = dem_path.parent / "dtm_flat.tif"
     home_lat, home_lon, home_elev = float(home[0]), float(home[1]), float(home[2])
     to_crs = Transformer.from_crs("EPSG:4326", raster.crs, always_xy=True)
     home_x, home_y = to_crs.transform(home_lon, home_lat)
 
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Gazebo loads a ZERO-BASED DEM, not the raw one: that makes the vertical
+    # datum identical whether Gazebo rescales elevations into <size>'s z or uses
+    # them raw. Getting this wrong spawned the vehicle 40-125 m underground and
+    # is what made terrain worlds tumble (io/gzworld.py module docstring).
+    from droneplanner.io.gzworld import normalise_dem
+    from droneplanner.io.raster import write_raster
+
+    norm_path = out.parent / f"{out.stem}_dem.tif"
+    write_raster(norm_path, normalise_dem(raster))
+    typer.secho(
+        f"wrote zero-based DEM {norm_path} (Gazebo loads this, not the raw DTM)",
+        fg=typer.colors.YELLOW,
+    )
+    # --dem-path is where the DEM will live on the sim machine; keep its dir but
+    # point at the normalised file we just wrote.
+    gazebo_dem = (dem_path.parent / norm_path.name) if dem_path is not None else norm_path.resolve()
+
     out.write_text(
         build_world_sdf(
             raster,
-            dem_path or dtm.resolve(),
+            gazebo_dem,
             base_world.read_text(encoding="utf-8"),
             home_lat=home_lat,
             home_lon=home_lon,

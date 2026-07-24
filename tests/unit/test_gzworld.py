@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from droneplanner.io.gzworld import build_world_sdf, compute_geometry
+from droneplanner.io.gzworld import (
+    build_world_sdf,
+    compute_geometry,
+    normalise_dem,
+    surface_z_at_home,
+)
 from droneplanner.io.raster import RasterGrid
 
 _CELL = 25.0
@@ -193,3 +200,63 @@ def test_sdf_carries_home_spherical_coordinates_and_dem_uri(tmp_path: Path) -> N
     assert "<world_frame_orientation>ENU</world_frame_orientation>" in sdf
     # Heightmap extents come from the raster.
     assert "2500.00 2500.00 80.00" in sdf
+
+
+# --------------------------------------------------------------------------- #
+# The tumble bug: vertical datum
+#
+# Terrain worlds tumbled because the vehicle spawned buried. PX4 spawns at world
+# z = 0, so the terrain surface under home MUST be at world z = 0. Getting this
+# wrong put it 40 m (real DEM) / 125 m (flat diagnostic) underground, which reads
+# as a stable hover and then flings the vehicle the moment it translates.
+# --------------------------------------------------------------------------- #
+
+
+def test_surface_under_home_is_at_world_zero() -> None:
+    """The regression guard for the tumble. Non-zero => buried or floating."""
+    for min_elev, relief, home_elev in (
+        (40.0, 110.0, 124.68),  # the demo AO that tumbled
+        (0.0, 50.0, 25.0),
+        (1200.0, 300.0, 1200.0),  # home at the DEM minimum
+        (1200.0, 300.0, 1500.0),  # home at the DEM maximum
+    ):
+        geom = compute_geometry(
+            _dtm(min_elev=min_elev, relief=relief),
+            home_x=_X0,
+            home_y=_Y0,
+            home_elev_m=home_elev,
+        )
+        assert surface_z_at_home(geom, home_elev) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_normalise_dem_zero_bases_elevations() -> None:
+    """Gazebo must be handed 0..relief, so raw-vs-rescaled interpretations agree."""
+    dtm = _dtm(min_elev=40.0, relief=110.0)
+    norm = normalise_dem(dtm)
+    assert float(norm.data.min()) == pytest.approx(0.0)
+    assert float(norm.data.max()) == pytest.approx(110.0)
+    # Shape/placement must be untouched — only the values shift.
+    assert norm.transform == dtm.transform
+    assert norm.crs == dtm.crs
+    assert norm.data.shape == dtm.data.shape
+
+
+def test_normalise_dem_ignores_nodata_cells() -> None:
+    dtm = _dtm(min_elev=40.0, relief=110.0)
+    data = dtm.data.copy()
+    data[0, 0] = -9999.0
+    holed = replace(dtm, data=data, nodata=-9999.0)
+    norm = normalise_dem(holed)
+    valid = norm.data[norm.data != -9999.0]
+    # The nodata sentinel must not become the floor (that would shift terrain by ~10 km).
+    assert float(valid.min()) == pytest.approx(0.0)
+    assert norm.data[0, 0] == -9999.0
+
+
+def test_flat_dem_gets_a_usable_vertical_scale() -> None:
+    """A perfectly flat DEM has relief 0; <size ... 0> is degenerate in Gazebo."""
+    flat = _dtm(min_elev=100.0, relief=0.0)
+    geom = compute_geometry(flat, home_x=_X0, home_y=_Y0, home_elev_m=100.0)
+    assert geom.relief_m > 0.0
+    # ...and the datum still lands on zero.
+    assert surface_z_at_home(geom, 100.0) == pytest.approx(0.0, abs=1e-9)

@@ -53,8 +53,17 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   from-scratch world loses gz-sim's default plugin set (loaded only if the world
   declares *no* `<plugin>`) and PX4's `<magnetic_field>` — sensors die and the EKF
   yaw diverges. `<world name>` must equal the .sdf file stem or PX4 hangs on
-  "Waiting for Gazebo world...". Open bug: terrain worlds tumble on translation —
-  see droneflight RUNBOOK §2b for what's already been eliminated.
+  "Waiting for Gazebo world...".
+- **`gz-world` hands Gazebo a ZERO-BASED DEM (2026-07-23 — don't regress).**
+  Gazebo uses a DEM's **raw elevations**, not a rescale into `<size>`'s z. With
+  the raw DTM the terrain surface under home landed at world `z = min_elev`
+  (+40 m on the demo AO, +125 m with `--flat`) while PX4 spawns at `z = 0` — the
+  vehicle spawned **buried**, which reads as a stable hover and then tumbles on
+  translation. That was the long-standing terrain-world bug. `normalise_dem()`
+  now zero-bases the elevations so raw-vs-rescaled interpretations coincide, and
+  the command writes `<out>_dem.tif` next to the world — **both files must reach
+  the sim machine**, and `--dem-path` must match where the DEM will live there.
+  Guarded by `surface_z_at_home() == 0`. Awaiting VM verification (RUNBOOK §2b).
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
