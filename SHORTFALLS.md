@@ -42,6 +42,48 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Top priorities before sims
 
+0. 🔴🔴 **CFIT on descending legs — terrain clearance assumes an altitude profile
+   PX4 does not fly. PROVEN IN SITL: it crashed the aircraft (2026-07-24).**
+
+   The emitted plan is correct at every vertex (all 77 waypoints 29.4–33.3 m AGL)
+   *and* along every leg **if** altitude is interpolated linearly with ground
+   distance (min 22.4 m AGL). PX4 does not do that. It descends toward the next
+   waypoint's altitude **at its own vertical rate**, front-loading the descent:
+
+   | leg wp50→wp51, 765 m, −40.5 m altitude | at 17 % along |
+   |---|---|
+   | linear interp (what the planner assumes) | +14.4 m → **27.0 m AGL** |
+   | what PX4 actually flew | −11.9 m → **0.8 m AGL** |
+
+   It burned 33 of the 40 m of descent in the first sixth of the leg, while still
+   over the *high* end of a falling slope, and flew into the ground — the mission
+   stalled at 51/77 and the watchdog aborted it.
+
+   Scoring the same plan with a worst-case model (vehicle sits at the **lower** of
+   the leg's two altitudes for the whole leg):
+
+   | clearance model | min AGL | legs <5 m | legs <0 m |
+   |---|---|---|---|
+   | linear interp (assumed) | 22.4 m | 0 | 0 |
+   | descend-early (PX4, observed) | **−32.9 m** | **5** | **3** |
+
+   *Fix options:* (a) **densify vertices on legs with large |Δalt|** so the
+   commanded profile is forced to track terrain — the standard terrain-following
+   answer and probably the cheapest; (b) plan clearance against the descend-early
+   worst case rather than linear interpolation; (c) cap the per-leg altitude
+   change so the vehicle cannot get far ahead of the terrain.
+
+   ⚠️ The **climb** side of that worst-case model is *unvalidated* — this flight
+   passed the +62 m climb leg (wp40→41) without incident, so PX4 appears to climb
+   promptly too. Only the descending legs (8 in this plan) are a confirmed hazard;
+   the "3 legs underground" figure is an upper bound.
+
+   ⚠️ Note this is **not** the 2026-07-21 altitude-frame CFIT bug (AGL emitted
+   verbatim instead of relative-to-home). That one is fixed and still fixed — the
+   vertices are all correct here. This is a *trajectory* defect: clearance is
+   guaranteed for a path the autopilot never flies. **Flat-world SITL could never
+   have found it** (constant altitude ⇒ no descent).
+
 1. 🔴 **Exposure is evaluated at ground level, not at flight altitude**
    (`fields/viewshed.py`, `target_height_m=0`). The viewshed asks "can an
    observer see this ground cell", but the drone flies at cruise AGL (M1) or the
