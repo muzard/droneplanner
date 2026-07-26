@@ -169,6 +169,23 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Cross-cutting
 
+- 🟠 **Planner output geometry defeats the flight stack's tether speed policy.**
+  The speed policy (`droneflight/speed_policy.py`) slows on **per-waypoint bend
+  angle** (>30° taper, >150° reversal). But planner output is smooth at exactly
+  that granularity: any-angle Theta* minimises turns, and the kinematic fillet
+  then spreads whatever remains into arcs of many shallow (<25°) vertices — so
+  the policy barely fires on real routes. Measured 2026-07-26: a slalom **forced**
+  through an obstacle comb still peaked at **24° per vertex** (0 waypoints over
+  30°); the flown `ev_test.plan` peaked at 16°. This is the same root as the
+  duplicate-waypoint clusters (droneflight CLAUDE.md) — both smear a turn below
+  the policy's trigger. **Consequence:** SITL §3 (tether policy in the loop) can
+  only be tested with a *synthetic* turn-rich course
+  (`droneflight/sitl/make_slalom_plan.py`), not planner output. **Fix candidates:**
+  (a) trigger the policy on **path curvature / turn-rate over a window**, not
+  per-vertex angle, so it matches how the planner actually emits geometry; or
+  (b) emit a *speed profile* from the planner's kinematic pass (it already knows
+  the fillet radii and where it flagged reversals) and carry it in the `.plan`,
+  rather than re-deriving speed from geometry downstream.
 - 🔴 **No real-AO validation.** Everything is exercised on synthetic fixtures and
   the procedural demo. The spec's small real lidar tile + DEM (§6.1) is not yet
   wired in, so field correctness on real data is unverified.
