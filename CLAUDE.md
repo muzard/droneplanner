@@ -63,7 +63,12 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   now zero-bases the elevations so raw-vs-rescaled interpretations coincide, and
   the command writes `<out>_dem.tif` next to the world — **both files must reach
   the sim machine**, and `--dem-path` must match where the DEM will live there.
-  Guarded by `surface_z_at_home() == 0`. Awaiting VM verification (RUNBOOK §2b).
+  Guarded by `surface_z_at_home() == 0`. **Verified on the VM 2026-07-24** — the
+  vehicle rests on the terrain (roll matches the DEM gradient at home to 2 %) and
+  flew 51/77 waypoints over real relief (RUNBOOK §2b). The only tracked world is
+  `worlds/planner_terrain.sdf` + `worlds/planner_terrain_dem.tif`; the pre-fix
+  `demo_ao/worlds/` copies were **deleted 2026-07-27** (they pointed at raw DEMs
+  and would bury the vehicle — never track a world whose `<uri>` names a raw DTM).
 - **Clearance is scored against the profile PX4 FLIES, not linear interpolation
   (2026-07-27 — don't regress).** PX4 front-loads a leg's descent at its own
   vertical rate instead of spreading it along the ground track, so a plan clear at
