@@ -77,6 +77,14 @@ class CorridorReport:
     cells: int
     """Corridor area, in grid cells — the sample size behind the two means above."""
 
+    swept: np.ndarray
+    """Boolean mask of the cells the flight stack may use.
+
+    This is the corridor as a *region*, which is what makes gate reduction
+    decidable: a straight line between two gates is an acceptable substitute for
+    the planned path between them exactly when it stays inside this mask.
+    """
+
     @property
     def min_half_width_m(self) -> float:
         return min(self.half_width_m, default=0.0)
@@ -188,4 +196,5 @@ def assess_corridor(
         mean_exposure=float(values.mean()),
         max_exposure=float(values.max()),
         cells=int(swept.sum()),
+        swept=swept,
     )

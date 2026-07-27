@@ -30,7 +30,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         # add --flat for the diagnostic flat-DEM world
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 211 tests, ~95% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 218 tests, ~95% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -196,6 +196,7 @@ validation yet.
 `model/` pydantic contracts + `Grid`. `io/` readers/writers (lazy GDAL/laspy).
 `fields/` cost layers (incl. `altitude.py`, the below-canopy band). `forest/`
 flyability. `planner/` Theta\* + corridor + kinematics + `terrain_profile.py`
-(CFIT) + `corridor_width.py` (lateral freedom).
+(CFIT) + `corridor_width.py` (lateral freedom) + `gates.py` (route reduction —
+analysis only, deliberately not wired into `.plan` emission; see TEST-PLAN A2).
 `crossings/` roads. `report/` GO/REVIEW/NO-GO. `demo.py` procedural AO.
 `viz.py`/`serve.py` visualization. `pipeline.py` orchestration. `cli.py`.
