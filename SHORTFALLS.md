@@ -60,10 +60,13 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   ("vehicle sits at the leg's lower altitude throughout"); the calibrated descent
   gradient says −6.6 m / 1 leg. Still CFIT, still fixed — but −32.9 m was an upper
   bound, not a measurement.
-  ✅ **THE CLEARANCE FIX IS NOW VERIFIED IN FLIGHT (2026-07-27,
-  `sim-logs/cfit/01_36_02.ulg`).** Same AO, same leg that crashed the aircraft on
-  2026-07-24: **minimum AGL 11.97 m** over the whole mission phase (predicted
-  floor 9.02 m), **0 of 49 500 samples below 5 m**, no terrain contact.
+  ✅ **THE CLEARANCE FIX IS VERIFIED IN FLIGHT — SIX RUNS, 2026-07-27**
+  (`sim-logs/cfit/` + `cfit/cfit-rep/`). Same AO, same leg that crashed the
+  aircraft on 2026-07-24 at 0.8 m AGL. Minimum AGL per run, including the two
+  that stalled: **11.97 / 11.94 / 11.96 / 11.91 / 11.96 / 11.91 m** — a **5 cm
+  spread** against a predicted 9.02 m floor, with **0 of ~250 000 samples below
+  5 m**. Four of the six flew the route end to end (78/78). **Terrain clearance is
+  closed.**
 
   **And the mechanism is confirmed, not just the outcome.** Splitting the leg
   shrinks the commanded altitude *step*, and PX4's descent gradient scales with
@@ -77,18 +80,49 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   So the front-loading the model assumes (0.333) is real and conservative — the
   worst observed is 0.220 — and the fix works for exactly the reason claimed.
 
-  🟠 **Residual, and it is now the ONLY blocker: PX4 will not sequence past the
-  inserted vertex.** The run stalled at 51/78 targeting it, missing the vertical
-  acceptance window by **7 cm** (best |error| inside `NAV_ACC_RAD` was 0.87 m vs
-  `NAV_MC_ALT_RAD` = 0.8 m). **No placement strategy can fix this**: PX4 spreads a
-  leg's descent across the leg, so the vehicle is descending at *every* interior
-  point — there is no settled position to insert at, and the settle-margin
-  scoring cannot help (it is retained because it does no harm and picks sensible
-  positions). The lever is the autopilot's acceptance tolerance:
-  `droneflight/configs/px4/terrain_following.params` sets `NAV_MC_ALT_RAD = 2.0`.
-  That is an *acceptance* tolerance, not a clearance change — the aircraft flies
-  no lower, and every original waypoint tracked to ≤0.37 m so their behaviour is
-  unchanged. Re-fly with it loaded (RUNBOOK §4.8).
+  🟠 **Residual, NOT a planner defect but a real operational cost: an inserted
+  vertex is mid-descent, so PX4's vertical acceptance window decides whether the
+  mission sequences past it — and it is a RATE, not a switch.** Seven flights,
+  outcome ordering perfectly by the vertical error at that vertex (every
+  completion ≤0.841 m, every stall more):
+
+  | ulog | `NAV_MC_ALT_RAD` | \|alt err\| at the vertex | outcome |
+  |---|---|---|---|
+  | `00_49_06` | 0.8 | 1.580 m (wp11, v1's spurious insert) | stall 11/79 |
+  | `01_36_02` | 0.8 | 0.873 m (wp51) | stall 51/78 |
+  | `03_28_04` | 2.0 | 0.669 m | COMPLETE |
+  | `02_34_36` | 2.0 | 0.716 m | COMPLETE |
+  | `03_11_41` | 2.0 | 0.721 m | COMPLETE |
+  | `02_05_36` | 2.0 | 0.841 m | COMPLETE |
+  | `02_52_58` | 2.0 | **1.190 m** | **stall 51/78** |
+
+  **Stall rate 2/2 at 0.8 → 1/5 at 2.0.** The error varies run to run, so the
+  window must cover the tail, not the median:
+  `droneflight/configs/px4/terrain_following.params` is now **4.0** (3.4× the
+  worst error seen, still 3× under the 11.9 m measured clearance). It is an
+  *acceptance tolerance*, not a clearance change — the aircraft flies no lower,
+  and every original waypoint tracks to ≤0.37 m so they are unaffected.
+
+  💡 **If that is judged too loose, the alternative is measured:** drop the
+  inserted vertex and instead raise the failing leg's **end altitude by 14 m**,
+  which clears the same leg to 5.4 m with no new waypoint and no sequencing risk.
+  It costs concealment — **30 m → 44 m AGL** over that stretch — so it is a
+  survivability trade, not a free fix, and it is the user's call.
+
+  ⚠️ **Two ULog audit traps cost a confidently wrong conclusion here
+  ("it's nondeterministic, the param is irrelevant") — do not repeat them.**
+  * **A param set at the `pxh>` prompt after boot appears in the ULog's
+    `changed_parameters`, not `initial_parameters`.** Diffing only the boot
+    snapshot made two differently-configured flights look identical.
+  * **Score altitude error against `vehicle_local_position_groundtruth`.**
+    `vehicle_local_position.z` is relative to the EKF local origin, not the
+    mission's home datum, and `ref_alt` is NaN in these logs — comparing it to a
+    plan altitude yields ~0 m error and explains nothing. Truth is only a proxy
+    for what PX4 actually tests, but it predicts all three outcomes correctly.
+
+  The deeper argument still stands: every inserted vertex buys a sequencing
+  dependency, which is another reason to want the min-spacing emission filter
+  (cross-cutting) that would make most insertions unnecessary.
 - ✅ **Altitude-frame CFIT bug at the `.plan` boundary** (2026-07-21, found by the
   first real-terrain run). The writer emitted the planner's terrain-relative AGL
   directly as a **relative-to-home** altitude; over the demo AO's 73.5 m of relief
