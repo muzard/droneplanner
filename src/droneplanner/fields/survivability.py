@@ -42,12 +42,20 @@ def build_survivability(
     veg_cover: np.ndarray | None = None,
     weights: SurvivabilityWeights | None = None,
     tpi_radius_cells: int = 5,
+    openness: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Build the normalized 0..1 cable-survivability cost field."""
+    """Build the normalized 0..1 cable-survivability cost field.
+
+    ``openness`` lets the caller pass a precomputed **ground-level** viewshed so
+    the expensive field is not built twice. It must stay ground-level: unlike the
+    drone (SHORTFALLS item 1, now scored at flight altitude) the cable really
+    does lie on the surface, so target height 0 is the right question for it.
+    """
     w = weights or SurvivabilityWeights()
 
     # Openness to the threat: what the threat observers can see of the ground.
-    openness = cumulative_exposure(dsm, grid, threat_observers)
+    if openness is None:
+        openness = cumulative_exposure(dsm, grid, threat_observers)
 
     # Ridgelines/crests are both exposed and un-maskable for a cable.
     pos_tpi = ridge_penalty(dtm, tpi_radius_cells)

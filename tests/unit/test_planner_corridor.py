@@ -5,10 +5,12 @@ from __future__ import annotations
 from itertools import pairwise
 
 import numpy as np
+import pytest
 
 from droneplanner.demo import build_demo, demo_flyability
+from droneplanner.fields.altitude import canopy_height
 from droneplanner.model.plan import FlightBand
-from droneplanner.planner.corridor import plan_corridor, plan_over_terrain
+from droneplanner.planner.corridor import _track_weighted_mean, plan_corridor, plan_over_terrain
 from droneplanner.raster_lines import bresenham
 
 
@@ -33,14 +35,99 @@ def test_corridor_reduces_exposure_vs_straight_line() -> None:
 def test_corridor_objective_scores_present() -> None:
     mission, dtm, dsm, grid = build_demo(size=80)
     plan, surface = plan_over_terrain(mission, dtm, dsm, grid)
-    for key in ("path_cost", "length_m", "mean_exposure", "max_exposure", "exposed_fraction"):
+    for key in (
+        "path_cost",
+        "length_m",
+        "mean_exposure",
+        "max_exposure",
+        "exposed_fraction",
+        "mean_exposure_flown",
+        "max_exposure_flown",
+        "mean_exposure_cable",
+    ):
         assert key in plan.objective_scores
 
 
-def test_corridor_flight_band_open() -> None:
+def test_drone_and_cable_exposure_are_scored_separately() -> None:
+    """SHORTFALLS item 1, end to end: the aircraft is the exposed object, not the cable.
+
+    Under canopy the two genuinely differ — the cable lies on ground the observers
+    can see over, the drone is beneath the crowns. Before the fix both numbers
+    were the ground's.
+    """
+    mission, dtm, dsm, grid = build_demo(size=90)
+    plan, surface = plan_over_terrain(mission, dtm, dsm, grid)
+    scores = plan.objective_scores
+    assert scores["mean_exposure"] != scores["mean_exposure_cable"]
+    assert not np.array_equal(surface.components["exposure"], surface.components["exposure_ground"])
+
+
+def test_flown_trajectory_exposure_tracks_the_raster_metric() -> None:
+    """The re-score at flown altitudes must corroborate the raster, not replace it.
+
+    They are computed differently on purpose (raster: corridor cells at the band
+    altitude; flown: the filleted 3D trajectory under PX4's front-loaded descent).
+    A large gap would mean the field is scored at an altitude the route does not
+    fly — the thing this item exists to prevent.
+    """
+    mission, dtm, dsm, grid = build_demo(size=90)
+    plan, _surface = plan_over_terrain(mission, dtm, dsm, grid)
+    flown = plan.objective_scores["mean_exposure_flown"]
+    raster = plan.objective_scores["mean_exposure"]
+    assert 0.0 <= flown <= 1.0
+    assert abs(flown - raster) < 0.15
+
+
+def test_flown_exposure_is_weighted_by_track_length_not_by_sample_count() -> None:
+    """Corners must not carry the metric.
+
+    The sampler puts a fixed number of samples on every leg, and a filleted route
+    is mostly short arc legs, so an unweighted mean would report the corners.
+    """
+    values = np.array([1.0, 1.0, 0.0], dtype=np.float32)
+    samples = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (999.0, 0.0, 0.0)]  # two close, one far
+    weighted = _track_weighted_mean(samples, values)
+    assert weighted < 0.51, "the long final leg must dominate, not the tight pair"
+    assert weighted < float(np.mean(values))
+    # Degenerate inputs stay finite.
+    assert _track_weighted_mean([], np.array([])) == 0.0
+    assert _track_weighted_mean([(0.0, 0.0, 0.0)], np.array([0.25])) == 0.25
+    assert _track_weighted_mean([(0.0, 0.0, 0.0)] * 2, np.array([0.2, 0.4])) == pytest.approx(0.3)
+
+
+def test_corridor_flies_under_the_canopy_where_there_is_canopy() -> None:
+    """The route hides *inside* the stands, not above them (SHORTFALLS item 1c).
+
+    Without a lidar model the ceiling comes from the canopy height (DSM - DTM):
+    tall stands are entered, clearings are crossed at the open target altitude.
+    """
     mission, dtm, dsm, grid = build_demo(size=80)
     plan = plan_corridor(mission, plan_over_terrain(mission, dtm, dsm, grid)[1])
-    assert all(v.flight_band is FlightBand.OPEN for v in plan.vertices)
+    bands = {v.flight_band for v in plan.vertices}
+    assert FlightBand.BELOW_CANOPY in bands
+    assert bands <= {FlightBand.BELOW_CANOPY, FlightBand.CANOPY_TOP, FlightBand.OPEN}
+
+    # Every vertex is either under the crowns or clear above them — never inside.
+    chm = canopy_height(dtm, dsm)
+    for v in plan.vertices:
+        canopy = float(chm[grid.world_to_pixel(v.coordinate)])
+        if canopy < mission.altitude.min_canopy_m:
+            continue
+        under = v.altitude_agl_m <= canopy - mission.altitude.canopy_clearance_m
+        over = v.altitude_agl_m >= canopy + mission.altitude.canopy_clearance_m
+        assert under or over, (
+            f"vertex sits in the crowns: {v.altitude_agl_m:.1f} m in {canopy:.1f} m"
+        )
+
+
+def test_altitude_is_low_not_a_fixed_cruise_height() -> None:
+    """Regression on the posture itself: a 30 m constant AGL is what made the
+    concealment fake, and it is what the planner emitted before 2026-07-27."""
+    mission, dtm, dsm, grid = build_demo(size=80)
+    plan, _surface = plan_over_terrain(mission, dtm, dsm, grid)
+    alts = [v.altitude_agl_m for v in plan.vertices]
+    assert max(alts) < 30.0
+    assert len(set(round(a, 1) for a in alts)) > 1  # it tracks the canopy, not a constant
 
 
 def test_corridor_is_deterministic() -> None:

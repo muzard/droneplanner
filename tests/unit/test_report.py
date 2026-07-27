@@ -112,6 +112,32 @@ def test_exposed_cable_is_review() -> None:
     report = _analyzed(m, _plan_with((seg,)))
     assert report.recommendation is Recommendation.REVIEW
     assert report.exposed_length_m == 50.0
+    # The cable is exposed; nothing was said about the aircraft.
+    assert {f.code for f in report.findings} == {"exposed_cable"}
+    assert report.drone_exposed_length_m == 0.0
+
+
+def test_exposed_drone_is_reported_separately_from_the_cable() -> None:
+    """A concealed cable laid by a skylined aircraft is not a concealed mission.
+
+    Before the flight-altitude viewshed (SHORTFALLS item 1) this plan reported no
+    exposure at all: only the ground was ever scored.
+    """
+    m = make_mission()
+    seg = RouteSegment(
+        index=0,
+        start=m.start,
+        end=m.end,
+        length_m=50.0,
+        flyability=FlyabilityClass.FLYABLE,
+        exposed=False,
+        drone_exposed=True,
+    )
+    report = _analyzed(m, _plan_with((seg,)))
+    assert report.recommendation is Recommendation.REVIEW
+    assert report.exposed_length_m == 0.0
+    assert report.drone_exposed_length_m == 50.0
+    assert {f.code for f in report.findings} == {"exposed_drone"}
 
 
 def test_manipulation_crossing_flagged_and_review() -> None:

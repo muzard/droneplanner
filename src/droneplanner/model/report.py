@@ -43,7 +43,10 @@ class SegmentReport(BaseModel):
     index: int = Field(ge=0)
     length_m: float = Field(ge=0)
     flyability: FlyabilityClass
-    exposed: bool
+    exposed: bool = Field(description="The laid cable is visible to the threat observers.")
+    drone_exposed: bool = Field(
+        default=False, description="The aircraft is visible while flying this segment."
+    )
 
 
 class CrossingReport(BaseModel):
@@ -70,7 +73,18 @@ class RiskReport(BaseModel):
     total_length_m: float = Field(ge=0)
     fiber_used_m: float = Field(ge=0)
     fiber_available_m: float = Field(ge=0)
-    exposed_length_m: float = Field(ge=0)
+    exposed_length_m: float = Field(ge=0, description="Cable length visible to threat observers.")
+    drone_exposed_length_m: float = Field(
+        default=0.0, ge=0, description="Route length flown within sight of threat observers."
+    )
+    below_canopy_length_m: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Route length flown beneath the canopy. Concealed, but its obstacle "
+            "clearance rests on onboard perception, not on this plan."
+        ),
+    )
 
     non_navigable_count: int = Field(ge=0, default=0)
     marginal_count: int = Field(ge=0, default=0)

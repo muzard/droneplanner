@@ -17,6 +17,7 @@ from droneplanner.planner.terrain_profile import (
     _settle_margin_m,
     assess_clearance,
     densify_unsafe_descents,
+    sample_flown_profile,
 )
 
 # The airframe in configs/mission.example.yaml: 2 m/s descent at 6 m/s cruise.
@@ -59,6 +60,36 @@ class TestFlownProfile:
     def test_rejects_nonpositive_cruise_speed(self) -> None:
         with pytest.raises(ValueError, match="cruise_speed_ms"):
             FlownProfile.from_rates(descent_rate_ms=2.0, cruise_speed_ms=0.0)
+
+
+class TestSampleFlownProfile:
+    """The sampler both the clearance check and the concealment metric consume."""
+
+    def test_samples_span_the_route_without_duplicating_shared_vertices(self) -> None:
+        pts = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)]
+        amsl = [50.0, 50.0, 50.0]
+        samples = sample_flown_profile(pts, amsl, DEMO_PROFILE, samples_per_leg=4)
+        assert len(samples) == 4 * 2 + 1  # not 2 * (4 + 1): shared vertices appear once
+        assert samples[0] == (0.0, 0.0, 50.0)
+        assert samples[-1] == (100.0, 100.0, 50.0)
+
+    def test_altitudes_are_the_front_loaded_ones_not_interpolated(self) -> None:
+        """Mid-leg on a descent the aircraft is already down — that is the point."""
+        pts = [(0.0, 0.0), (900.0, 0.0)]
+        amsl = [130.0, 70.0]
+        mid = sample_flown_profile(pts, amsl, DEMO_PROFILE, samples_per_leg=2)[1]
+        assert mid[0] == pytest.approx(450.0)
+        assert mid[2] == pytest.approx(70.0)  # 0.333 gradient: down after 180 m
+        assert mid[2] < 100.0  # linear interpolation would say 100.0
+
+    def test_degenerate_routes_are_returned_as_is(self) -> None:
+        assert sample_flown_profile([(1.0, 2.0)], [7.0], DEMO_PROFILE) == [(1.0, 2.0, 7.0)]
+        with pytest.raises(ValueError, match="same length"):
+            sample_flown_profile([(0.0, 0.0), (1.0, 1.0)], [0.0], DEMO_PROFILE)
+        with pytest.raises(ValueError, match="samples_per_leg"):
+            sample_flown_profile(
+                [(0.0, 0.0), (1.0, 1.0)], [0.0, 1.0], DEMO_PROFILE, samples_per_leg=1
+            )
 
 
 class TestAssessClearance:

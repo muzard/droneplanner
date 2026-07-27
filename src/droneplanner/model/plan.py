@@ -83,7 +83,18 @@ class RouteSegment(BaseModel):
     length_m: float = Field(ge=0)
     flyability: FlyabilityClass = FlyabilityClass.UNKNOWN
     flight_band: FlightBand = FlightBand.UNKNOWN
-    exposed: bool = Field(default=False, description="Visually exposed per the viewshed field.")
+    exposed: bool = Field(
+        default=False,
+        description="The laid CABLE is visually exposed (viewshed of the ground surface).",
+    )
+    drone_exposed: bool = Field(
+        default=False,
+        description=(
+            "The DRONE is visually exposed while flying this segment (viewshed evaluated at "
+            "the planned flight altitude, not at ground level). Distinct from ``exposed``: a "
+            "cable hidden in a draw can still be laid by an aircraft skylined above it."
+        ),
+    )
 
 
 class Crossing(BaseModel):

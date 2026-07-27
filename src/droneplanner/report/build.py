@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from droneplanner.model.mission import Mission
-from droneplanner.model.plan import CrossingMethod, FlyabilityClass, Plan
+from droneplanner.model.plan import CrossingMethod, FlightBand, FlyabilityClass, Plan
 from droneplanner.model.report import (
     CrossingReport,
     Finding,
@@ -91,7 +91,11 @@ def build_report(
             )
         )
 
-    # --- Cable exposure ---
+    # --- Exposure: the cable on the ground, and the aircraft laying it ---
+    # These are separate findings because they are separate objects at separate
+    # heights (SHORTFALLS item 1). A route can lay cable in perfect defilade
+    # while flying the aircraft skylined the whole way — before 2026-07-27 only
+    # the ground was ever scored, so that plan looked concealed.
     exposed_segments = [s for s in plan.segments if s.exposed]
     exposed_length = sum(s.length_m for s in exposed_segments)
     if exposed_segments:
@@ -100,6 +104,52 @@ def build_report(
                 severity=Severity.WARNING,
                 code="exposed_cable",
                 message=f"{exposed_length:.0f} m of cable is visually/fire exposed",
+            )
+        )
+
+    # --- Below-canopy flight: concealment bought with an unverified assumption ---
+    # The planner sees a canopy *top* (DSM - DTM). It cannot see trunks, branches
+    # or understory, so a leg flown under the canopy is safe only if the aircraft
+    # clears obstacles itself. That capability lives in the flight stack, not here,
+    # and saying so is the difference between a concealed plan and a wishful one.
+    below_canopy = [
+        s
+        for s in plan.segments
+        if s.flight_band in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+    ]
+    below_canopy_length = sum(s.length_m for s in below_canopy)
+    if below_canopy:
+        lidar_verified = all(s.flight_band is FlightBand.UPPER_TRUNK for s in below_canopy)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="below_canopy_flight",
+                message=(
+                    f"{below_canopy_length:.0f} m of the route is flown below the canopy"
+                    + (
+                        " inside a lidar-measured free window; obstacle clearance at flight "
+                        "time still depends on onboard perception"
+                        if lidar_verified
+                        else " on canopy-top (DSM) evidence alone — trunks, branches and "
+                        "understory are unmodelled. The route is a corridor to follow "
+                        "approximately; clearing obstacles is the flight stack's job"
+                    )
+                ),
+            )
+        )
+
+    drone_exposed_segments = [s for s in plan.segments if s.drone_exposed]
+    drone_exposed_length = sum(s.length_m for s in drone_exposed_segments)
+    if drone_exposed_segments:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="exposed_drone",
+                message=(
+                    f"{drone_exposed_length:.0f} m of the route is flown in view of threat "
+                    "observers at the planned flight altitude — the aircraft is detectable "
+                    "there even where the cable beneath it is concealed"
+                ),
             )
         )
 
@@ -229,6 +279,8 @@ def build_report(
         fiber_used_m=plan.fiber_used_m,
         fiber_available_m=mission.spool.length_m,
         exposed_length_m=exposed_length,
+        drone_exposed_length_m=drone_exposed_length,
+        below_canopy_length_m=below_canopy_length,
         non_navigable_count=len(non_navigable),
         marginal_count=len(marginal),
         manipulation_crossings=len(manipulation),
@@ -239,6 +291,7 @@ def build_report(
                 length_m=s.length_m,
                 flyability=s.flyability,
                 exposed=s.exposed,
+                drone_exposed=s.drone_exposed,
             )
             for s in plan.segments
         ),

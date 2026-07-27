@@ -74,6 +74,44 @@ class ThreatModel(BaseModel):
     sectors: tuple[ThreatSector, ...] = ()
 
 
+class AltitudePolicy(BaseModel):
+    """How low to fly, and what stops it going lower (Preflight-Design §4, §"primary posture").
+
+    The drone hides by being **under the canopy**, not by being high over it: at a
+    fixed 30 m AGL it clears a 22 m stand by 8 m and is a silhouette against sky.
+    So the planner targets ``Mission.cruise_agl_m`` and this policy supplies the
+    two things that stop it: a floor (understory, rotor wash, terrain error) and a
+    ceiling (stay under the crowns) derived from the canopy height model.
+
+    ⚠️ **Flying under the canopy is a bet on onboard perception.** This offline
+    planner sees a canopy *top* (DSM - DTM); it cannot see trunks, branches or
+    understory, and at DSM resolution it never will. The route is a corridor to
+    follow approximately — local avoidance is the flight stack's job (camera /
+    lidar), and where that is unavailable a below-canopy leg is not verified.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    min_agl_m: float = Field(
+        default=5.0,
+        gt=0,
+        description="Hard floor above terrain; also the terrain-clearance margin.",
+    )
+    canopy_clearance_m: float = Field(
+        default=3.0, gt=0, description="Vertical gap kept below the canopy top."
+    )
+    min_canopy_m: float = Field(
+        default=12.0,
+        gt=0,
+        description=(
+            "Only stands at least this tall are entered. A crude proxy for canopy base "
+            "height, which a DSM cannot measure: mature open-structured stands have "
+            "usable trunk space, young regen and thickets of the same footprint do not. "
+            "Lidar replaces this guess with a measured free window."
+        ),
+    )
+
+
 class Weights(BaseModel):
     """Operator-tunable objective weights (Preflight-Design §3)."""
 
@@ -119,13 +157,33 @@ class Mission(BaseModel):
     spool: SpoolSpec
     threat: ThreatModel = ThreatModel()
     weights: Weights = Weights()
+    altitude: AltitudePolicy = AltitudePolicy()
     layers: LayerPaths = LayerPaths()
     k_routes: int = Field(default=1, ge=1, description="Survivability redundancy (k routes).")
     seed: int = Field(default=0, ge=0, description="Master seed for reproducible runs.")
 
     # Planner defaults (tunable per mission; kept here so the contract is complete).
-    waypoint_spacing_m: float = Field(default=100.0, gt=0)
-    cruise_agl_m: float = Field(default=30.0, gt=0, description="Default cruise altitude AGL.")
+    waypoint_spacing_m: float = Field(
+        default=25.0,
+        gt=0,
+        description=(
+            "Max spacing between emitted waypoints. This is what makes low flight "
+            "possible: PX4 drives toward the next waypoint's altitude at its own "
+            "vertical rate, so between distant waypoints the commanded profile cannot "
+            "track the ground. Measured on the demo AO, a 10 m AGL route clears terrain "
+            "at 25 m spacing and flies 12 m underground at the old 100 m."
+        ),
+    )
+    cruise_agl_m: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Target height above terrain. The planner flies this low wherever the "
+            "AltitudePolicy floor and the canopy ceiling allow — it is a target to be "
+            "clamped, not a cruise altitude to be held. Was 30 m until 2026-07-27, "
+            "which put the aircraft above the canopy it was supposed to be hiding in."
+        ),
+    )
     fiber_slack_factor: float = Field(
         default=1.0, ge=1.0, description="Fiber-used / track-length ratio (>=1)."
     )

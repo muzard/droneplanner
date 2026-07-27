@@ -30,7 +30,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         # add --flat for the diagnostic flat-DEM world
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 142 tests, ~96% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 198 tests, ~95% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -44,6 +44,12 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   at home. Frame choice (relative-to-home, `MAV_FRAME 3`) is deliberate and
   documented in that module — revisit there if AMSL or terrain-frame is ever
   needed. Guarded by `test_qgc_altitudes_are_relative_to_home_not_agl`.
+- **The demo AO has a canopy (2026-07-27).** It used to set `dsm = dtm.copy()` —
+  no trees in the DSM at all — so the cost surface rewarded forest the viewshed
+  could not see and nothing about concealment was falsifiable. `demo_canopy()`
+  builds 12–22 m stands, two clearings on the natural corridor, and ridge scrub.
+  This changed `demo_ao/dsm.tif` and therefore the demo route; the Gazebo world
+  is unaffected (`gz-world` reads the DTM, and home is the mission start).
 - **`demo-ao` exists so `plan` has real terrain.** `configs/mission.example.yaml`
   has no layers → straight-line stub (zero turns, flat altitude), which makes SITL
   tests vacuous. `droneplanner demo-ao` writes the procedural AO as real
@@ -87,6 +93,50 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   never sequenced past it, and flew into the ground. A big drop is not unsafe by
   itself: PX4 flew that leg's full 27.8 m drop *unsplit* to 0.22 m. Every inserted
   vertex is a waypoint PX4 must accept vertically — insert as few as possible.
+- **The drone flies UNDER the canopy, as low as the constraints allow
+  (2026-07-27 — don't regress).** It used to hold a fixed 30 m above *bare
+  terrain*, which in the demo's 12–22 m stands is 8–18 m over the crowns: the
+  cost surface rewarded forest as cover while the aircraft was silhouetted above
+  it. `fields/altitude.py` derives the band from the canopy height model
+  (`DSM - DTM`, no new data needed): target `cruise_agl_m`, floored by
+  `AltitudePolicy.min_agl_m`, ceilinged at `canopy_top − canopy_clearance_m`.
+  **Under the crowns with clearance, or over them with clearance — never inside**
+  (the over-canopy case must raise the *floor*, or the altitude smoother will
+  park the drone in the crowns). Measured on the demo AO: drone exposure
+  **0.55 → 0.15**, exposed route 1998 m → 611 m, 2654 m of 5299 m flown below
+  canopy — and the drone ends up *less* exposed than its own cable (0.15 vs
+  0.27), which is the whole point.
+  **`waypoint_spacing_m` is what makes low flight possible** and is now honoured
+  by the corridor planner (it was read only by the M0 stub). PX4 drives toward
+  the next waypoint's altitude at its own rate, so between distant waypoints the
+  commanded profile cannot track the ground: at 100 m spacing a 10 m AGL route
+  flies **12 m underground**, at 25 m it clears by 6.7 m. The residual loss is
+  terrain bulging *between* waypoints, so the useful floor on spacing is the
+  DTM's cell size — **the achievable altitude is set by DEM resolution, not by
+  the autopilot** (capping the descent rate 2.0 → 0.5 m/s buys 0.37 m).
+  🔴 **A below-canopy plan is not verified and must not pretend to be.** The
+  planner sees a canopy *top* and nothing beneath it. Per the user (2026-07-27)
+  obstacle clearance is the flight stack's job (camera/lidar) and the route is a
+  corridor to follow approximately — so the report raises `below_canopy_flight`
+  with the length on every such route. That capability does not exist yet on this
+  hardware (Track B needs x86+RTX).
+- **The viewshed scores the DRONE at flight altitude, not the ground under it
+  (2026-07-27 — don't regress).** `fields/viewshed.py` takes a `target_elev_m`
+  raster (absolute elevation of the object being looked at) while occlusion still
+  marches over the DSM, and `fields/composite.py` builds **two** fields:
+  `exposure` = the drone at `dtm + planned flight AGL`, `exposure_ground` = the
+  surface the **cable** is laid on (which feeds `build_survivability`). They are
+  different objects at different heights — do not re-merge them. Scoring the
+  drone at ground level understated its exposure on the demo AO by **3.2×**
+  (0.219 reported vs 0.7455 actual) and drove the route with the wrong field.
+  The flight altitude comes from `forest.navigability.planned_flight_agl`, the
+  **vectorized twin of `altitude_band_at`** that the corridor planner flies —
+  keep them one definition (`test_planned_flight_agl_matches_the_per_cell_band_everywhere`),
+  or the field silently scores an altitude the drone never occupies.
+  `Plan.objective_scores` now carries `mean_exposure` (drone),
+  `mean_exposure_cable`, and `mean_exposure_flown` (line-of-sight along the
+  *flown* 3D trajectory, sharing `sample_flown_profile` with the clearance
+  guarantee); the report separates `exposed_cable` from `exposed_drone`.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
@@ -101,17 +151,27 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   roads. **Not yet:** land cover (snag/veg terms are 0), threat *sectors*.
 
 ## What ingests what (cost surface)
-`fields/composite.py` blends: base move cost + exposure (viewshed over DSM) +
-survivability + snag + road penalty + forest term (reward/penalty) − cover
-(drainage defilade). Non-navigable forest → Theta\* obstacle. `planner/corridor.py`
-runs the search then the kinematic pass.
+`fields/composite.py` blends: base move cost + drone exposure (viewshed over the
+DSM, evaluated at flight altitude) + survivability (which carries the *ground*
+viewshed, for the cable) + snag + road penalty + forest term (reward/penalty) −
+cover (drainage defilade). Non-navigable forest → Theta\* obstacle.
+`planner/corridor.py` runs the search then the kinematic pass.
 
 ## Top gaps (SHORTFALLS.md, before sims)
-1. Viewshed evaluated at ground level, not flight altitude (concealment metric
-   systematically off). *User note: the fuller lidar-based-cover fix is a later,
-   perception-side thing, not this planner.*
-2. Forest voxelized at corridor grid res, not 0.25–0.5 m (flyability optimistic).
-3. Performance won't scale to a real 5 km AO (pure-Python viewshed/Theta\*).
+1. 🔴 **The new low route is unflown.** 6.6 m min AGL (was 24) and 282 waypoints
+   (was 145). PX4's vertical acceptance stalled two missions in the CFIT campaign
+   at 87 waypoints and 30 m; nothing about this configuration is verified.
+2. 🔴 **The M2 navigable band is not AGL** — it is height above the point
+   cloud's global min z, added to the local DTM as if it were AGL (SHORTFALLS
+   1b). Identical forest over 0/30/70 m ground reports `nav_floor` 26/56/3 m.
+   Masked today because no real lidar has been run; it bites the first one, and
+   a voxel window *overrides* the canopy-derived altitude band, so it bounds the
+   below-canopy posture too. (Without a point cloud, the canopy path is fine —
+   `DSM - DTM` is terrain-relative by construction.)
+3. 🔴 **Below-canopy flight assumes onboard obstacle avoidance that does not
+   exist yet** on this hardware (Track B, x86+RTX). The report says so per route.
+4. Forest voxelized at corridor grid res, not 0.25–0.5 m (flyability optimistic).
+5. Performance won't scale to a real 5 km AO (pure-Python viewshed/Theta\*).
 Plus land cover + threat sectors unwired; OMPL 3D refinement deferred; no real-AO
 validation yet.
 

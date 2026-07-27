@@ -11,12 +11,15 @@ corridor is future work (see SHORTFALLS.md).
 
 from __future__ import annotations
 
+import math
 from itertools import pairwise
 
 import numpy as np
 
 from droneplanner.crossings.detect import detect_crossings
+from droneplanner.fields.altitude import altitude_band_at, canopy_height
 from droneplanner.fields.composite import CostSurface, build_cost_surface
+from droneplanner.fields.viewshed import point_exposure
 from droneplanner.forest.navigability import CLASS_TO_ENUM, FlyabilityField
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
@@ -39,6 +42,7 @@ from droneplanner.planner.terrain_profile import (
     FlownProfile,
     assess_clearance,
     densify_unsafe_descents,
+    sample_flown_profile,
 )
 from droneplanner.planner.theta_star import path_cost, plan_path
 from droneplanner.raster_lines import bresenham
@@ -46,9 +50,19 @@ from droneplanner.raster_lines import bresenham
 # A path cell counts as "exposed" when this fraction of observers can see it.
 EXPOSED_THRESHOLD = 0.5
 
-# Terrain clearance floor (m AGL) the flown descent profile must keep. Below this
-# a leg is a CFIT finding, not a warning — see planner/terrain_profile.py.
+# Terrain clearance floor (m AGL) the flown descent profile must keep, used when a
+# mission carries no AltitudePolicy. Below this a leg is a CFIT finding, not a
+# warning — see planner/terrain_profile.py. The policy's ``min_agl_m`` is the same
+# quantity seen from the other side (how low the drone may be *asked* to fly), so
+# the two are one number: a route may not be planned lower than it is allowed to
+# be flown.
 MIN_TERRAIN_CLEARANCE_M = 5.0
+
+# Samples per leg for re-scoring exposure along the flown 3D trajectory. Coarser
+# than the clearance check's 32 on purpose: line-of-sight per sample costs a ray
+# march per observer, and unlike a CFIT spike (a metres-wide terrain feature) an
+# exposure average does not swing on sub-100 m detail.
+EXPOSURE_SAMPLES_PER_LEG = 4
 
 
 def _segment_cells(a: tuple[int, int], b: tuple[int, int]) -> list[tuple[int, int]]:
@@ -61,6 +75,55 @@ def _mean_over(field: np.ndarray, cells: list[tuple[int, int]]) -> float:
     return float(np.mean([field[r, c] for r, c in cells]))
 
 
+def _subdivide(pts: list[tuple[float, float]], spacing_m: float) -> list[tuple[float, float]]:
+    """Split legs longer than ``spacing_m`` so the commanded altitude can track terrain.
+
+    **Subdivide only — never merge.** PX4 drives toward the next waypoint's
+    altitude at its own vertical rate, so between distant waypoints the commanded
+    profile is a straight line the ground is free to rise through: on the demo AO
+    a 10 m AGL route flies **12 m underground** at 100 m spacing and clears by
+    6.7 m at 25 m. Existing vertices are all kept, because they carry the fillet
+    arcs that make the turn radius flyable — resampling *through* an arc would
+    cut the corner it exists to round.
+
+    The residual clearance loss after subdividing is terrain bulging between
+    samples, so the useful floor on ``spacing_m`` is the DTM's cell size: finer
+    than the data cannot buy accuracy it does not have.
+    """
+    if spacing_m <= 0.0 or len(pts) < 2:
+        return list(pts)
+    out: list[tuple[float, float]] = [pts[0]]
+    for a, b in pairwise(pts):
+        steps = max(1, math.ceil(math.hypot(b[0] - a[0], b[1] - a[1]) / spacing_m))
+        for k in range(1, steps + 1):
+            f = k / steps
+            out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+    return out
+
+
+def _track_weighted_mean(samples: list[tuple[float, float, float]], values: np.ndarray) -> float:
+    """Mean of per-sample values weighted by the track length each sample covers.
+
+    A plain mean would be wrong here: the sampler puts a fixed number of samples
+    on every leg, and after filleting a route is mostly *short* arc legs, so
+    corners would carry the metric. Weight each sample by half the distance to
+    each neighbour (trapezoidal) and it becomes an average over the route.
+    """
+    n = len(samples)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return float(values[0])
+    xy = np.asarray([(x, y) for x, y, _z in samples], dtype=float)
+    seg = np.hypot(*(xy[1:] - xy[:-1]).T)
+    weights = np.zeros(n, dtype=float)
+    weights[:-1] += seg / 2.0
+    weights[1:] += seg / 2.0
+    if weights.sum() <= 0.0:  # a zero-length route
+        return float(np.mean(values))
+    return float(np.dot(weights, values) / weights.sum())
+
+
 def _segment_flyability(
     flyability: FlyabilityField | None, cells: list[tuple[int, int]]
 ) -> FlyabilityClass:
@@ -71,24 +134,6 @@ def _segment_flyability(
     return CLASS_TO_ENUM[worst]
 
 
-def _altitude_band(
-    flyability: FlyabilityField | None, rc: tuple[int, int], cruise_agl_m: float
-) -> tuple[float, float, float, FlightBand]:
-    """Return (preferred, floor, ceil, band) altitude for a cell.
-
-    Without forest: a fixed cruise-AGL band. With forest: the navigable vertical
-    window (altitude is free to vary within it to find/keep the gap).
-    """
-    if flyability is None:
-        return cruise_agl_m, cruise_agl_m, cruise_agl_m, FlightBand.OPEN
-    floor = float(flyability.nav_floor_m[rc])
-    ceil = float(flyability.nav_ceil_m[rc])
-    pref = float(flyability.max_flyable_altitude_m[rc])
-    if ceil <= 0.0:
-        return cruise_agl_m, cruise_agl_m, cruise_agl_m, FlightBand.OPEN
-    return min(max(pref, floor), ceil), floor, ceil, FlightBand.UPPER_TRUNK
-
-
 def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) -> Plan:
     """Plan the concealment-aware corridor route over a cost surface."""
     grid = surface.grid
@@ -96,9 +141,13 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     goal_rc = grid.world_to_pixel(mission.end)
 
     cell_path = plan_path(surface.cost, start_rc, goal_rc, obstacle=surface.obstacle)
+    # Two objects, two fields (SHORTFALLS item 1): the drone is scored at its
+    # flight altitude, the cable on the ground it is laid on.
     exposure = surface.components["exposure"]
+    ground_exposure = surface.components["exposure_ground"]
     flyability = surface.flyability
     speed = mission.drone.cruise_speed_ms
+    clearance_floor = mission.altitude.min_agl_m
 
     # World coordinates: exact mission endpoints, cell centers for turning points.
     def world_of(i: int, rc: tuple[int, int]) -> Coordinate:
@@ -122,8 +171,23 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         [(c.x, c.y) for c in coords], limits, _blocked
     )
 
+    # Terrain-following spacing: the route is flown low, so the commanded altitude
+    # profile has to track the ground rather than span it. See ``_subdivide``.
+    spaced = _subdivide(filleted, mission.waypoint_spacing_m)
+
     def _ground_at(x: float, y: float) -> float:
         return float(surface.dtm[grid.world_to_pixel(Coordinate(x=x, y=y))])
+
+    chm = canopy_height(surface.dtm, surface.dsm)
+
+    def _band_at(p: Coordinate) -> tuple[float, float, float, FlightBand]:
+        return altitude_band_at(
+            grid.world_to_pixel(p),
+            chm=chm,
+            target_agl_m=mission.cruise_agl_m,
+            policy=mission.altitude,
+            flyability=flyability,
+        )
 
     def _solve_altitudes(
         pts: list[tuple[float, float]],
@@ -132,9 +196,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         cs = [Coordinate(x=x, y=y) for x, y in pts]
         prefs, floors, ceils, bands = [], [], [], []
         for p in cs:
-            pref, floor, ceil, band = _altitude_band(
-                flyability, grid.world_to_pixel(p), mission.cruise_agl_m
-            )
+            pref, floor, ceil, band = _band_at(p)
             prefs.append(pref)
             floors.append(floor)
             ceils.append(ceil)
@@ -144,7 +206,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         amsl = [a + _ground_at(p.x, p.y) for p, a in zip(cs, agl, strict=True)]
         return cs, agl, amsl, bands, climb_v, up, down
 
-    _, _, amsl0, _, _, _, _ = _solve_altitudes(filleted)
+    _, _, amsl0, _, _, _, _ = _solve_altitudes(spaced)
 
     # --- Terrain clearance under the profile PX4 actually flies (SHORTFALLS 0) ---
     # PX4 front-loads a leg's descent instead of interpolating it along the ground
@@ -158,19 +220,16 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
 
     def _predicted_amsl(x: float, y: float) -> float:
         """AMSL an inserted vertex would get from the band + smoothing pass."""
-        p = Coordinate(x=x, y=y)
-        pref, floor, ceil, _band = _altitude_band(
-            flyability, grid.world_to_pixel(p), mission.cruise_agl_m
-        )
+        pref, floor, ceil, _band = _band_at(Coordinate(x=x, y=y))
         return _ground_at(x, y) + min(max(pref, floor), ceil)
 
     densified, inserted = densify_unsafe_descents(
-        filleted,
+        spaced,
         amsl0,
         predicted_amsl=_predicted_amsl,
         ground_at=_ground_at,
         profile=profile,
-        margin_agl_m=MIN_TERRAIN_CLEARANCE_M,
+        margin_agl_m=clearance_floor,
     )
 
     fpts, alts, amsl, bands, climb_violations, max_climb, max_descent = _solve_altitudes(densified)
@@ -180,7 +239,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         amsl,
         _ground_at,
         profile,
-        margin_agl_m=MIN_TERRAIN_CLEARANCE_M,
+        margin_agl_m=clearance_floor,
     )
 
     # Carry the terrain elevation under each vertex: AGL alone is not enough to
@@ -217,13 +276,24 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     )
     trajectory_length = sum(seg_dists)
 
-    seg_band = FlightBand.UPPER_TRUNK if flyability is not None else FlightBand.OPEN
+    # Per-segment band, taken as the *least* concealed cell it crosses: a segment
+    # that dips out of the stand for one cell is not a below-canopy segment.
+    band_codes = surface.components["flight_band"]
+    code_to_band = {
+        0: FlightBand.OPEN,
+        1: FlightBand.CANOPY_TOP,
+        2: FlightBand.BELOW_CANOPY,
+        3: FlightBand.UPPER_TRUNK,
+    }
+
+    def _segment_band(cells: list[tuple[int, int]]) -> FlightBand:
+        return code_to_band[int(min(band_codes[r, c] for r, c in cells))]
+
     segments: list[RouteSegment] = []
     all_cells: list[tuple[int, int]] = []
     for i in range(len(cell_path) - 1):
         seg_cells = _segment_cells(cell_path[i], cell_path[i + 1])
         all_cells.extend(seg_cells if i == 0 else seg_cells[1:])
-        seg_exposed = _mean_over(exposure, seg_cells) > EXPOSED_THRESHOLD
         segments.append(
             RouteSegment(
                 index=i,
@@ -231,8 +301,9 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
                 end=coords[i + 1],
                 length_m=coords[i].distance_to(coords[i + 1]),
                 flyability=_segment_flyability(flyability, seg_cells),
-                flight_band=seg_band,
-                exposed=seg_exposed,
+                flight_band=_segment_band(seg_cells),
+                exposed=_mean_over(ground_exposure, seg_cells) > EXPOSED_THRESHOLD,
+                drone_exposed=_mean_over(exposure, seg_cells) > EXPOSED_THRESHOLD,
             )
         )
 
@@ -249,6 +320,24 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     exposed_fraction = (
         float(np.mean([e > EXPOSED_THRESHOLD for e in path_exposures])) if path_exposures else 0.0
     )
+    cable_exposures = [float(ground_exposure[r, c]) for r, c in all_cells]
+    mean_exposure_cable = float(np.mean(cable_exposures)) if cable_exposures else 0.0
+
+    # Re-score exposure along the trajectory the aircraft will actually fly. The
+    # raster above assumes every cell is overflown at its *band* altitude; the
+    # route departs from that twice over — the climb-limited smoother may not
+    # reach the band, and PX4 front-loads a leg's descent (terrain_profile.py),
+    # so on a descending leg it is higher than any interpolation says. This is
+    # the same "re-score the final answer against what is actually flown" check
+    # that terrain clearance uses, applied to concealment.
+    flown_samples = sample_flown_profile(
+        [(p.x, p.y) for p in fpts], amsl, profile, samples_per_leg=EXPOSURE_SAMPLES_PER_LEG
+    )
+    flown_exposure = point_exposure(
+        surface.dsm, grid, list(mission.threat.observers), flown_samples
+    )
+    mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
+    max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0
 
     return Plan(
         mission_name=mission.name,
@@ -263,9 +352,16 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         objective_scores={
             "path_cost": path_cost(surface.cost, cell_path),
             "length_m": total_length,
+            # Drone exposure at planned flight altitude, over the corridor cells.
             "mean_exposure": mean_exposure,
             "max_exposure": max_exposure,
             "exposed_fraction": exposed_fraction,
+            # The same question asked of the flown 3D trajectory, and of the
+            # cable on the ground beneath it. Divergence between these three is
+            # informative, not noise — see the comment above.
+            "mean_exposure_flown": mean_exposure_flown,
+            "max_exposure_flown": max_exposure_flown,
+            "mean_exposure_cable": mean_exposure_cable,
         },
         kinematics=kinematics,
     )

@@ -45,6 +45,60 @@ def test_cost_surface_positive_and_has_components() -> None:
     mission = make_mission(crs="EPSG:32633")
     surface = build_cost_surface(dem.data, dem.data, grid, mission)
     assert surface.cost.min() >= COST_FLOOR
-    for key in ("exposure", "survivability", "snag", "ridge", "drainage", "cost_normalized"):
+    for key in (
+        "exposure",
+        "exposure_ground",
+        "flight_agl",
+        "survivability",
+        "snag",
+        "ridge",
+        "drainage",
+        "cost_normalized",
+    ):
         assert key in surface.components
     assert surface.shape == (24, 24)
+
+
+def _mission_with_observer(grid: Grid, **overrides: object) -> object:
+    obs = grid.pixel_to_world(2, 2)
+    return make_mission(
+        crs="EPSG:32633",
+        threat={"observers": [{"x": obs.x, "y": obs.y}]},
+        **overrides,
+    )
+
+
+def test_exposure_is_scored_at_flight_altitude_not_on_the_ground() -> None:
+    """SHORTFALLS item 1: the drone and the ground under it are different objects.
+
+    Over a bare DSM, lifting the target to cruise altitude can only reveal more,
+    and here it must actually reveal more — otherwise the field is still
+    measuring the ground.
+    """
+    dem = make_dem("ridge", size=24)
+    grid = _grid_for(24)
+    mission = _mission_with_observer(grid)
+    surface = build_cost_surface(dem.data, dem.data, grid, mission)  # type: ignore[arg-type]
+
+    drone = surface.components["exposure"]
+    ground = surface.components["exposure_ground"]
+    assert np.all(drone >= ground)  # nothing hides by climbing over bare terrain
+    assert drone.mean() > ground.mean()  # and the ridge stops hiding the aircraft
+    # DSM == DTM here: no canopy to get under, so the target altitude stands.
+    assert np.all(surface.flight_agl_m == mission.cruise_agl_m)  # type: ignore[attr-defined]
+
+
+def test_cable_survivability_is_unaffected_by_the_drone_altitude() -> None:
+    """The cable lies on the ground, so its openness term must not move with cruise AGL."""
+    dem = make_dem("ridge", size=24)
+    grid = _grid_for(24)
+    low = build_cost_surface(
+        dem.data, dem.data, grid, _mission_with_observer(grid, cruise_agl_m=5.0)
+    )  # type: ignore[arg-type]
+    high = build_cost_surface(
+        dem.data, dem.data, grid, _mission_with_observer(grid, cruise_agl_m=200.0)
+    )  # type: ignore[arg-type]
+
+    assert np.array_equal(low.components["survivability"], high.components["survivability"])
+    assert np.array_equal(low.components["exposure_ground"], high.components["exposure_ground"])
+    assert high.components["exposure"].mean() > low.components["exposure"].mean()

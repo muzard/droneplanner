@@ -60,11 +60,38 @@ def demo_terrain(size: int = 160, cell_m: float = 25.0) -> tuple[np.ndarray, np.
     dtm -= _gauss(xx, yy, cx=0.78 * cols, cy=0.25 * rows, amp=25.0, sig=0.11 * size)
 
     dtm = dtm.astype(np.float32)
-    dsm = dtm.copy()  # no canopy in the demo; DSM == DTM
+    dsm = (dtm + demo_canopy(rows, cols, size)).astype(np.float32)
 
     transform = (cell_m, 0.0, _X0, 0.0, -cell_m, _Y0 + rows * cell_m)
     grid = Grid(transform=transform, rows=rows, cols=cols, crs=DEMO_CRS)
     return dtm, dsm, grid
+
+
+def demo_canopy(rows: int, cols: int, size: int) -> np.ndarray:
+    """Canopy height (m) for the demo AO — mature stands, clearings, and scrub.
+
+    The DSM used to be a copy of the DTM: no canopy at all. That made the whole
+    concealment story unfalsifiable — the cost surface rewarded "forest" that the
+    line-of-sight model could not see, and the drone's altitude had nothing to
+    hide under. The stands here are laid out so the concealed route and the short
+    one disagree: a mature belt runs across the AO between the observer hills,
+    broken by clearings the route has to cross or detour around.
+    """
+    yy, xx = np.mgrid[0:rows, 0:cols].astype(np.float64)
+
+    # A broad mature stand (22 m) over most of the AO, thinning to the north-east.
+    canopy = 22.0 - 6.0 * (xx / cols) - 4.0 * (yy / rows)
+
+    # Two clearings straddling the natural corridor: no cover, must be crossed low.
+    canopy -= _gauss(xx, yy, cx=0.35 * cols, cy=0.55 * rows, amp=26.0, sig=0.07 * size)
+    canopy -= _gauss(xx, yy, cx=0.70 * cols, cy=0.40 * rows, amp=26.0, sig=0.06 * size)
+
+    # Regenerating scrub (too short to fly under) along the ridge crest.
+    d_anti = (xx + yy - size) / np.sqrt(2.0)
+    canopy -= 14.0 * np.exp(-(d_anti**2) / (2.0 * (0.05 * size) ** 2))
+
+    chm: np.ndarray = np.clip(canopy, 0.0, None).astype(np.float32)
+    return chm
 
 
 def demo_mission(grid: Grid, weights: Weights | None = None) -> Mission:
@@ -91,7 +118,13 @@ def demo_mission(grid: Grid, weights: Weights | None = None) -> Mission:
         spool=SpoolSpec(length_m=8000.0, mass_kg=1.6),
         threat=ThreatModel(observers=observers),
         weights=weights or Weights(),
-        cruise_agl_m=30.0,
+        # Fly under the canopy, not over it. The stands are 12-22 m, so a 12 m
+        # target sits inside them wherever the ceiling allows — and above ~12 m the
+        # canopy ceiling binds instead of the target, so asking for 15 m changes
+        # nothing. 12 m is also the lowest that clears terrain at *every* demo grid
+        # size: this AO's DTM has 25 m cells, and the ground bulges ~5 m between
+        # samples, which is what sets the floor (not the autopilot).
+        cruise_agl_m=12.0,
         seed=1,
     )
 
@@ -154,6 +187,7 @@ def _mission_doc(mission: Mission, grid: Grid, dtm_path: Path, dsm_path: Path) -
         "seed": mission.seed,
         "waypoint_spacing_m": mission.waypoint_spacing_m,
         "cruise_agl_m": mission.cruise_agl_m,
+        "altitude": mission.altitude.model_dump(mode="json"),
     }
 
 

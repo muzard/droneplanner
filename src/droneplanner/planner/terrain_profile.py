@@ -48,7 +48,7 @@ because clearance is a question about terrain, not about the AGL bookkeeping.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 Point = tuple[float, float]
@@ -120,6 +120,66 @@ def _leg_length(a: Point, b: Point) -> float:
     return math.hypot(b[0] - a[0], b[1] - a[1])
 
 
+def _leg_samples(
+    a: Point,
+    b: Point,
+    amsl_a: float,
+    amsl_b: float,
+    profile: FlownProfile,
+    samples_per_leg: int,
+    *,
+    skip_first: bool = False,
+) -> Iterator[tuple[float, float, float]]:
+    """``(x, y, amsl)`` along one leg under the flown profile.
+
+    The single definition of *where the aircraft actually is*. Both questions
+    asked of a route — does it clear the terrain (:func:`assess_clearance`), and
+    can it be seen (the concealment metric) — are asked of these same samples, so
+    they describe one flight rather than two idealizations of it.
+    """
+    length = _leg_length(a, b)
+    for k in range(1 if skip_first else 0, samples_per_leg + 1):
+        frac = k / samples_per_leg
+        yield (
+            a[0] + (b[0] - a[0]) * frac,
+            a[1] + (b[1] - a[1]) * frac,
+            profile.altitude_amsl_at(
+                length * frac, length_m=length, start_amsl=amsl_a, end_amsl=amsl_b
+            ),
+        )
+
+
+def sample_flown_profile(
+    pts: list[Point],
+    amsl: list[float],
+    profile: FlownProfile,
+    *,
+    samples_per_leg: int = DEFAULT_SAMPLES_PER_LEG,
+) -> list[tuple[float, float, float]]:
+    """Sample a whole route as ``(x, y, amsl)`` triples under the flown profile."""
+    if len(pts) != len(amsl):
+        raise ValueError("pts and amsl must be the same length")
+    if samples_per_leg < 2:
+        raise ValueError("samples_per_leg must be at least 2")
+    if len(pts) < 2:
+        return [(p[0], p[1], a) for p, a in zip(pts, amsl, strict=True)]
+
+    out: list[tuple[float, float, float]] = []
+    for i in range(len(pts) - 1):
+        out.extend(
+            _leg_samples(
+                pts[i],
+                pts[i + 1],
+                amsl[i],
+                amsl[i + 1],
+                profile,
+                samples_per_leg,
+                skip_first=i > 0,  # would duplicate the previous leg's endpoint
+            )
+        )
+    return out
+
+
 def assess_clearance(
     pts: list[Point],
     amsl: list[float],
@@ -151,16 +211,10 @@ def assess_clearance(
     worst_leg = -1
     violations = 0
     for i in range(len(pts) - 1):
-        a, b = pts[i], pts[i + 1]
-        length = _leg_length(a, b)
         leg_worst = math.inf
-        for k in range(samples_per_leg + 1):
-            frac = k / samples_per_leg
-            x = a[0] + (b[0] - a[0]) * frac
-            y = a[1] + (b[1] - a[1]) * frac
-            flown = profile.altitude_amsl_at(
-                length * frac, length_m=length, start_amsl=amsl[i], end_amsl=amsl[i + 1]
-            )
+        for x, y, flown in _leg_samples(
+            pts[i], pts[i + 1], amsl[i], amsl[i + 1], profile, samples_per_leg
+        ):
             leg_worst = min(leg_worst, flown - ground_at(x, y))
         if leg_worst < margin_agl_m:
             violations += 1

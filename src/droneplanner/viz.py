@@ -74,10 +74,11 @@ def render(mission: Mission, surface: CostSurface, plan: Plan) -> Figure:
     """Build the 2x2 fields+route figure for a planned mission."""
     extent = _extent(surface)
     fig, axes = plt.subplots(2, 2, figsize=(12, 11))
+    scores = plan.objective_scores
     fig.suptitle(
         f"{mission.name}: concealment-aware route  "
-        f"(mean exposure {plan.objective_scores.get('mean_exposure', 0):.2f}, "
-        f"length {plan.total_length_m:.0f} m)",
+        f"(drone exposure {scores.get('mean_exposure', 0):.2f} vs cable "
+        f"{scores.get('mean_exposure_cable', 0):.2f}, length {plan.total_length_m:.0f} m)",
         fontsize=13,
     )
 
@@ -88,6 +89,10 @@ def render(mission: Mission, surface: CostSurface, plan: Plan) -> Figure:
             "forest flyability (green=flyable, red=non-navigable)",
             "RdYlGn_r",
         )
+    elif "canopy_height" in surface.components:
+        # The cover the route is hiding under — the reason the drone's exposure
+        # and the cable's differ at all.
+        fourth = (axes[1, 1], surface.components["canopy_height"], "canopy height (m)", "YlGn")
     else:
         fourth = (
             axes[1, 1],
@@ -103,7 +108,12 @@ def render(mission: Mission, surface: CostSurface, plan: Plan) -> Figure:
             "terrain (hillshade)",
             "gray",
         ),
-        (axes[0, 1], surface.components["exposure"], "drone visual exposure (viewshed)", "inferno"),
+        (
+            axes[0, 1],
+            surface.components["exposure"],
+            "drone visual exposure (viewshed at flight altitude)",
+            "inferno",
+        ),
         (axes[1, 0], surface.components["cost_normalized"], "composite cost surface", "viridis"),
         fourth,
     ]
@@ -125,7 +135,16 @@ def save_figure(path: str | Path, mission: Mission, surface: CostSurface, plan: 
     plt.close(fig)
 
 
-LAYERS = ("exposure", "cost", "terrain", "survivability", "flyability")
+LAYERS = (
+    "exposure",
+    "exposure_ground",
+    "canopy",
+    "flight_agl",
+    "cost",
+    "terrain",
+    "survivability",
+    "flyability",
+)
 
 
 def layer_data(surface: CostSurface, layer: str) -> tuple[np.ndarray, str]:
@@ -136,6 +155,15 @@ def layer_data(surface: CostSurface, layer: str) -> tuple[np.ndarray, str]:
         return hillshade(surface.dtm, surface.grid.cell_size_m), "gray"
     if layer == "survivability":
         return surface.components["survivability"], "magma"
+    # What the drone is hiding under, and how low it flies to do it.
+    if layer == "canopy" and "canopy_height" in surface.components:
+        return surface.components["canopy_height"], "YlGn"
+    if layer == "flight_agl" and "flight_agl" in surface.components:
+        return surface.components["flight_agl"], "cividis"
+    # Ground-level exposure: what the *cable* is exposed to, and the contrast that
+    # shows how much the drone's altitude costs it (SHORTFALLS item 1).
+    if layer == "exposure_ground" and "exposure_ground" in surface.components:
+        return surface.components["exposure_ground"], "inferno"
     if layer == "flyability" and "flyability_class" in surface.components:
         # 0 flyable (green) -> 1 marginal -> 2 non-navigable (red)
         return surface.components["flyability_class"], "RdYlGn_r"

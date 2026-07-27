@@ -119,3 +119,9 @@ def build_flyability(voxels: VoxelGrid, config: FlyabilityConfig) -> FlyabilityF
         nav_floor_m=nav_floor,
         nav_ceil_m=nav_ceil,
     )
+
+
+# The altitude band this field implies is assembled in ``fields/altitude.py``,
+# which also handles the no-lidar case (a canopy ceiling from DSM - DTM). Keeping
+# the policy there means the corridor planner and the cost surface read one
+# definition — see that module's docstring.

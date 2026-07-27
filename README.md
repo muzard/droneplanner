@@ -14,7 +14,11 @@ algorithmic rationale in **`../Preflight-Planning-Module-Design.md`**.
 `droneplanner plan` runs end-to-end. Given a DTM+DSM it plans a **concealment-
 and defilade-aware route** (in-house viewshed + terrain TPI/slope/drainage +
 survivability, combined into a composite cost surface, solved by a **cost-aware
-any-angle Theta\***). Add a **lidar point cloud** and it builds the **forest
+any-angle Theta\***). The aircraft flies **under the canopy** where the canopy
+height model allows — as low as the terrain and the airframe permit, not at a
+fixed cruise altitude — and visibility is scored for **two objects**: the
+aircraft at its planned flight altitude, and the cable on the ground beneath it.
+They hide in different places. Add a **lidar point cloud** and it builds the **forest
 flyability** field (voxelize → vertical segmentation → 3D EDT clearance →
 FLYABLE/MARGINAL/NON_NAVIGABLE), routes around non-navigable clutter, and flies
 the upper-trunk band. Add a **roads** layer and each route/road crossing is
@@ -53,8 +57,9 @@ live — the fastest way to build intuition for the cost function.
 | M3 | laydown + k-diverse survivability routing | later |
 | M4 | PX4 SITL / Isaac Sim validation | later |
 
-> **Before sims:** evaluate the viewshed at flight altitude, wire land cover +
-> threat sectors, and voxelize at fine resolution — see
+> **Before sims:** fly the new low route (it is 3× denser and a third of the
+> altitude, and unflown), fix the M2 navigable-altitude band datum (it is not
+> AGL), wire land cover + threat sectors, and voxelize at fine resolution — see
 > [SHORTFALLS.md](SHORTFALLS.md) for the prioritized list.
 
 ## Install

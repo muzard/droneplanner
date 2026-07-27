@@ -5,6 +5,11 @@ the any-angle planner minimizes (Preflight-Design §6). Cost rises with drone
 visual exposure, cable survivability cost, and snag risk, and falls under cover
 (defilade). The individual layers are retained on the returned object so the
 visualizer can show *why* the planner chose a route.
+
+Note the deliberate split between the two visibility layers: ``exposure`` is the
+**drone** seen at its planned flight altitude, ``exposure_ground`` is the
+**surface** (what the laid cable is exposed to, via ``survivability``). They are
+different objects at different heights and are not interchangeable.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from droneplanner.crossings import ROAD_COST
+from droneplanner.fields.altitude import band_raster, canopy_height, planned_flight_agl
 from droneplanner.fields.snag import build_snag
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_penalty
@@ -44,6 +50,7 @@ class CostSurface:
     cost: np.ndarray  # float32, per-meter traversal cost, > 0
     dtm: np.ndarray
     dsm: np.ndarray
+    flight_agl_m: np.ndarray | None = None  # float32; altitude the exposure field assumes
     components: dict[str, np.ndarray] = field(default_factory=dict)
     obstacle: np.ndarray | None = None  # bool; non-navigable cells the planner must avoid
     road_mask: np.ndarray | None = None  # bool; on-road cells (open crossings)
@@ -72,8 +79,19 @@ def build_cost_surface(
     weights = mission.weights
     observers = list(mission.threat.observers)
 
-    exposure = cumulative_exposure(dsm, grid, observers)
-    survivability = build_survivability(dtm, dsm, grid, observers)
+    # Two viewsheds, two different objects — see SHORTFALLS item 1. The DRONE is
+    # scored at the altitude it will fly (terrain + planned AGL: under the canopy
+    # where there is canopy to get under, low over open ground); the CABLE lies on
+    # the surface, so it keeps a ground-level viewshed. Scoring the drone at
+    # ground level made the concealment metric — and the route it drives —
+    # systematically wrong about the thing being hidden.
+    chm = canopy_height(dtm, dsm)
+    flight_agl = planned_flight_agl(chm, mission.cruise_agl_m, mission.altitude, flyability)
+    flight_band = band_raster(chm, mission.cruise_agl_m, mission.altitude, flyability)
+    exposure = cumulative_exposure(dsm, grid, observers, target_elev_m=dtm + flight_agl)
+    ground_exposure = cumulative_exposure(dsm, grid, observers)
+
+    survivability = build_survivability(dtm, dsm, grid, observers, openness=ground_exposure)
     snag = build_snag((grid.rows, grid.cols))
     ridge = ridge_penalty(dtm)
     drainage = drainage_proxy(dtm)
@@ -88,7 +106,11 @@ def build_cost_surface(
     )
 
     components = {
-        "exposure": exposure,
+        "exposure": exposure,  # the drone, at flight altitude
+        "exposure_ground": ground_exposure,  # the cable, on the surface
+        "flight_agl": flight_agl,
+        "canopy_height": chm,
+        "flight_band": flight_band.astype(np.float32),
         "survivability": survivability,
         "snag": snag,
         "ridge": ridge,
@@ -119,6 +141,7 @@ def build_cost_surface(
         cost=cost,
         dtm=dtm,
         dsm=dsm,
+        flight_agl_m=flight_agl,
         components=components,
         obstacle=obstacle,
         road_mask=road_mask,

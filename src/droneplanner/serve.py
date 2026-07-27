@@ -93,6 +93,7 @@ def _plan_response(scene: _Scene, params: dict[str, Any]) -> dict[str, Any]:
                 "mean_exposure": round(scores.get("mean_exposure", 0.0), 3),
                 "max_exposure": round(scores.get("max_exposure", 0.0), 3),
                 "exposed_fraction": round(scores.get("exposed_fraction", 0.0), 3),
+                "mean_exposure_cable": round(scores.get("mean_exposure_cable", 0.0), 3),
                 "recommendation": report.recommendation.value,
             },
             "error": None,
@@ -246,7 +247,7 @@ INDEX_HTML = r"""<!doctype html>
       <table class="stats"><tbody id="stats"></tbody></table>
       <div id="err"></div>
     </div>
-    <div class="hint">The planner minimizes an any-angle least-cost path (cost-aware Theta*) over a composite of viewshed exposure, terrain (TPI/ridge), survivability and snag. Raising <b>exposure</b> pushes the route into cover; raising <b>cover</b> pulls it into valleys/defilade.</div>
+    <div class="hint">The planner minimizes an any-angle least-cost path (cost-aware Theta*) over a composite of viewshed exposure, terrain (TPI/ridge), survivability and snag. Raising <b>exposure</b> pushes the route into cover; raising <b>cover</b> pulls it into valleys/defilade. The <b>exposure</b> layer is the drone at its planned flight altitude; <b>exposure_ground</b> is the surface the cable is laid on — they differ by exactly the altitude the aircraft flies.</div>
   </div>
 </div>
 <script>
@@ -314,7 +315,8 @@ async function replan(){
     `<tr><td>Recommendation</td><td><span class="rec ${s.recommendation}">${s.recommendation}</span></td></tr>`+
     `<tr><td>Route length</td><td>${s.length_m.toLocaleString()} m</td></tr>`+
     `<tr><td>Fiber used / avail</td><td>${s.fiber_used_m.toLocaleString()} / ${s.fiber_available_m.toLocaleString()} m</td></tr>`+
-    `<tr><td>Mean exposure</td><td>${s.mean_exposure}</td></tr>`+
+    `<tr><td>Mean exposure (drone)</td><td>${s.mean_exposure}</td></tr>`+
+    `<tr><td>Mean exposure (cable)</td><td>${s.mean_exposure_cable}</td></tr>`+
     `<tr><td>Max exposure</td><td>${s.max_exposure}</td></tr>`+
     `<tr><td>Exposed fraction</td><td>${(s.exposed_fraction*100).toFixed(0)}%</td></tr>`;
   busy(false);

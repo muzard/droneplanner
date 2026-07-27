@@ -1,18 +1,25 @@
 {
+  "below_canopy_length_m": 2653.5515156841648,
   "crossings": [],
-  "exposed_length_m": 154.05694150420948,
+  "drone_exposed_length_m": 610.8550866710941,
+  "exposed_length_m": 287.195153608442,
   "fiber_available_m": 8000.0,
-  "fiber_used_m": 5135.567099291089,
+  "fiber_used_m": 5298.945662387502,
   "findings": [
     {
       "code": "exposed_cable",
-      "message": "154 m of cable is visually/fire exposed",
+      "message": "287 m of cable is visually/fire exposed",
       "severity": "warning"
     },
     {
-      "code": "descent_densified",
-      "message": "1 vertex/vertices inserted to split the leg(s) whose flown descent hit terrain, so the autopilot cannot descend ahead of it (min clearance now 9.0 m AGL). Each inserted vertex is one PX4 must accept vertically to sequence past",
-      "severity": "info"
+      "code": "below_canopy_flight",
+      "message": "2654 m of the route is flown below the canopy on canopy-top (DSM) evidence alone \u2014 trunks, branches and understory are unmodelled. The route is a corridor to follow approximately; clearing obstacles is the flight stack's job",
+      "severity": "warning"
+    },
+    {
+      "code": "exposed_drone",
+      "message": "611 m of the route is flown in view of threat observers at the planned flight altitude \u2014 the aircraft is detectable there even where the cable beneath it is concealed",
+      "severity": "warning"
     },
     {
       "code": "flyability_not_analyzed",
@@ -20,15 +27,15 @@
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-07-27T01:35:05.978548Z",
+  "generated_at": "2026-07-27T17:52:08.317650Z",
   "kinematics": {
     "clearance_violations": 0,
     "climb_violations": 0,
-    "descent_vertices_inserted": 1,
+    "descent_vertices_inserted": 0,
     "feasible": true,
-    "max_climb_rate_ms": 0.0,
-    "max_descent_rate_ms": 0.0,
-    "min_clearance_agl_m": 9.018333435058594,
+    "max_climb_rate_ms": 1.3625941094696037,
+    "max_descent_rate_ms": 1.4700583747514315,
+    "min_clearance_agl_m": 6.6397857666015625,
     "min_turn_radius_m": 8.0,
     "reversals": 0,
     "tightest_turn_radius_m": 8.0,
@@ -39,111 +46,137 @@
   "mission_name": "demo-ao",
   "non_navigable_count": 0,
   "objective_scores": {
-    "exposed_fraction": 0.03592814371257485,
-    "length_m": 5135.567099291089,
+    "exposed_fraction": 0.12352941176470589,
+    "length_m": 5298.945662387502,
     "max_exposure": 1.0,
-    "mean_exposure": 0.218562874251497,
-    "path_cost": 264.016869143051
+    "max_exposure_flown": 1.0,
+    "mean_exposure": 0.15,
+    "mean_exposure_cable": 0.27058823529411763,
+    "mean_exposure_flown": 0.12940095590494,
+    "path_cost": 263.788149488769
   },
   "recommendation": "REVIEW",
   "route_index": 0,
   "segments": [
     {
+      "drone_exposed": true,
       "exposed": true,
       "flyability": "unknown",
       "index": 0,
-      "length_m": 75.0
+      "length_m": 70.71067811865476
     },
     {
+      "drone_exposed": true,
       "exposed": false,
       "flyability": "unknown",
       "index": 1,
       "length_m": 79.05694150420949
     },
     {
+      "drone_exposed": true,
       "exposed": false,
       "flyability": "unknown",
       "index": 2,
-      "length_m": 254.95097567963924
+      "length_m": 176.7766952966369
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 3,
-      "length_m": 79.05694150420949
+      "length_m": 100.0
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 4,
-      "length_m": 223.60679774997897
+      "length_m": 111.80339887498948
     },
     {
-      "exposed": false,
+      "drone_exposed": false,
+      "exposed": true,
       "flyability": "unknown",
       "index": 5,
-      "length_m": 285.0438562747845
+      "length_m": 145.7737973711325
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 6,
-      "length_m": 125.0
+      "length_m": 425.73465914816
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 7,
-      "length_m": 106.06601717798213
+      "length_m": 176.7766952966369
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 8,
-      "length_m": 1131.9231422671771
+      "length_m": 675.4628043053148
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 9,
-      "length_m": 35.35533905932738
+      "length_m": 548.2928049865327
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 10,
-      "length_m": 765.2613932506983
+      "length_m": 750.0
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 11,
       "length_m": 336.34060117684277
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 12,
       "length_m": 848.5281374238571
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 13,
-      "length_m": 436.6062299143245
+      "length_m": 469.7073557013984
     },
     {
+      "drone_exposed": false,
       "exposed": false,
       "flyability": "unknown",
       "index": 14,
-      "length_m": 275.0
+      "length_m": 100.0
     },
     {
-      "exposed": true,
+      "drone_exposed": true,
+      "exposed": false,
       "flyability": "unknown",
       "index": 15,
-      "length_m": 79.05694150420949
+      "length_m": 213.60009363293827
+    },
+    {
+      "drone_exposed": true,
+      "exposed": true,
+      "flyability": "unknown",
+      "index": 16,
+      "length_m": 70.71067811865476
     }
   ],
-  "total_length_m": 5135.567099291089
+  "total_length_m": 5298.945662387502
 }

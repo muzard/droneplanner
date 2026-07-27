@@ -53,6 +53,18 @@ k_routes: 1
 seed: 42
 
 # Planner defaults (tunable):
-waypoint_spacing_m: 100.0
-cruise_agl_m: 30.0
+# waypoint_spacing_m is what makes low flight possible: PX4 drives toward the next
+# waypoint's altitude at its own vertical rate, so between distant waypoints the
+# commanded profile cannot track the ground. Keep it near the DTM's cell size.
+waypoint_spacing_m: 25.0
+# A *target* height above terrain, not a cruise altitude to hold: the planner flies
+# this low wherever the floor and the canopy ceiling allow.
+cruise_agl_m: 10.0
 fiber_slack_factor: 1.05
+
+# How low to fly, and what stops it going lower. The drone hides UNDER the canopy —
+# a fixed 30 m AGL clears a 22 m stand by 8 m and is a silhouette against sky.
+altitude:
+  min_agl_m: 5.0           # floor: understory, rotor wash, DTM error
+  canopy_clearance_m: 3.0  # gap kept below the crowns (and above them when skimming)
+  min_canopy_m: 12.0       # only stands at least this tall are entered

@@ -9,6 +9,140 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Recently closed
 
+- ✅ **The concealment was fake: the drone flew ABOVE the canopy — FIXED
+  2026-07-27** (item 1c, 🔴🔴; raised by the user immediately after item 1 landed,
+  and the more fundamental of the two). The planner held a fixed **30 m above
+  bare terrain**. The demo stands are 12–22 m, so the aircraft sat 8–18 m *over
+  the crowns* while the cost surface rewarded forest as cover. `FlightBand`
+  already had `CANOPY_TOP` and `BELOW_CANOPY` values that nothing ever produced,
+  and Preflight-Design already prescribed the posture — *"canopy-top skimming /
+  upper-trunk-space flight"* — so this was an unimplemented spec requirement, not
+  a design question. The canopy height model needed no new data: it is `DSM - DTM`.
+
+  **Fix, in three parts** (`fields/altitude.py`, `AltitudePolicy`,
+  `planner/corridor.py`):
+  1. **Altitude is surface-relative and as low as the constraints allow.** Target
+     `cruise_agl_m` (default 30 → **10 m**), floored by `min_agl_m`, ceilinged at
+     `canopy_top − canopy_clearance_m` wherever the stand is worth entering. The
+     drone is either **under** the crowns with clearance or **over** them with the
+     same clearance — never inside. (The first cut had the floor stay at
+     `min_agl_m` in the over-canopy case, which let the altitude smoother place
+     the aircraft at 5 m inside the crowns of a 9 m stand it had just declined to
+     enter. Caught by a unit test before it ever ran.)
+  2. **`waypoint_spacing_m` is now honoured by the corridor planner** — it was
+     read only by the M0 stub, so real routes had legs up to 760 m. This is what
+     makes low flight possible at all (below).
+  3. **The demo AO grew a canopy.** `dsm = dtm.copy()` meant the whole forest
+     story was untestable; there are now 12–22 m stands, two clearings and a belt
+     of ridge scrub, laid out so the concealed route and the short one disagree.
+
+  | demo AO, same terrain and observers | old posture | new posture |
+  |---|---|---|
+  | flight altitude | flat 30 m AGL | **9–15 m**, tracking the canopy |
+  | mean drone exposure | 0.5500 | **0.1500** |
+  | flown-trajectory exposure | 0.5061 | **0.1294** |
+  | route flown in view of observers | 1998 m | **611 m** |
+  | route flown below canopy | 0 m | **2654 m of 5299** |
+  | waypoints | 145 | 282 |
+  | min AGL under the flown profile | 23.99 m | 6.64 m |
+
+  **Drone exposure falls 3.7×, and the drone is now less exposed than its own
+  cable** (0.15 vs 0.27) — which is what hiding in a forest means. Under the old
+  posture the aircraft was *twice* as exposed as the cable it was laying.
+
+  **What actually limits "as low as possible" is the DTM, not the autopilot.**
+  Sweeping the target altitude with 25 m spacing, the achieved clearance loses a
+  near-constant ~3.3 m to terrain bulging between waypoints — so 10 m AGL clears
+  by 6.7 m and 4 m AGL does not clear at all. Capping the descent *rate* barely
+  helps (0.5 m/s instead of 2.0 m/s buys 0.37 m), because once waypoints are 25 m
+  apart the route's own ground gradient (max 0.149 m/m) is gentler than the
+  descent gradient anyway. The demo's DTM has **25 m cells**; on the 1 m lidar
+  DTM a real AO would use, the same argument allows a far lower floor.
+
+  | target AGL | 15 m | 10 m | 8 m | 6 m | 4 m |
+  |---|---|---|---|---|---|
+  | achieved min AGL (25 m spacing) | 11.67 | 6.67 | 4.67 | 2.67 | **0.67** |
+
+  Waypoint spacing is the lever that made it work at all — at the old 100 m
+  spacing a 10 m route flies **12 m underground**:
+
+  | spacing | ∞ (as emitted) | 200 m | 100 m | 50 m | 25 m |
+  |---|---|---|---|---|---|
+  | min AGL at 10 m target | −12.27 | −1.70 | 2.87 | 4.69 | **6.67** |
+
+  🔴 **The safety argument moved off this planner, deliberately (user decision,
+  2026-07-27).** Obstacle clearance below the canopy is now the flight stack's
+  job — camera/lidar avoidance — and the route is a corridor to be followed
+  *approximately* ("it doesn't matter if it flies past a rock from the right or
+  left side"). That is a coherent architecture, and it is why this planner may
+  commit a leg below a canopy it can only see the top of. But it means:
+  * a below-canopy plan is **not verified**, and the report now says so on every
+    such route (`below_canopy_flight`, WARNING, with the length);
+  * the capability it leans on **does not exist yet on this hardware** — onboard
+    avoidance is Track B and needs an x86+RTX box the M4 lacks;
+  * 2654 m of the demo route is currently concealment bought on credit.
+- ✅ **Exposure is evaluated at flight altitude — FIXED 2026-07-27** (was item 1,
+  🔴). The viewshed asked "can an observer see this **ground** cell"
+  (`target_height_m=0`) while the drone flies 30 m above it, or in the trunk
+  band. Concealment was measured for the wrong object, so both the metric and
+  the route it drove were systematically off.
+
+  **Fix:** the target elevation is now a first-class input to the viewshed
+  (`fields/viewshed.py`, `target_elev_m`), and `fields/composite.py` builds
+  **two** fields instead of one — `exposure` for the **drone** at
+  `dtm + planned flight AGL`, `exposure_ground` for the **cable**, which really
+  does lie on the surface. Occlusion still marches over the DSM in both. Cost is
+  unchanged (the pipeline already ran two viewsheds; the second is now the
+  ground one, handed to `build_survivability` instead of recomputed there).
+
+  The flight altitude comes from `forest.navigability.planned_flight_agl`, which
+  is the **vectorized form of the same `altitude_band_at` the corridor planner
+  flies** — one definition, pinned cell-for-cell by a test, so the field cannot
+  drift to an altitude the drone never occupies.
+
+  **The measurement error was ~2×, in the flattering direction.** On the demo AO
+  the old planner reported **0.28** mean exposure for a route whose aircraft was
+  actually at **0.55** — it was quoting the ground's concealment, not the
+  drone's. Over the whole AO, mean exposure is **0.239 at ground level** and
+  **0.509 for a drone at 30 m AGL**: more than half the AO (**52.8 %**) is
+  visible to an observer at 30 m and invisible under the canopy.
+
+  ⚠️ **Fixing the measurement is what exposed the bigger defect** (item 1c
+  below): an honest metric immediately showed the aircraft was flying above the
+  canopy it was supposed to be hiding in. The two are one story — the planner was
+  measuring the wrong object *and* putting it at the wrong altitude — and the
+  numbers here are quoted after both fixes, on the canopy-bearing demo AO. The
+  original item-1 measurements were taken on the old canopy-free demo, where
+  raising the target could only ever *add* exposure.
+
+  **A third number re-scores line-of-sight along the flown 3D trajectory** —
+  filleted geometry, climb-smoothed altitudes, PX4's front-loaded descent —
+  using the same `sample_flown_profile` samples the clearance guarantee uses,
+  averaged by *track length* (a fixed sample count per leg would let the short
+  fillet arcs carry the metric). It exists because the raster assumes every cell
+  is overflown at its *band* altitude, and the route departs from that. On the
+  demo AO the two disagree by 10 %, and the disagreement decomposes cleanly:
+
+  | scored along | mean exposure |
+  |---|---|
+  | raster, over the corridor cells at band altitude (`mean_exposure`) | 0.1500 |
+  | trajectory, altitudes interpolated linearly | 0.1490 |
+  | trajectory, **altitudes as PX4 flies them** (`mean_exposure_flown`) | **0.1294** |
+
+  Geometry contributes almost nothing now (−0.001): with 25 m waypoint spacing
+  the emitted track and the corridor cells are nearly the same line. The
+  remaining **−0.020** is the front-loaded descent, which cuts the *other* way
+  from item 0 — the behaviour that flew the aircraft into a slope also gets it
+  low early, and low is concealed. ⚠️ AO-specific: where cover is canopy rather
+  than terrain, arriving low early need not help.
+
+  ⚠️ **The demo route changed**, so the six CFIT verification flights of
+  2026-07-27 were flown against the *old* route (and the old DSM). The clearance
+  guarantee still passes on the new one (min **6.64 m** AGL, 0 violations) but it
+  is a different, lower, much denser route — 282 waypoints against 87 — so
+  re-flying it exercises neither the same leg nor the densifier, and the
+  vertical-acceptance behaviour that stalled two missions is now being asked of
+  3× as many waypoints. **This is the single most important thing to re-fly.**
 - ✅ **CFIT on descending legs — FIXED 2026-07-27** (was item 0, 🔴🔴; the full
   diagnosis is kept below under "Top priorities" for the record). Clearance was
   guaranteed against linear altitude interpolation; PX4 front-loads a leg's
@@ -96,12 +230,17 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   | `02_05_36` | 2.0 | 0.841 m | COMPLETE |
   | `02_52_58` | 2.0 | **1.190 m** | **stall 51/78** |
 
-  **Stall rate 2/2 at 0.8 → 1/5 at 2.0.** The error varies run to run, so the
-  window must cover the tail, not the median:
-  `droneflight/configs/px4/terrain_following.params` is now **4.0** (3.4× the
-  worst error seen, still 3× under the 11.9 m measured clearance). It is an
-  *acceptance tolerance*, not a clearance change — the aircraft flies no lower,
-  and every original waypoint tracks to ≤0.37 m so they are unaffected.
+  **RESOLVED over 12 flights: the mission stalls iff the vertical error at some
+  waypoint exceeds the window — no exceptions.** 0/2 complete at 0.8, 4/5 at 2.0,
+  **5/5 at 4.0**. The inserted vertex is bimodal (usually 0.66–0.73 m, spiking to
+  2.1–2.6 m about 1 run in 6 — those spikes are the stalls); the *final* waypoint
+  independently sits at ~1.78 m in every healthy run.
+  `droneflight/configs/px4/terrain_following.params` is **4.0**, covering the
+  whole observed distribution (worst 2.569 m) with 1.56× margin and still 3× under
+  the 11.9 m measured clearance. It is an *acceptance tolerance*, not a clearance
+  change — the aircraft flies no lower.
+  ⚠️ The 5/5 does not by itself prove 4.0: none of those five spiked (max 1.83 m),
+  so they would have passed at 2.0 too. The case rests on the distribution.
 
   💡 **If that is judged too loose, the alternative is measured:** drop the
   inserted vertex and instead raise the failing leg's **end altitude by 14 m**,
@@ -228,15 +367,53 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
    the slope. That trade is the user's call. Item 0's fix is unaffected: it
    computes in AMSL throughout.
 
-1. 🔴 **Exposure is evaluated at ground level, not at flight altitude**
-   (`fields/viewshed.py`, `target_height_m=0`). The viewshed asks "can an
-   observer see this ground cell", but the drone flies at cruise AGL (M1) or the
-   trunk band (M2). Concealment is measured for the wrong object, so the
-   `mean_exposure` metric and the route it drives are systematically off. *Fix:
-   evaluate the viewshed at the planned flight altitude per cell.*
-   *Note (user, later versions):* the fuller fix — using **lidar to determine
-   cover** in the visibility model — belongs to the online/perception side, not
-   this offline route planner; treat it as a later-version enhancement.
+1. ✅ **Exposure at flight altitude — FIXED 2026-07-27**, see "Recently closed"
+   for the mechanism and the measured before/after. *Note (user, later
+   versions):* the fuller fix — using **lidar to determine cover** in the
+   visibility model — belongs to the online/perception side, not this offline
+   route planner; treat it as a later-version enhancement.
+
+1b. 🔴 **The M2 navigable altitude band is NOT height above ground — it is height
+   above the point cloud's global minimum z** (found 2026-07-27 while wiring the
+   flight-altitude viewshed; **flagged, deliberately not fixed**). `voxelize` is
+   called with `z_min = cloud.z.min()`, so a voxel level index is an *absolute*
+   elevation. `build_flyability` then reports `nav_floor_m` / `nav_ceil_m` /
+   `max_flyable_altitude_m` as `level * voxel_size_z` — still absolute — and
+   `planner/corridor.py` adds them to the local DTM **as if they were AGL**.
+
+   Measured on a synthetic tile with an identical 20 m canopy above the local
+   ground everywhere, over ground rising 0 → 70 m (so every column should report
+   the same band):
+
+   | local ground | `nav_floor_m` | `max_flyable_altitude_m` |
+   |---|---|---|
+   | 0 m | 26.45 | 95.75 |
+   | 30 m | 56.45 | 95.75 |
+   | 70 m | 2.95 | 2.75 |
+
+   Identical forest, three different answers. The planner would command 56 m
+   "AGL" over the 30 m column — through the canopy it is meant to hide in. The
+   segmentation is confused too: at the low column it picks the free space
+   *above* the canopy (95 m) as "max flyable altitude".
+
+   **Currently masked by exactly the degeneracies this file keeps warning about:**
+   no real point cloud has ever been run (`demo_flyability` builds a synthetic
+   field directly at `z0 = 0`), and flat inputs make absolute and relative
+   heights coincide. It bites the first time real lidar over real relief is
+   ingested — the same AGL-vs-AMSL confusion as item 0 and item 0b, in a third
+   place. *Fix: normalize the voxel grid (or the derived band) to height above
+   the DTM per column before segmentation.* Not done here because it changes the
+   forest model and the routes it produces, and because it deserves its own
+   verification pass.
+
+   ⚠️ **This bounds items 1 and 1c on real data:** the flight-altitude viewshed
+   is only as correct as the flight altitude handed to it, and `altitude_band_at`
+   lets a lidar voxel window *override* the canopy-derived ceiling — correctly,
+   since a measured free window beats a guess, but that override is exactly the
+   broken number. **Without lidar the new canopy path is unaffected** (it uses
+   `DSM - DTM`, which is per-cell terrain-relative by construction), so the
+   working configuration today is the one with no point cloud. The moment real
+   lidar is wired in, this must be fixed first.
 2. 🟠 **Forest voxel resolution is tied to the corridor grid**
    (`pipeline._load_flyability`). The spec wants **0.25–0.5 m** voxels for
    clearance near the airframe scale; we voxelize at the DTM/DSM horizontal
@@ -268,9 +445,22 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   `COVER_SCALE`, `FOREST_COVER_REWARD`, `FOREST_MARGINAL_PENALTY`, `ROAD_COST`,
   the survivability sub-weights) is heuristic; there is no cross-AO normalization
   or tuning study.
+- ✅ **The demo AO now has a canopy** (fixed 2026-07-27 with item 1c). It used to
+  set `dsm = dtm.copy()`, so the DSM had no trees at all and the whole
+  concealment story was unfalsifiable — the cost surface rewarded "forest" the
+  line-of-sight model could not see, and altitude had nothing to hide under.
+  `demo_canopy()` now builds 12–22 m stands, two clearings on the natural
+  corridor, and ridge scrub. ⚠️ **This changed `demo_ao/dsm.tif`**, hence the
+  demo route; the Gazebo world is unaffected (`gz-world` reads the DTM, and home
+  is the mission start, which did not move).
+  🟠 **Residual:** the M2 `demo_flyability()` voxel forest is still built
+  independently of this canopy, so the two disagree in detail — the voxel scene
+  is illustrative scenery, not a voxelization of the demo DSM.
 - 🟡 **Viewshed is an approximation.** Radial rays to boundary cells can miss
   interior cells; no earth-curvature/refraction (negligible <5 km) and fixed
-  2 m observer height.
+  2 m observer height. A target *below* the local surface (a drone under canopy)
+  is not occluded by the canopy of its **own** cell, only by intervening ones —
+  a sub-cell effect the surrounding stand dominates.
 - 🟡 **`k_routes > 1` emits identical routes.** Spatial-diversity penalization is
   M3; today extra routes are duplicates.
 
@@ -374,8 +564,15 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Suggested sequence
 
-1. Flight-altitude viewshed — makes the concealment metric honest.
-2. Wire land cover + threat sectors — completes the M1 concealment inputs.
-3. Fine-resolution voxelization + aggregation — makes flyability trustworthy.
-4. Then SITL/Gazebo export (M4) with a real AO; treat OMPL 3D refinement and
+1. ✅ Flight-altitude viewshed + below-canopy posture — done 2026-07-27; the
+   concealment metric measures the aircraft, and the aircraft is under the trees.
+2. **Fly the new route in SITL.** It is lower (6.6 m min AGL vs 24), denser (282
+   waypoints vs 145) and unflown. The vertical-acceptance behaviour that stalled
+   two missions in the CFIT campaign is now being asked of 3× as many waypoints,
+   at a third of the altitude — nothing about this is verified.
+3. **Fix the M2 band datum (item 1b)** — prerequisite for any real-lidar run, and
+   for trusting the altitude band when a voxel model overrides the canopy one.
+4. Wire land cover + threat sectors — completes the M1 concealment inputs.
+5. Fine-resolution voxelization + aggregation — makes flyability trustworthy.
+6. Then SITL/Gazebo export (M4) with a real AO; treat OMPL 3D refinement and
    laydown (M3) as parallel tracks.

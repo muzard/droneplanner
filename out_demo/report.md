@@ -2,17 +2,19 @@
 
 **Recommendation: REVIEW**
 
-_Generated 2026-07-27T01:35:05.978548+00:00_
+_Generated 2026-07-27T17:52:08.317650+00:00_
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
 | Route index | 0 |
-| Total route length | 5135.6 m |
-| Fiber used | 5135.6 m |
+| Total route length | 5298.9 m |
+| Fiber used | 5298.9 m |
 | Fiber available | 8000.0 m |
-| Exposed length | 154.1 m |
+| Exposed cable length | 287.2 m |
+| Exposed flight length (drone) | 610.9 m |
+| Flown below canopy | 2653.6 m |
 | Non-navigable segments | 0 |
 | Marginal segments | 0 |
 | Crossings needing manipulation | 0 |
@@ -27,23 +29,27 @@ _Generated 2026-07-27T01:35:05.978548+00:00_
 | Tightest turn achieved | 8.0 m |
 | Turn-radius violations | 0 |
 | Reversals | 0 |
-| Max climb rate | 0.00 m/s |
-| Max descent rate | 0.00 m/s |
+| Max climb rate | 1.36 m/s |
+| Max descent rate | 1.47 m/s |
 | Climb-rate violations | 0 |
 
 ## Objective scores
 
 | Objective | Score |
 | --- | ---: |
-| exposed_fraction | 0.0359 |
-| length_m | 5135.5671 |
+| exposed_fraction | 0.1235 |
+| length_m | 5298.9457 |
 | max_exposure | 1.0000 |
-| mean_exposure | 0.2186 |
-| path_cost | 264.0169 |
+| max_exposure_flown | 1.0000 |
+| mean_exposure | 0.1500 |
+| mean_exposure_cable | 0.2706 |
+| mean_exposure_flown | 0.1294 |
+| path_cost | 263.7881 |
 
 ## Findings
 
-- ⚠️ **warning** (exposed_cable): 154 m of cable is visually/fire exposed
-- **info** (descent_densified): 1 vertex/vertices inserted to split the leg(s) whose flown descent hit terrain, so the autopilot cannot descend ahead of it (min clearance now 9.0 m AGL). Each inserted vertex is one PX4 must accept vertically to sequence past
+- ⚠️ **warning** (exposed_cable): 287 m of cable is visually/fire exposed
+- ⚠️ **warning** (below_canopy_flight): 2654 m of the route is flown below the canopy on canopy-top (DSM) evidence alone — trunks, branches and understory are unmodelled. The route is a corridor to follow approximately; clearing obstacles is the flight stack's job
+- ⚠️ **warning** (exposed_drone): 611 m of the route is flown in view of threat observers at the planned flight altitude — the aircraft is detectable there even where the cable beneath it is concealed
 - ⚠️ **warning** (flyability_not_analyzed): concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight — confirm before execution
 
