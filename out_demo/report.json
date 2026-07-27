@@ -1,5 +1,7 @@
 {
   "below_canopy_length_m": 2653.5515156841648,
+  "corridor_half_width_median_m": 50.0,
+  "corridor_half_width_min_m": 0.0,
   "crossings": [],
   "drone_exposed_length_m": 610.8550866710941,
   "exposed_length_m": 287.195153608442,
@@ -22,12 +24,17 @@
       "severity": "warning"
     },
     {
+      "code": "corridor_pinched",
+      "message": "32/282 waypoints (11%) grant no lateral freedom \u2014 the route runs at the edge of its cover there, so a deviation leaves the concealment the plan was scored on. Elsewhere the corridor is 50 m (median half-width)",
+      "severity": "info"
+    },
+    {
       "code": "flyability_not_analyzed",
       "message": "concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight \u2014 confirm before execution",
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-07-27T20:37:50.939166Z",
+  "generated_at": "2026-07-27T22:41:31.850419Z",
   "kinematics": {
     "clearance_violations": 0,
     "climb_violations": 0,
@@ -46,12 +53,16 @@
   "mission_name": "demo-ao",
   "non_navigable_count": 0,
   "objective_scores": {
+    "corridor_half_width_median_m": 50.0,
+    "corridor_half_width_min_m": 0.0,
     "exposed_fraction": 0.12352941176470589,
     "length_m": 5298.945662387502,
     "max_exposure": 1.0,
+    "max_exposure_corridor": 1.0,
     "max_exposure_flown": 1.0,
     "mean_exposure": 0.15,
     "mean_exposure_cable": 0.27058823529411763,
+    "mean_exposure_corridor": 0.16419918835163116,
     "mean_exposure_flown": 0.12940095590494,
     "path_cost": 263.788149488769
   },

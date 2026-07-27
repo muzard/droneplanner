@@ -33,6 +33,7 @@ from droneplanner.model.plan import (
     RouteSegment,
     TrajectoryVertex,
 )
+from droneplanner.planner.corridor_width import assess_corridor
 from droneplanner.planner.kinematics import (
     KinematicLimits,
     fillet_path,
@@ -242,6 +243,16 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         margin_agl_m=clearance_floor,
     )
 
+    # --- Lateral freedom the plan grants, and what it costs (TEST-PLAN A1) ---
+    # The flight stack follows this route approximately, so concealment scored on
+    # the centreline describes a line it will not fly. The corridor's width is
+    # whatever the local cover allows — it stops at the edge of a stand.
+    corridor = assess_corridor(
+        surface,
+        list(fpts),
+        max_half_width_m=mission.corridor_half_width_max_m,
+    )
+
     # Carry the terrain elevation under each vertex: AGL alone is not enough to
     # emit a correct .plan (the writer must convert to relative-to-home, and on
     # sloping ground those differ by the full relief).
@@ -254,8 +265,9 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             ground_elev_m=float(surface.dtm[grid.world_to_pixel(p)]),
             flight_band=band,
             speed_hint_ms=speed,
+            corridor_half_width_m=half_width,
         )
-        for p, alt, band in zip(fpts, alts, bands, strict=True)
+        for p, alt, band, half_width in zip(fpts, alts, bands, corridor.half_width_m, strict=True)
     )
     kinematics = KinematicReport(
         # Reversals are allowed (low payout speed mitigates snag), so they do not
@@ -362,6 +374,12 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             "mean_exposure_flown": mean_exposure_flown,
             "max_exposure_flown": max_exposure_flown,
             "mean_exposure_cable": mean_exposure_cable,
+            # And of the CORRIDOR — the area the flight stack may actually use.
+            # This is the honest number if the route is followed approximately.
+            "mean_exposure_corridor": corridor.mean_exposure,
+            "max_exposure_corridor": corridor.max_exposure,
+            "corridor_half_width_min_m": corridor.min_half_width_m,
+            "corridor_half_width_median_m": corridor.median_half_width_m,
         },
         kinematics=kinematics,
     )

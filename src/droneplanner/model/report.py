@@ -85,6 +85,16 @@ class RiskReport(BaseModel):
             "clearance rests on onboard perception, not on this plan."
         ),
     )
+    corridor_half_width_min_m: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Tightest lateral freedom anywhere on the route. Where this is 0 the "
+            "flight stack has to track the centreline, because any deviation leaves "
+            "the cover the plan was built on."
+        ),
+    )
+    corridor_half_width_median_m: float = Field(default=0.0, ge=0)
 
     non_navigable_count: int = Field(ge=0, default=0)
     marginal_count: int = Field(ge=0, default=0)

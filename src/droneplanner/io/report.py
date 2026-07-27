@@ -45,6 +45,10 @@ def report_to_markdown(report: RiskReport) -> str:
     lines.append(f"| Exposed cable length | {report.exposed_length_m:.1f} m |")
     lines.append(f"| Exposed flight length (drone) | {report.drone_exposed_length_m:.1f} m |")
     lines.append(f"| Flown below canopy | {report.below_canopy_length_m:.1f} m |")
+    lines.append(
+        f"| Corridor half-width (median / min) | "
+        f"{report.corridor_half_width_median_m:.0f} / {report.corridor_half_width_min_m:.0f} m |"
+    )
     lines.append(f"| Non-navigable segments | {report.non_navigable_count} |")
     lines.append(f"| Marginal segments | {report.marginal_count} |")
     lines.append(f"| Crossings needing manipulation | {report.manipulation_crossings} |")

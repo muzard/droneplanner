@@ -187,6 +187,16 @@ class Mission(BaseModel):
     fiber_slack_factor: float = Field(
         default=1.0, ge=1.0, description="Fiber-used / track-length ratio (>=1)."
     )
+    corridor_half_width_max_m: float = Field(
+        default=50.0,
+        gt=0,
+        description=(
+            "Most lateral freedom the plan will ever grant the flight stack. The "
+            "actual per-vertex width is whatever the local concealment allows — it "
+            "stops at the edge of a stand or a depression — and this only caps it, "
+            "because beyond some width 'follow this route' stops meaning anything."
+        ),
+    )
 
     @field_validator("crs")
     @classmethod

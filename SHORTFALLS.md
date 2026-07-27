@@ -456,11 +456,44 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   🟠 **Residual:** the M2 `demo_flyability()` voxel forest is still built
   independently of this canopy, so the two disagree in detail — the voxel scene
   is illustrative scenery, not a voxelization of the demo DSM.
-- 🟡 **Viewshed is an approximation.** Radial rays to boundary cells can miss
-  interior cells; no earth-curvature/refraction (negligible <5 km) and fixed
-  2 m observer height. A target *below* the local surface (a drone under canopy)
-  is not occluded by the canopy of its **own** cell, only by intervening ones —
-  a sub-cell effect the surrounding stand dominates.
+- ✅ **Viewshed cross-validated 2026-07-28** (TEST-PLAN A4) against an independent
+  implementation — per-target straight-segment LOS, a different algorithm rather
+  than a refactor (`tests/unit/test_fields_viewshed_reference.py`). It had never
+  been checked against anything, while every concealment number rests on it.
+
+  | terrain | agreement |
+  |---|---|
+  | flat (any observer) | **100 %** |
+  | hard wall — shadow behind it | **100 %** |
+  | random rough | 99.8 % |
+  | canopy belt, drone at 8 m AGL | 99.6 % |
+  | smooth gaussian hill / ridge | 92.8–93.6 % |
+  | **real demo AO, both observers** | **99.0 %** |
+
+  **On the demo AO the route's mean exposure differs by 0.0085** (0.150 vs
+  0.142) — immaterial to routing. And the errors are **conservative**: 0.94 % of
+  cells over-report exposure against 0.07 % that under-report, so the field does
+  not promise cover the terrain fails to provide.
+
+  Two things the exercise corrected:
+  * 🔴 **The documented caveat was false.** This file and the module both claimed
+    radial rays "can miss interior cells". Measured over four observer positions:
+    **zero cells go untested** — rays to a full perimeter cover a rectangular grid
+    exhaustively. The real approximation is a **bearing error** (a cell is tested
+    against a ray aimed at a *boundary* cell, not at itself, so occluders are up
+    to half a cell off-line), which costs ≤3 % on smooth terrain and ≤0.1 % on
+    rough or canopy terrain.
+  * The running-max-**angle** test is algebraically identical to a segment-height
+    test given the same ray and cells, so ray choice is the *only* source of
+    disagreement. Pinned by a test.
+
+  🟡 **Still approximate, and unchanged:** no earth-curvature/refraction
+  (negligible <5 km), fixed 2 m observer height, and a target *below* the local
+  surface (a drone under canopy) is not occluded by the canopy of its **own**
+  cell — a sub-cell effect the surrounding stand dominates. Disagreements
+  concentrate exactly where a sightline grazes a slope, i.e. where sub-cell
+  terrain detail neither model has would decide the answer; a finer DEM is the
+  only real fix.
 - 🟡 **`k_routes > 1` emits identical routes.** Spatial-diversity penalization is
   M3; today extra routes are duplicates.
 

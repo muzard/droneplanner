@@ -30,7 +30,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         # add --flat for the diagnostic flat-DEM world
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 198 tests, ~95% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 211 tests, ~95% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -137,6 +137,23 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   `mean_exposure_cable`, and `mean_exposure_flown` (line-of-sight along the
   *flown* 3D trajectory, sharing `sample_flown_profile` with the clearance
   guarantee); the report separates `exposed_cable` from `exposed_drone`.
+- **The plan carries the lateral freedom it grants, and concealment is scored
+  over it (2026-07-28 — don't regress).** The flight stack follows the route
+  *approximately* (obstacle avoidance is onboard, user 2026-07-27), so scoring
+  concealment on the centreline described a line the aircraft will not fly.
+  `planner/corridor_width.py` gives every vertex a `corridor_half_width_m` and
+  re-scores exposure over the swept area. **The width is not a constant** — it is
+  the distance to the nearest cell that would lose the concealment that vertex
+  has, under three clauses: never enter ground *more exposed* than here
+  (relative, not an absolute threshold — an absolute one lets a corridor around
+  an unobserved vertex reach into watched ground); **never leave the stand** you
+  are hiding inside, even into unobserved open ground (user's requirement — the
+  corridor must not expand outside a forest patch); never enter an obstacle. Demo
+  AO: median 50 m (capped), **32/282 vertices get 0 m** where the route runs at
+  the edge of its cover, and corridor exposure is **0.164** vs 0.150 on the line.
+  ⚠️ Widths come from a distance transform, so they quantise to the cell size —
+  25 m on the demo AO. And the radius stops **one cell short** of the offending
+  cell, or a corridor of exactly that radius would reach it.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
@@ -177,6 +194,8 @@ validation yet.
 
 ## Layout
 `model/` pydantic contracts + `Grid`. `io/` readers/writers (lazy GDAL/laspy).
-`fields/` cost layers. `forest/` flyability. `planner/` Theta\* + corridor +
-kinematics. `crossings/` roads. `report/` GO/REVIEW/NO-GO. `demo.py` procedural AO.
+`fields/` cost layers (incl. `altitude.py`, the below-canopy band). `forest/`
+flyability. `planner/` Theta\* + corridor + kinematics + `terrain_profile.py`
+(CFIT) + `corridor_width.py` (lateral freedom).
+`crossings/` roads. `report/` GO/REVIEW/NO-GO. `demo.py` procedural AO.
 `viz.py`/`serve.py` visualization. `pipeline.py` orchestration. `cli.py`.

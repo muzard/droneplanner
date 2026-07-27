@@ -10,6 +10,27 @@ each ray outward tracking the running maximum elevation angle; a cell is visible
 when its own elevation angle clears that running maximum. Exposure is the
 fraction of observers that see each cell, in [0, 1].
 
+VALIDATED 2026-07-28 against an independent implementation (TEST-PLAN A4,
+``tests/unit/test_fields_viewshed_reference.py``), which tests each target cell
+against the straight 3D segment aimed at *that* cell. Results worth knowing:
+
+* the running-max-**angle** test is algebraically identical to a segment-height
+  test on the same ray and cells, so the *only* approximation here is which ray
+  and which cells get used;
+* rays run to every boundary cell, and those Bresenham lines cover a rectangular
+  grid **exhaustively — zero cells go untested**. (An earlier version of this
+  docstring claimed radial rays "can miss interior cells". Measured: they do not.
+  That was a guess, and it was wrong.)
+* what remains is a **bearing error**: a cell is tested against a ray aimed at a
+  boundary cell, not at itself, so the occluders considered are up to half a cell
+  off-line. Cost measured on the demo AO: **1.0 % of cells disagree**, and mean
+  exposure differs by **+0.004** — immaterial to any routing decision.
+* the disagreements are **overwhelmingly conservative** (0.94 % of cells
+  over-report exposure vs 0.07 % under-report), which is the safe direction for
+  a concealment planner: it does not promise cover the terrain fails to provide.
+  They concentrate where a sightline grazes a slope — exactly where sub-cell
+  terrain detail, which neither model has, would decide the answer.
+
 WHAT IS BEING SEEN — the target elevation (SHORTFALLS item 1)
 The occluding surface (the DSM) and the *object being looked at* are two
 different things, and conflating them measured concealment for the wrong object.

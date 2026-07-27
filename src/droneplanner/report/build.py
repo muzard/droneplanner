@@ -153,6 +153,32 @@ def build_report(
             )
         )
 
+    # --- Lateral freedom: where the route can be followed loosely, and where not ---
+    # The flight stack follows the route approximately. Where the corridor pinches
+    # to nothing the plan is relying on precise tracking it has no way to command,
+    # so the operator should know before the aircraft finds out.
+    # A vertex's 0.0 means "no corridor was computed" on a stub plan and "no
+    # freedom here" on a planned one, so gate on whether the pass actually ran.
+    scores = plan.objective_scores
+    corridor_scored = "corridor_half_width_min_m" in scores
+    corridor_min = scores.get("corridor_half_width_min_m", 0.0)
+    corridor_median = scores.get("corridor_half_width_median_m", 0.0)
+    pinched = [v for v in plan.vertices if v.corridor_half_width_m <= 0.0]
+    if corridor_scored and pinched and len(plan.vertices) > 1:
+        findings.append(
+            Finding(
+                severity=Severity.INFO,
+                code="corridor_pinched",
+                message=(
+                    f"{len(pinched)}/{len(plan.vertices)} waypoints "
+                    f"({len(pinched) / len(plan.vertices):.0%}) grant no lateral freedom — "
+                    "the route runs at the edge of its cover there, so a deviation leaves "
+                    "the concealment the plan was scored on. Elsewhere the corridor is "
+                    f"{corridor_median:.0f} m (median half-width)"
+                ),
+            )
+        )
+
     # --- Crossings needing unsolved aerial manipulation ---
     manipulation = [c for c in plan.crossings if c.needs_manipulation]
     if manipulation:
@@ -281,6 +307,8 @@ def build_report(
         exposed_length_m=exposed_length,
         drone_exposed_length_m=drone_exposed_length,
         below_canopy_length_m=below_canopy_length,
+        corridor_half_width_min_m=corridor_min,
+        corridor_half_width_median_m=corridor_median,
         non_navigable_count=len(non_navigable),
         marginal_count=len(marginal),
         manipulation_crossings=len(manipulation),

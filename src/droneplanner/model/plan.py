@@ -61,6 +61,17 @@ class TrajectoryVertex(BaseModel):
     )
     flight_band: FlightBand = FlightBand.UNKNOWN
     speed_hint_ms: float = Field(gt=0)
+    corridor_half_width_m: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "How far the flight stack may deviate laterally here without losing the "
+            "concealment this vertex was planned for. Bounded by the local extent of "
+            "the cover — it stops at the edge of a stand or a depression — so it is "
+            "small in a thin screen of trees and large in the middle of one. 0.0 "
+            "means it was not computed (the M0 stub), not that freedom is zero."
+        ),
+    )
 
     @property
     def altitude_amsl_m(self) -> float:
