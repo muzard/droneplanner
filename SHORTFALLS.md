@@ -9,6 +9,40 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Recently closed
 
+- ✅ **CFIT on descending legs — FIXED 2026-07-27** (was item 0, 🔴🔴; the full
+  diagnosis is kept below under "Top priorities" for the record). Clearance was
+  guaranteed against linear altitude interpolation; PX4 front-loads a leg's
+  descent, so on the demo AO the route sat **6.6 m underground** at its worst
+  point and it crashed the aircraft in SITL on 2026-07-24.
+
+  **Fix = both halves of fix option (a), plus a check that cannot be fooled**
+  (`planner/terrain_profile.py`, wired in `planner/corridor.py`):
+  * `densify_descending_legs` splits any leg dropping more than
+    `cruise_agl_m − 5 m` into equal sub-legs, capping how far the autopilot can
+    get ahead of the terrain. Purely geometric — planner altitudes are AGL, so an
+    inserted vertex picks up a terrain-following altitude from the normal band +
+    smoothing pass for free.
+  * `assess_clearance` re-scores the **final** altitudes against real terrain
+    under the *flown* profile (front-loaded descent; climb deliberately modelled
+    as linear, since prompt climbing only adds clearance and is unvalidated).
+    Densification is a heuristic; this is the guarantee, so a plan cannot silently
+    claim clearance it does not have.
+
+  | demo AO | vertices | min AGL (flown profile) | legs <5 m | feasible |
+  |---|---|---|---|---|
+  | before | 77 | **−6.6 m** | 1 | ❌ |
+  | after | 79 | **+11.9 m** | 0 | ✅ |
+
+  Cost: **2 vertices**. `KinematicReport` now carries `min_clearance_agl_m`,
+  `clearance_violations` and `descent_vertices_inserted`; a breach is a
+  **CRITICAL `terrain_clearance` finding → NO-GO**, and it breaks `feasible`.
+  ⚠️ The residual margin is real and should be read: the same fixed route scores
+  **23.5 m** under the old linear assumption but **11.9 m** under the flown
+  profile, so front-loading still costs ~12 m of clearance after densification.
+  ⚠️ Also note the old **−32.9 m / 5 legs** figure came from a cruder worst-case
+  ("vehicle sits at the leg's lower altitude throughout"); the calibrated descent
+  gradient says −6.6 m / 1 leg. Still CFIT, still fixed — but −32.9 m was an upper
+  bound, not a measurement. **Unflown**: verify on the VM (RUNBOOK §4.8).
 - ✅ **Altitude-frame CFIT bug at the `.plan` boundary** (2026-07-21, found by the
   first real-terrain run). The writer emitted the planner's terrain-relative AGL
   directly as a **relative-to-home** altitude; over the demo AO's 73.5 m of relief
@@ -42,8 +76,13 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Top priorities before sims
 
-0. 🔴🔴 **CFIT on descending legs — terrain clearance assumes an altitude profile
-   PX4 does not fly. PROVEN IN SITL: it crashed the aircraft (2026-07-24).**
+0. ✅ **CFIT on descending legs — FIXED 2026-07-27, see "Recently closed" for the
+   fix and its measured before/after. The diagnosis below is kept as the record
+   of what the defect was, because it is the clearest example in this project of
+   an offline model quietly disagreeing with the autopilot.**
+
+   🔴🔴 **(historical) Terrain clearance assumed an altitude profile PX4 does not
+   fly. PROVEN IN SITL: it crashed the aircraft (2026-07-24).**
 
    The emitted plan is correct at every vertex (all 77 waypoints 29.4–33.3 m AGL)
    *and* along every leg **if** altitude is interpolated linearly with ground
@@ -83,6 +122,31 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
    vertices are all correct here. This is a *trajectory* defect: clearance is
    guaranteed for a path the autopilot never flies. **Flat-world SITL could never
    have found it** (constant altitude ⇒ no descent).
+
+0b. 🟠 **The climb/descent-rate check runs in AGL, so terrain-driven vertical
+   motion is invisible to it** (found 2026-07-27 while fixing item 0; **flagged,
+   deliberately not changed**). `smooth_altitudes` picks and constrains altitudes
+   in the **AGL** band, but the airframe's climb/descent limit applies to actual
+   vertical motion (**AMSL**). On a constant-30 m-AGL route over the demo AO's
+   73.5 m of relief the report says:
+
+   | | max climb | max descent |
+   |---|---|---|
+   | `KinematicReport` (AGL) | **0.00 m/s** | **0.00 m/s** |
+   | actually flown (AMSL) | 0.83 m/s | 0.93 m/s |
+   | airframe limit | 3.0 | 2.0 |
+
+   Here it hides nothing — the real rates are well inside the limits — but the
+   check is *structurally* blind: on steeper terrain, or with a tighter descent
+   limit, it would pass a plan the airframe cannot fly. It is the same
+   AGL-vs-AMSL confusion that produced item 0, in a different place.
+
+   **Not fixed here because it is a design decision, not a bug fix**: constraining
+   in AMSL would change routes and could make terrain-following plans infeasible
+   wherever terrain slope alone exceeds the climb rate — at which point the
+   planner must either climb off the terrain (losing concealment) or route around
+   the slope. That trade is the user's call. Item 0's fix is unaffected: it
+   computes in AMSL throughout.
 
 1. 🔴 **Exposure is evaluated at ground level, not at flight altitude**
    (`fields/viewshed.py`, `target_height_m=0`). The viewshed asks "can an
@@ -186,6 +250,22 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   (b) emit a *speed profile* from the planner's kinematic pass (it already knows
   the fillet radii and where it flagged reversals) and carry it in the `.plan`,
   rather than re-deriving speed from geometry downstream.
+  🛑 **DEPRIORITISED 2026-07-26 — do neither fix yet.** Acceptance §3 flew the
+  synthetic course and the policy **did nothing measurable in the loop**: peak
+  tether turn transient 0.3150 N (policy) vs 0.3164 N (control, cruise
+  everywhere) — **−0.4 %** — for **2.19× flight time**, with cross-track slightly
+  *worse*. Two reasons, both invisible to the offline model: PX4 already
+  decelerates into corners on its own (control arm commanded 6.0 m/s at all 32
+  waypoints, actually flew them at 4.4 m/s at ≤35° bends down to **0.51 m/s** at
+  ≥140° reversals), and slowing further makes PX4 corner *tighter* (5.3 m vs
+  13.6 m radius at the transient peak), which cancels the `v²` gain. Both fixes
+  above would only make a **miscalibrated** policy fire more often. Worse, the
+  offline model over-predicts 7–18× at bends ≥100° and **under-predicts 2–5× at
+  bends ≤35°**, i.e. it is optimistic exactly where the real in-loop peak lives
+  (45–50°). **Prerequisite for either fix: give `droneflight/tether.py` a PX4
+  corner-speed prior** (measurable directly from `sim-logs/4.7/23_40_58.ulg`),
+  then re-derive whether a planner-side trigger buys anything at all. Full result:
+  droneflight CLAUDE.md → tether plugin §3, and RUNBOOK §4.7.
 - 🔴 **No real-AO validation.** Everything is exercised on synthetic fixtures and
   the procedural demo. The spec's small real lidar tile + DEM (§6.1) is not yet
   wired in, so field correctness on real data is unverified.

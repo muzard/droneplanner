@@ -35,11 +35,20 @@ from droneplanner.planner.kinematics import (
     fillet_path,
     smooth_altitudes,
 )
+from droneplanner.planner.terrain_profile import (
+    FlownProfile,
+    assess_clearance,
+    densify_descending_legs,
+)
 from droneplanner.planner.theta_star import path_cost, plan_path
 from droneplanner.raster_lines import bresenham
 
 # A path cell counts as "exposed" when this fraction of observers can see it.
 EXPOSED_THRESHOLD = 0.5
+
+# Terrain clearance floor (m AGL) the flown descent profile must keep. Below this
+# a leg is a CFIT finding, not a warning — see planner/terrain_profile.py.
+MIN_TERRAIN_CLEARANCE_M = 5.0
 
 
 def _segment_cells(a: tuple[int, int], b: tuple[int, int]) -> list[tuple[int, int]]:
@@ -112,19 +121,49 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     filleted, turn_violations, reversals, tightest = fillet_path(
         [(c.x, c.y) for c in coords], limits, _blocked
     )
-    fpts = [Coordinate(x=x, y=y) for x, y in filleted]
-    prefs, floors, ceils, bands = [], [], [], []
-    for p in fpts:
-        pref, floor, ceil, band = _altitude_band(
-            flyability, grid.world_to_pixel(p), mission.cruise_agl_m
-        )
-        prefs.append(pref)
-        floors.append(floor)
-        ceils.append(ceil)
-        bands.append(band)
+
+    def _ground_at(x: float, y: float) -> float:
+        return float(surface.dtm[grid.world_to_pixel(Coordinate(x=x, y=y))])
+
+    def _solve_altitudes(
+        pts: list[tuple[float, float]],
+    ) -> tuple[list[Coordinate], list[float], list[float], list[FlightBand], int, float, float]:
+        """Band + climb-smooth a point list into per-vertex AGL and AMSL altitudes."""
+        cs = [Coordinate(x=x, y=y) for x, y in pts]
+        prefs, floors, ceils, bands = [], [], [], []
+        for p in cs:
+            pref, floor, ceil, band = _altitude_band(
+                flyability, grid.world_to_pixel(p), mission.cruise_agl_m
+            )
+            prefs.append(pref)
+            floors.append(floor)
+            ceils.append(ceil)
+            bands.append(band)
+        dists = [a.distance_to(b) for a, b in pairwise(cs)]
+        agl, climb_v, up, down = smooth_altitudes(prefs, floors, ceils, dists, limits)
+        amsl = [a + _ground_at(p.x, p.y) for p, a in zip(cs, agl, strict=True)]
+        return cs, agl, amsl, bands, climb_v, up, down
+
+    _, _, amsl0, _, _, _, _ = _solve_altitudes(filleted)
+
+    # --- Terrain clearance under the profile PX4 actually flies (SHORTFALLS 0) ---
+    # PX4 front-loads a leg's descent instead of interpolating it along the ground
+    # track, so a long leg with a big drop can reach its target altitude while
+    # still over high ground. Split those legs first, then re-solve altitudes: the
+    # inserted vertices are terrain-following for free, because planner altitudes
+    # are AGL. See planner/terrain_profile.py for the measured defect.
+    profile = FlownProfile.from_rates(limits.max_descent_rate_ms, limits.cruise_speed_ms)
+    max_drop = max(mission.cruise_agl_m - MIN_TERRAIN_CLEARANCE_M, 1.0)
+    densified, inserted = densify_descending_legs(filleted, amsl0, max_drop_m=max_drop)
+
+    fpts, alts, amsl, bands, climb_violations, max_climb, max_descent = _solve_altitudes(densified)
     seg_dists = [a.distance_to(b) for a, b in pairwise(fpts)]
-    alts, climb_violations, max_climb, max_descent = smooth_altitudes(
-        prefs, floors, ceils, seg_dists, limits
+    clearance = assess_clearance(
+        [(p.x, p.y) for p in fpts],
+        amsl,
+        _ground_at,
+        profile,
+        margin_agl_m=MIN_TERRAIN_CLEARANCE_M,
     )
 
     # Carry the terrain elevation under each vertex: AGL alone is not enough to
@@ -144,8 +183,10 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     )
     kinematics = KinematicReport(
         # Reversals are allowed (low payout speed mitigates snag), so they do not
-        # break feasibility — only turn-radius and climb-rate violations do.
-        feasible=(turn_violations == 0 and climb_violations == 0),
+        # break feasibility — turn-radius, climb-rate and terrain-clearance
+        # violations do. Clearance is scored against the *flown* descent profile,
+        # not linear interpolation (SHORTFALLS item 0).
+        feasible=(turn_violations == 0 and climb_violations == 0 and clearance.clears),
         min_turn_radius_m=limits.min_turn_radius_m,
         tightest_turn_radius_m=tightest,
         turn_violations=turn_violations,
@@ -153,6 +194,9 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         max_climb_rate_ms=max_climb,
         max_descent_rate_ms=max_descent,
         climb_violations=climb_violations,
+        min_clearance_agl_m=clearance.min_clearance_agl_m,
+        clearance_violations=clearance.violations,
+        descent_vertices_inserted=inserted,
     )
     trajectory_length = sum(seg_dists)
 

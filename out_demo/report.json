@@ -10,17 +10,25 @@
       "severity": "warning"
     },
     {
+      "code": "descent_densified",
+      "message": "2 vertex/vertices inserted to split big-drop legs so the autopilot cannot descend ahead of the terrain (min clearance now 11.9 m AGL)",
+      "severity": "info"
+    },
+    {
       "code": "flyability_not_analyzed",
       "message": "concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight \u2014 confirm before execution",
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-07-21T12:49:17.496717Z",
+  "generated_at": "2026-07-27T00:35:00.511984Z",
   "kinematics": {
+    "clearance_violations": 0,
     "climb_violations": 0,
+    "descent_vertices_inserted": 2,
     "feasible": true,
     "max_climb_rate_ms": 0.0,
     "max_descent_rate_ms": 0.0,
+    "min_clearance_agl_m": 11.883644104003906,
     "min_turn_radius_m": 8.0,
     "reversals": 0,
     "tightest_turn_radius_m": 8.0,

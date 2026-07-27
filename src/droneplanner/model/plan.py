@@ -6,6 +6,7 @@ GeoJSON, MAVLink ``.plan``, laydown polyline) is a serialization of a ``Plan``.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -113,6 +114,27 @@ class KinematicReport(BaseModel):
     max_climb_rate_ms: float = Field(default=0.0, ge=0)
     max_descent_rate_ms: float = Field(default=0.0, ge=0)
     climb_violations: int = Field(default=0, ge=0)
+    min_clearance_agl_m: float = Field(
+        default=math.inf,
+        description=(
+            "Lowest AGL along the route under the altitude profile PX4 actually flies "
+            "(front-loaded descent), not under linear interpolation. Can be negative — "
+            "that means the plan flies underground. See planner/terrain_profile.py."
+        ),
+    )
+    clearance_violations: int = Field(
+        default=0,
+        ge=0,
+        description="Legs whose flown descent profile drops below the clearance floor.",
+    )
+    descent_vertices_inserted: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Vertices added to split big-drop legs so the autopilot cannot get ahead "
+            "of the terrain."
+        ),
+    )
 
 
 class Plan(BaseModel):

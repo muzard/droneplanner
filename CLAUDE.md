@@ -64,6 +64,18 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   the command writes `<out>_dem.tif` next to the world — **both files must reach
   the sim machine**, and `--dem-path` must match where the DEM will live there.
   Guarded by `surface_z_at_home() == 0`. Awaiting VM verification (RUNBOOK §2b).
+- **Clearance is scored against the profile PX4 FLIES, not linear interpolation
+  (2026-07-27 — don't regress).** PX4 front-loads a leg's descent at its own
+  vertical rate instead of spreading it along the ground track, so a plan clear at
+  every vertex *and* along every linearly-interpolated leg can still fly into a
+  falling slope — it did, in SITL, at 0.8 m AGL (SHORTFALLS "Recently closed").
+  `planner/terrain_profile.py` now (a) splits any leg dropping more than
+  `cruise_agl_m − 5 m` so the autopilot cannot get ahead of the terrain, and
+  (b) re-scores the final altitudes against real terrain under the flown profile —
+  (b) is the guarantee, (a) is only the mechanism. Demo AO: **−6.6 m → +11.9 m**
+  min AGL for **2 extra vertices**. A breach is CRITICAL → NO-GO and breaks
+  `feasible`. **Climb is modelled as linear on purpose** (prompt climbing only
+  adds clearance and is unvalidated — assuming it would make the check optimistic).
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is

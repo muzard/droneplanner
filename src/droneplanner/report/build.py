@@ -163,6 +163,35 @@ def build_report(
                     ),
                 )
             )
+        # CFIT: clearance is scored against the front-loaded descent profile PX4
+        # actually flies, not linear interpolation. This is the check that would
+        # have caught the 2026-07-24 terrain crash — it is NO-GO, not a warning.
+        if kin.clearance_violations > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.CRITICAL,
+                    code="terrain_clearance",
+                    message=(
+                        f"{kin.clearance_violations} leg(s) descend into terrain: minimum "
+                        f"{kin.min_clearance_agl_m:.1f} m AGL under the flown descent profile. "
+                        "PX4 front-loads a leg's descent instead of interpolating it along the "
+                        "ground track, so clearance that holds at every vertex can still fly the "
+                        "aircraft into a falling slope"
+                    ),
+                )
+            )
+        if kin.descent_vertices_inserted > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    code="descent_densified",
+                    message=(
+                        f"{kin.descent_vertices_inserted} vertex/vertices inserted to split "
+                        "big-drop legs so the autopilot cannot descend ahead of the terrain "
+                        f"(min clearance now {kin.min_clearance_agl_m:.1f} m AGL)"
+                    ),
+                )
+            )
 
     # --- Analysis coverage: how far up the M0->M2 ladder did we get? ---
     if not concealment_analyzed:

@@ -2,7 +2,7 @@
 
 **Recommendation: REVIEW**
 
-_Generated 2026-07-21T12:49:17.496717+00:00_
+_Generated 2026-07-27T00:35:00.511984+00:00_
 
 ## Summary
 
@@ -44,5 +44,6 @@ _Generated 2026-07-21T12:49:17.496717+00:00_
 ## Findings
 
 - ⚠️ **warning** (exposed_cable): 154 m of cable is visually/fire exposed
+- **info** (descent_densified): 2 vertex/vertices inserted to split big-drop legs so the autopilot cannot descend ahead of the terrain (min clearance now 11.9 m AGL)
 - ⚠️ **warning** (flyability_not_analyzed): concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight — confirm before execution
 

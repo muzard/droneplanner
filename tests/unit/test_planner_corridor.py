@@ -93,3 +93,42 @@ def test_corridor_avoids_non_navigable_forest() -> None:
             assert not fly.non_navigable[r, c]
     # M2 flies the trunk band, not the M1 constant AGL.
     assert all(v.flight_band is FlightBand.UPPER_TRUNK for v in plan.vertices)
+
+
+def test_corridor_clears_terrain_under_the_flown_descent_profile() -> None:
+    """SHORTFALLS item 0 regression: the planner's own clearance guarantee must
+    hold against PX4's front-loaded descent, not just linear interpolation.
+
+    A plan that passed the old linear check flew into the ground in SITL on
+    2026-07-24. On the demo AO the flown profile put the route 6.6 m *underground*
+    before the descent-densification pass; it must now clear.
+    """
+    mission, dtm, dsm, grid = build_demo(size=120)
+    plan, _surface = plan_over_terrain(mission, dtm, dsm, grid)
+
+    kin = plan.kinematics
+    assert kin is not None
+    assert kin.clearance_violations == 0
+    assert kin.min_clearance_agl_m > 5.0
+    assert kin.feasible
+
+
+def test_clearance_is_scored_against_the_flown_profile_not_linear_interp() -> None:
+    """The check must be the pessimistic one — if these ever agree, the flown
+    profile has silently stopped being modelled."""
+    from droneplanner.model.geometry import Coordinate
+    from droneplanner.planner.terrain_profile import FlownProfile, assess_clearance
+
+    mission, dtm, dsm, grid = build_demo(size=120)
+    plan, _surface = plan_over_terrain(mission, dtm, dsm, grid)
+
+    def ground(x: float, y: float) -> float:
+        return float(dtm[grid.world_to_pixel(Coordinate(x=x, y=y))])
+
+    pts = [(v.x, v.y) for v in plan.vertices]
+    amsl = [v.altitude_amsl_m for v in plan.vertices]
+    linear = assess_clearance(
+        pts, amsl, ground, FlownProfile(descent_gradient=0.0), margin_agl_m=5.0
+    )
+    assert plan.kinematics is not None
+    assert plan.kinematics.min_clearance_agl_m < linear.min_clearance_agl_m
