@@ -199,6 +199,7 @@ def build_world_sdf(
     home_elev_m: float,
     world_name: str,
     collision: bool = True,
+    extra_models_sdf: str = "",
 ) -> str:
     """Inject the terrain heightmap into PX4's own world SDF.
 
@@ -288,6 +289,15 @@ def build_world_sdf(
         )
     )
     world.append(terrain)
+
+    # 5. Optional clutter (TEST-PLAN B2): static trunk cylinders, so the world
+    #    contains something to hit. Appended verbatim rather than built here —
+    #    io/forest_models.py owns the geometry *and* the manifest the flight
+    #    stack senses from, and generating it in two places would let the trees
+    #    the drone avoids drift apart from the trees Gazebo collides with.
+    if extra_models_sdf.strip():
+        for element in ET.fromstring(f"<fragment>{extra_models_sdf}</fragment>"):
+            world.append(element)
 
     ET.indent(root, space="  ")
     header = '<?xml version="1.0" encoding="UTF-8"?>\n'

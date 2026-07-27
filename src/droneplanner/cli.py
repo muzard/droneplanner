@@ -99,6 +99,95 @@ def demo_ao(
     typer.echo(f"next: droneplanner plan --mission {mission_path} --out out/")
 
 
+def _build_forest(
+    dtm_raster: object,
+    forest_dsm: Path,
+    plan: Path,
+    out: Path,
+    *,
+    home: tuple[float, float, float],
+    band_m: float,
+    stems_per_ha: float,
+    max_stems: int,
+    trunk_radius_m: float,
+) -> str:
+    """Generate trunks along the plan's route and write the perception manifest.
+
+    The route comes from the ``.plan`` itself, so the forest is placed around the
+    path that will actually be flown — clutter somewhere else tests nothing.
+    """
+    import json
+
+    from pyproj import Transformer
+
+    from droneplanner.fields.altitude import canopy_height
+    from droneplanner.io.forest_models import (
+        generate_trunks,
+        nearest_trunk_spacing_m,
+        trunk_manifest_csv,
+        trunks_to_sdf,
+    )
+    from droneplanner.io.raster import read_raster
+    from droneplanner.model.geometry import Coordinate
+    from droneplanner.model.grid import Grid
+
+    dsm_raster = read_raster(forest_dsm)
+    if dsm_raster.shape != dtm_raster.shape:  # type: ignore[attr-defined]
+        raise typer.BadParameter("--forest-dsm must share the DTM's grid")
+
+    grid = Grid(
+        transform=dtm_raster.transform,  # type: ignore[attr-defined]
+        rows=dtm_raster.shape[0],  # type: ignore[attr-defined]
+        cols=dtm_raster.shape[1],  # type: ignore[attr-defined]
+        crs=dsm_raster.crs,
+    )
+    chm = canopy_height(dtm_raster.data, dsm_raster.data)  # type: ignore[attr-defined]
+
+    items = json.loads(plan.read_text())["mission"]["items"]
+    to_crs = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
+    route = []
+    for item in items:
+        params = item.get("params") or []
+        if len(params) >= 6 and params[4] is not None and params[5] is not None:
+            x, y = to_crs.transform(float(params[5]), float(params[4]))
+            route.append(Coordinate(x=x, y=y))
+
+    home_x, home_y, home_elev = home
+    trunks, stats = generate_trunks(
+        chm,
+        dtm_raster.data,  # type: ignore[attr-defined]
+        grid,
+        route,
+        home=Coordinate(x=home_x, y=home_y),
+        home_elev_m=home_elev,
+        band_m=band_m,
+        stems_per_ha=stems_per_ha,
+        trunk_radius_m=trunk_radius_m,
+        max_stems=max_stems,
+    )
+
+    manifest = out.parent / f"{out.stem}_trunks.csv"
+    manifest.write_text(trunk_manifest_csv(trunks), encoding="utf-8")
+    spacing = nearest_trunk_spacing_m(trunks)
+    typer.secho(
+        f"forest: {stats.trunks} trunks over {stats.band_area_ha:.1f} ha "
+        f"({stats.effective_stems_per_ha:.0f} stems/ha, median nearest-neighbour "
+        f"{spacing:.1f} m, band reaches {stats.max_route_distance_m:.0f} m) -> {manifest}\n"
+        f"        {stats.on_route_trunks} trunk(s) within a rotor span of the planned "
+        f"centreline — a run WITHOUT avoidance should hit them",
+        fg=typer.colors.GREEN,
+    )
+    if stats.subsampled:
+        typer.secho(
+            f"  NOTE: capped at --max-stems {max_stems}, so the density is "
+            f"{stats.effective_stems_per_ha:.0f}/ha, not the {stats.requested_stems_per_ha:.0f}/ha "
+            "requested. The band was NOT narrowed — a hole in the forest would let the "
+            "aircraft escape it, which would test the wrong thing.",
+            fg=typer.colors.YELLOW,
+        )
+    return trunks_to_sdf(trunks)
+
+
 @app.command("gz-world")
 def gz_world(
     dtm: Path = typer.Option(
@@ -139,6 +228,25 @@ def gz_world(
             "Bisects 'heightmap present' from 'terrain has slopes' when the vehicle is unstable."
         ),
     ),
+    forest_dsm: Path | None = typer.Option(
+        None,
+        "--forest-dsm",
+        exists=True,
+        dir_okay=False,
+        help=(
+            "TEST-PLAN B2: also populate the world with tree trunks derived from this DSM "
+            "(canopy = DSM - DTM), near the plan's route. Writes a <out>_trunks.csv manifest "
+            "for droneflight's perception oracle. Omit for the plain terrain world."
+        ),
+    ),
+    stems_per_ha: float = typer.Option(400.0, "--stems-per-ha", help="Target stem density."),
+    forest_band_m: float = typer.Option(
+        25.0, "--forest-band", help="Half-width of the treed band around the route (m)."
+    ),
+    max_stems: int = typer.Option(
+        4000, "--max-stems", help="Cap on trunk count; density is reduced, never the band."
+    ),
+    trunk_radius_m: float = typer.Option(0.15, "--trunk-radius", help="Trunk radius (m)."),
 ) -> None:
     """Generate a Gazebo world whose heightmap is the planned terrain.
 
@@ -196,6 +304,20 @@ def gz_world(
     # point at the normalised file we just wrote.
     gazebo_dem = (dem_path.parent / norm_path.name) if dem_path is not None else norm_path.resolve()
 
+    trunks_sdf = ""
+    if forest_dsm is not None:
+        trunks_sdf = _build_forest(
+            raster,
+            forest_dsm,
+            plan,
+            out,
+            home=(home_x, home_y, home_elev),
+            band_m=forest_band_m,
+            stems_per_ha=stems_per_ha,
+            max_stems=max_stems,
+            trunk_radius_m=trunk_radius_m,
+        )
+
     out.write_text(
         build_world_sdf(
             raster,
@@ -208,6 +330,7 @@ def gz_world(
             home_elev_m=home_elev,
             world_name=out.stem,
             collision=not no_collision,
+            extra_models_sdf=trunks_sdf,
         ),
         encoding="utf-8",
     )

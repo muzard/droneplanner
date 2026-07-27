@@ -28,9 +28,13 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
     --base-world <PX4>/Tools/simulation/gz/worlds/default.sdf --out worlds/t.sdf
                         # Gazebo world = PX4's own world + the planned terrain
                         # add --flat for the diagnostic flat-DEM world
+                        # add --forest-dsm demo_ao/dsm.tif for TREES (TEST-PLAN B2):
+                        #   static trunk cylinders + a <out>_trunks.csv manifest that
+                        #   droneflight's perception oracle senses from. ⚠️ --base-world
+                        #   must be PX4's default.sdf, never an already-generated world.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 218 tests, ~95% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 226 tests, ~95% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
