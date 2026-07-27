@@ -14,8 +14,9 @@ import pytest
 
 from droneplanner.planner.terrain_profile import (
     FlownProfile,
+    _settle_margin_m,
     assess_clearance,
-    densify_descending_legs,
+    densify_unsafe_descents,
 )
 
 # The airframe in configs/mission.example.yaml: 2 m/s descent at 6 m/s cruise.
@@ -130,59 +131,121 @@ class TestAssessClearance:
             )
 
 
-class TestDensifyDescendingLegs:
-    def test_splits_a_big_drop_into_capped_sub_legs(self) -> None:
-        pts, inserted = densify_descending_legs(
-            [(0.0, 0.0), (900.0, 0.0)], [130.0, 70.0], max_drop_m=25.0
+class TestDensifyUnsafeDescents:
+    """The mechanism. Every test here is a lesson paid for in SITL."""
+
+    # A 900 m leg descending 60 m over ground that holds high then falls away —
+    # the shape that put the aircraft in the ground on 2026-07-24.
+    FAILING_LEG = ([(0.0, 0.0), (900.0, 0.0)], [130.0, 70.0])
+
+    @staticmethod
+    def _falling_slope(x: float, _y: float) -> float:
+        return 100.0 if x < 450.0 else 100.0 - (x - 450.0) * (60.0 / 450.0)
+
+    @classmethod
+    def _terrain_following(cls, x: float, y: float) -> float:
+        return cls._falling_slope(x, y) + 30.0
+
+    def _densify(self, pts: list[tuple[float, float]], amsl: list[float], **kw: object):
+        return densify_unsafe_descents(
+            pts,
+            amsl,
+            predicted_amsl=self._terrain_following,
+            ground_at=self._falling_slope,
+            profile=DEMO_PROFILE,
+            margin_agl_m=5.0,
+            **kw,  # type: ignore[arg-type]
         )
-        # 60 m drop / 25 m cap -> 3 sub-legs -> 2 inserted vertices.
-        assert inserted == 2
-        assert pts == [(0.0, 0.0), (300.0, 0.0), (600.0, 0.0), (900.0, 0.0)]
 
-    def test_capped_sub_legs_restore_clearance_on_the_failing_case(self) -> None:
-        """Densification must actually fix the leg the flown profile rejects."""
-        amsl = [130.0, 70.0]
+    def test_splits_a_leg_the_clearance_check_rejects(self) -> None:
+        pts, inserted = self._densify(*self.FAILING_LEG)
+        assert inserted >= 1
+        assert len(pts) == 2 + inserted
 
-        def ground(x: float, _y: float) -> float:
-            return 100.0 if x < 450.0 else 100.0 - (x - 450.0) * (60.0 / 450.0)
-
-        pts, _ = densify_descending_legs([(0.0, 0.0), (900.0, 0.0)], amsl, max_drop_m=25.0)
-        # Inserted vertices are terrain-following, as the planner's AGL bands make them.
-        dense_amsl = [ground(x, y) + 30.0 for x, y in pts]
-        dense_amsl[0], dense_amsl[-1] = amsl[0], amsl[-1]
-        rep = assess_clearance(pts, dense_amsl, ground, DEMO_PROFILE, margin_agl_m=5.0)
+    def test_the_split_actually_restores_clearance(self) -> None:
+        """Splitting is pointless unless the guarantee then passes."""
+        pts, _ = self._densify(*self.FAILING_LEG)
+        amsl = [self._terrain_following(x, y) for x, y in pts]
+        amsl[0], amsl[-1] = self.FAILING_LEG[1]
+        rep = assess_clearance(pts, amsl, self._falling_slope, DEMO_PROFILE, margin_agl_m=5.0)
         assert rep.clears
         assert rep.min_clearance_agl_m > 5.0
 
-    def test_leaves_small_drops_and_level_legs_alone(self) -> None:
-        pts = [(0.0, 0.0), (100.0, 0.0), (200.0, 0.0)]
-        out, inserted = densify_descending_legs(pts, [30.0, 20.0, 20.0], max_drop_m=25.0)
+    def test_does_NOT_split_a_leg_that_already_clears(self) -> None:
+        """THE regression test for the 2026-07-27 SITL failure.
+
+        The first version split on ``drop > threshold`` regardless of whether the
+        leg was safe. On the demo AO that inserted a vertex into a leg already
+        clear at +9.0 m AGL; PX4 missed it by 1.58 m vertically (> the 0.8 m
+        ``NAV_MC_ALT_RAD``), never marked it reached, and the mission froze at
+        11/79 while the trajectory generator slid past it into the ground.
+        A big drop is not by itself a reason to insert anything.
+        """
+        # 60 m of descent over flat, low ground: a huge drop that is never unsafe.
+        flat = lambda _x, _y: 0.0  # noqa: E731
+        pts, inserted = densify_unsafe_descents(
+            [(0.0, 0.0), (900.0, 0.0)],
+            [130.0, 70.0],
+            predicted_amsl=lambda _x, _y: 30.0,
+            ground_at=flat,
+            profile=DEMO_PROFILE,
+            margin_agl_m=5.0,
+        )
         assert inserted == 0
-        assert out == pts
+        assert pts == [(0.0, 0.0), (900.0, 0.0)]
+
+    def test_inserts_as_few_vertices_as_possible(self) -> None:
+        """Every inserted vertex is a new chance for PX4 to refuse to sequence."""
+        _, inserted = self._densify(*self.FAILING_LEG)
+        assert inserted == 1
+
+    def test_placement_maximises_the_level_run_before_arrival(self) -> None:
+        """Placement is scored by settle margin, not taken as the midpoint.
+
+        Measured 2026-07-24 over 51 accepted arrivals: PX4 holds altitude to
+        0.35 m mean / 0.64 m p95 when it reaches a waypoint level. The vertex it
+        missed by 1.58 m had only ~84 m of level run.
+        """
+        pts, _ = self._densify(*self.FAILING_LEG)
+        amsl = [self._terrain_following(x, y) for x, y in pts]
+        amsl[0], amsl[-1] = self.FAILING_LEG[1]
+        runs = [
+            _settle_margin_m(math.dist(pts[k], pts[k + 1]), amsl[k] - amsl[k + 1], DEMO_PROFILE)
+            for k in range(len(pts) - 1)
+        ]
+        assert min(runs) > 84.0, "must beat the level run of the vertex PX4 refused"
 
     def test_never_splits_a_climb(self) -> None:
         """A front-loaded climb only gains clearance; the check assumes linear."""
-        out, inserted = densify_descending_legs(
-            [(0.0, 0.0), (900.0, 0.0)], [70.0, 200.0], max_drop_m=25.0
-        )
+        out, inserted = self._densify([(0.0, 0.0), (900.0, 0.0)], [70.0, 200.0])
         assert inserted == 0
         assert out == [(0.0, 0.0), (900.0, 0.0)]
 
     def test_zero_length_leg_is_not_split(self) -> None:
-        out, inserted = densify_descending_legs(
-            [(5.0, 5.0), (5.0, 5.0)], [130.0, 70.0], max_drop_m=25.0
-        )
+        out, inserted = self._densify([(5.0, 5.0), (5.0, 5.0)], [130.0, 70.0])
         assert inserted == 0
         assert out == [(5.0, 5.0), (5.0, 5.0)]
 
+    def test_leaves_the_route_alone_when_nothing_fails(self) -> None:
+        pts = [(0.0, 0.0), (100.0, 0.0), (200.0, 0.0)]
+        out, inserted = densify_unsafe_descents(
+            pts,
+            [130.0, 129.0, 128.0],
+            predicted_amsl=lambda _x, _y: 130.0,
+            ground_at=lambda _x, _y: 0.0,
+            profile=DEMO_PROFILE,
+            margin_agl_m=5.0,
+        )
+        assert inserted == 0
+        assert out == pts
+
     def test_is_deterministic(self) -> None:
-        args = ([(0.0, 0.0), (900.0, 30.0)], [130.0, 40.0])
-        a = densify_descending_legs(*args, max_drop_m=17.0)
-        b = densify_descending_legs(*args, max_drop_m=17.0)
+        a = self._densify(*self.FAILING_LEG)
+        b = self._densify(*self.FAILING_LEG)
         assert a == b
 
     def test_rejects_bad_arguments(self) -> None:
-        with pytest.raises(ValueError, match="max_drop_m"):
-            densify_descending_legs([(0.0, 0.0)], [1.0], max_drop_m=0.0)
         with pytest.raises(ValueError, match="same length"):
-            densify_descending_legs([(0.0, 0.0)], [1.0, 2.0], max_drop_m=5.0)
+            self._densify([(0.0, 0.0)], [1.0, 2.0])
+        with pytest.raises(ValueError, match="max_inserts_per_leg"):
+            self._densify(*self.FAILING_LEG, max_inserts_per_leg=0)

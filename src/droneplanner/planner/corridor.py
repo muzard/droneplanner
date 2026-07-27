@@ -38,7 +38,7 @@ from droneplanner.planner.kinematics import (
 from droneplanner.planner.terrain_profile import (
     FlownProfile,
     assess_clearance,
-    densify_descending_legs,
+    densify_unsafe_descents,
 )
 from droneplanner.planner.theta_star import path_cost, plan_path
 from droneplanner.raster_lines import bresenham
@@ -149,12 +149,29 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     # --- Terrain clearance under the profile PX4 actually flies (SHORTFALLS 0) ---
     # PX4 front-loads a leg's descent instead of interpolating it along the ground
     # track, so a long leg with a big drop can reach its target altitude while
-    # still over high ground. Split those legs first, then re-solve altitudes: the
-    # inserted vertices are terrain-following for free, because planner altitudes
-    # are AGL. See planner/terrain_profile.py for the measured defect.
+    # still over high ground. Split *only the legs that actually hit terrain*,
+    # then re-solve altitudes: the inserted vertices are terrain-following for
+    # free, because planner altitudes are AGL.
+    # ⚠️ Splitting on a drop threshold instead of on the clearance check froze a
+    # real SITL mission at 11/79 — see planner/terrain_profile.py.
     profile = FlownProfile.from_rates(limits.max_descent_rate_ms, limits.cruise_speed_ms)
-    max_drop = max(mission.cruise_agl_m - MIN_TERRAIN_CLEARANCE_M, 1.0)
-    densified, inserted = densify_descending_legs(filleted, amsl0, max_drop_m=max_drop)
+
+    def _predicted_amsl(x: float, y: float) -> float:
+        """AMSL an inserted vertex would get from the band + smoothing pass."""
+        p = Coordinate(x=x, y=y)
+        pref, floor, ceil, _band = _altitude_band(
+            flyability, grid.world_to_pixel(p), mission.cruise_agl_m
+        )
+        return _ground_at(x, y) + min(max(pref, floor), ceil)
+
+    densified, inserted = densify_unsafe_descents(
+        filleted,
+        amsl0,
+        predicted_amsl=_predicted_amsl,
+        ground_at=_ground_at,
+        profile=profile,
+        margin_agl_m=MIN_TERRAIN_CLEARANCE_M,
+    )
 
     fpts, alts, amsl, bands, climb_violations, max_climb, max_descent = _solve_altitudes(densified)
     seg_dists = [a.distance_to(b) for a, b in pairwise(fpts)]

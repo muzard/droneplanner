@@ -63,11 +63,6 @@
         30.0
       ],
       [
-        500588.29743444105,
-        5200287.659486888,
-        30.0
-      ],
-      [
         500712.01161004085,
         5200312.402322008,
         30.0
@@ -412,11 +407,6 @@
     "route_index": 0,
     "total_length_m": 5135.567099291089,
     "vertices": [
-      {
-        "altitude_agl_m": 30.0,
-        "flight_band": "open",
-        "speed_hint_ms": 6.0
-      },
       {
         "altitude_agl_m": 30.0,
         "flight_band": "open",

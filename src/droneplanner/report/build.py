@@ -186,9 +186,10 @@ def build_report(
                     severity=Severity.INFO,
                     code="descent_densified",
                     message=(
-                        f"{kin.descent_vertices_inserted} vertex/vertices inserted to split "
-                        "big-drop legs so the autopilot cannot descend ahead of the terrain "
-                        f"(min clearance now {kin.min_clearance_agl_m:.1f} m AGL)"
+                        f"{kin.descent_vertices_inserted} vertex/vertices inserted to split the "
+                        "leg(s) whose flown descent hit terrain, so the autopilot cannot descend "
+                        f"ahead of it (min clearance now {kin.min_clearance_agl_m:.1f} m AGL). "
+                        "Each inserted vertex is one PX4 must accept vertically to sequence past"
                     ),
                 )
             )

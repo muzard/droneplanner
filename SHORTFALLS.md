@@ -15,25 +15,42 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   descent, so on the demo AO the route sat **6.6 m underground** at its worst
   point and it crashed the aircraft in SITL on 2026-07-24.
 
-  **Fix = both halves of fix option (a), plus a check that cannot be fooled**
+  **Fix = fix option (a) driven by a check that cannot be fooled**
   (`planner/terrain_profile.py`, wired in `planner/corridor.py`):
-  * `densify_descending_legs` splits any leg dropping more than
-    `cruise_agl_m − 5 m` into equal sub-legs, capping how far the autopilot can
-    get ahead of the terrain. Purely geometric — planner altitudes are AGL, so an
-    inserted vertex picks up a terrain-following altitude from the normal band +
-    smoothing pass for free.
   * `assess_clearance` re-scores the **final** altitudes against real terrain
     under the *flown* profile (front-loaded descent; climb deliberately modelled
     as linear, since prompt climbing only adds clearance and is unvalidated).
-    Densification is a heuristic; this is the guarantee, so a plan cannot silently
-    claim clearance it does not have.
+    This is the guarantee, so a plan cannot silently claim clearance it lacks.
+  * `densify_unsafe_descents` splits **only the legs that check rejects**, placing
+    each inserted vertex where the settle margin (level-flight run before arrival)
+    is longest. Planner altitudes are AGL, so an inserted vertex picks up a
+    terrain-following altitude from the normal band + smoothing pass for free.
+
+  🔴 **v1 of this fix caused a worse crash than the bug — read this before
+  touching it (2026-07-27, `sim-logs/cfit/`).** v1 split on a *drop threshold*
+  (`drop > cruise_agl − 5 m`) rather than on the clearance check, so on the demo
+  AO it also split leg 10 — **already clear at +9.0 m AGL**. PX4 needs both
+  horizontal *and* vertical acceptance (`NAV_MC_ALT_RAD`, 0.8 m); the vehicle
+  passed that gratuitous vertex 1.58 m off vertically, the sequencer **froze at
+  11/79**, and the trajectory generator slid past it for 565 s, descending, until
+  it touched down 29 m below the plan's lowest altitude. **An unreachable
+  waypoint is worse than the CFIT it prevents — it fails 40 legs earlier.**
+  Two rules came out of it, both encoded in the module and its tests:
+  1. **Insert only where the check fails.** A big drop is not by itself unsafe:
+     PX4 flew leg 10's full 27.8 m drop over 251 m *unsplit* with **0.22 m** of
+     vertical error. Splitting it made tracking **7× worse**.
+  2. **Insert as few as possible, placed where the vehicle arrives level.** Over
+     51 accepted arrivals (2026-07-24) PX4 held altitude to **0.35 m mean /
+     0.64 m p95**; the vertex it refused had ~84 m of level run, the one now
+     inserted has **327 m**.
 
   | demo AO | vertices | min AGL (flown profile) | legs <5 m | feasible |
   |---|---|---|---|---|
   | before | 77 | **−6.6 m** | 1 | ❌ |
-  | after | 79 | **+11.9 m** | 0 | ✅ |
+  | v1 (drop threshold) | 79 | +11.9 m | 0 | ✅ *but froze SITL at 11/79* |
+  | now (check-driven) | **78** | **+9.0 m** | 0 | ✅ |
 
-  Cost: **2 vertices**. `KinematicReport` now carries `min_clearance_agl_m`,
+  Cost: **1 vertex**. `KinematicReport` now carries `min_clearance_agl_m`,
   `clearance_violations` and `descent_vertices_inserted`; a breach is a
   **CRITICAL `terrain_clearance` finding → NO-GO**, and it breaks `feasible`.
   ⚠️ The residual margin is real and should be read: the same fixed route scores
@@ -42,7 +59,36 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   ⚠️ Also note the old **−32.9 m / 5 legs** figure came from a cruder worst-case
   ("vehicle sits at the leg's lower altitude throughout"); the calibrated descent
   gradient says −6.6 m / 1 leg. Still CFIT, still fixed — but −32.9 m was an upper
-  bound, not a measurement. **Unflown**: verify on the VM (RUNBOOK §4.8).
+  bound, not a measurement.
+  ✅ **THE CLEARANCE FIX IS NOW VERIFIED IN FLIGHT (2026-07-27,
+  `sim-logs/cfit/01_36_02.ulg`).** Same AO, same leg that crashed the aircraft on
+  2026-07-24: **minimum AGL 11.97 m** over the whole mission phase (predicted
+  floor 9.02 m), **0 of 49 500 samples below 5 m**, no terrain contact.
+
+  **And the mechanism is confirmed, not just the outcome.** Splitting the leg
+  shrinks the commanded altitude *step*, and PX4's descent gradient scales with
+  the step — measured on the same terrain:
+
+  | leg | commanded step | flown descent gradient | min AGL |
+  |---|---|---|---|
+  | 2026-07-24, unsplit | −40.5 m in one go | **0.220** | 0.8 m → crash |
+  | 2026-07-27, split | −18.3 m | **0.040** | **11.97 m** |
+
+  So the front-loading the model assumes (0.333) is real and conservative — the
+  worst observed is 0.220 — and the fix works for exactly the reason claimed.
+
+  🟠 **Residual, and it is now the ONLY blocker: PX4 will not sequence past the
+  inserted vertex.** The run stalled at 51/78 targeting it, missing the vertical
+  acceptance window by **7 cm** (best |error| inside `NAV_ACC_RAD` was 0.87 m vs
+  `NAV_MC_ALT_RAD` = 0.8 m). **No placement strategy can fix this**: PX4 spreads a
+  leg's descent across the leg, so the vehicle is descending at *every* interior
+  point — there is no settled position to insert at, and the settle-margin
+  scoring cannot help (it is retained because it does no harm and picks sensible
+  positions). The lever is the autopilot's acceptance tolerance:
+  `droneflight/configs/px4/terrain_following.params` sets `NAV_MC_ALT_RAD = 2.0`.
+  That is an *acceptance* tolerance, not a clearance change — the aircraft flies
+  no lower, and every original waypoint tracked to ≤0.37 m so their behaviour is
+  unchanged. Re-fly with it loaded (RUNBOOK §4.8).
 - ✅ **Altitude-frame CFIT bug at the `.plan` boundary** (2026-07-21, found by the
   first real-terrain run). The writer emitted the planner's terrain-relative AGL
   directly as a **relative-to-home** altitude; over the demo AO's 73.5 m of relief

@@ -26,15 +26,20 @@ Two behaviours, deliberately **asymmetric** — this is not an oversight:
 
 The fix has two halves and they are deliberately separate:
 
-* :func:`densify_descending_legs` is the *mechanism* — it splits a big-drop leg so
-  the autopilot can never get more than one short sub-leg ahead of the terrain.
-  Because planner altitudes are **AGL** (terrain-relative), an inserted vertex
-  picks up a terrain-following altitude from the normal band/smoothing pass; the
-  densifier itself is purely geometric.
 * :func:`assess_clearance` is the *guarantee* — it re-scores the final altitudes
-  against the flown profile and real terrain. Densification is a heuristic; this
-  is what the risk report is allowed to trust, so a plan cannot silently claim
-  clearance it does not have.
+  against the flown profile and real terrain. This is what the risk report is
+  allowed to trust, so a plan cannot silently claim clearance it does not have.
+* :func:`densify_unsafe_descents` is the *mechanism* — it splits a leg the check
+  rejects, so the autopilot cannot get ahead of the terrain. Because planner
+  altitudes are **AGL** (terrain-relative), an inserted vertex picks up a
+  terrain-following altitude from the normal band/smoothing pass.
+
+**The mechanism is driven BY the guarantee, and that is load-bearing.** The first
+version split every leg whose drop exceeded a threshold, without asking whether
+that leg was actually unsafe. On the demo AO it split one that was already clear
+at +9.0 m AGL, and that single gratuitous vertex **froze a real SITL mission at
+11/79** on 2026-07-27 — 40 legs before the fix was ever exercised. See
+:func:`densify_unsafe_descents` for the mechanism and why placement matters.
 
 All geometry is in the projected world CRS (meters); altitudes here are **AMSL**,
 because clearance is a question about terrain, not about the AGL bookkeeping.
@@ -169,22 +174,71 @@ def assess_clearance(
     )
 
 
-def densify_descending_legs(
-    pts: list[Point], amsl: list[float], *, max_drop_m: float
-) -> tuple[list[Point], int]:
-    """Split legs that descend more than ``max_drop_m`` into equal sub-legs.
+# Candidate insertion positions along a leg, as a fraction of its length. Coarse
+# on purpose: a finer grid buys nothing (the clearance surface is smooth) and a
+# denser search would make the placement sensitive to DEM sampling noise.
+_CANDIDATE_FRACTIONS: tuple[float, ...] = tuple(round(0.10 + 0.05 * k, 2) for k in range(17))
 
-    The front-loaded profile can be below the terrain-following one by at most the
-    leg's own drop, so capping the per-sub-leg drop caps how far the autopilot can
-    get ahead of the terrain. Returns ``(points, inserted_count)``.
 
-    Only *descending* legs are split: a front-loaded climb gains clearance, and a
-    linear climb is what the check already assumes.
+def _settle_margin_m(length_m: float, drop_m: float, profile: FlownProfile) -> float:
+    """Metres of LEVEL flight before a sub-leg's endpoint.
+
+    The autopilot gives up ``drop_m`` at ``descent_gradient``, so it needs
+    ``drop_m / gradient`` metres to get down; whatever is left of the sub-leg is
+    flown level, which is when its altitude tracking settles. Negative means the
+    vehicle is still descending when it arrives.
     """
-    if max_drop_m <= 0.0:
-        raise ValueError("max_drop_m must be positive")
+    if drop_m <= 0.0:
+        return length_m
+    if profile.descent_gradient <= 0.0:
+        return length_m
+    return length_m - drop_m / profile.descent_gradient
+
+
+def densify_unsafe_descents(
+    pts: list[Point],
+    amsl: list[float],
+    *,
+    predicted_amsl: Callable[[float, float], float],
+    ground_at: GroundFn,
+    profile: FlownProfile,
+    margin_agl_m: float,
+    max_inserts_per_leg: int = 3,
+    samples_per_leg: int = DEFAULT_SAMPLES_PER_LEG,
+) -> tuple[list[Point], int]:
+    """Split only the legs whose flown profile actually hits terrain.
+
+    ⚠️ **Two lessons from SITL are baked in here — do not "simplify" either away.**
+
+    1. **Split only legs that FAIL the clearance check**, never every leg over a
+       drop threshold. The first version split on ``drop > cruise_agl - margin``,
+       which on the demo AO also split a leg that was already clear at +9.0 m AGL.
+       That gratuitous vertex **froze the mission at 11/79** on 2026-07-27: PX4
+       needs both horizontal *and* vertical acceptance (``NAV_MC_ALT_RAD``, 0.8 m
+       by default), the vehicle passed it 1.58 m off vertically, the sequencer
+       never advanced, and the trajectory generator slid past it for 565 s until
+       it touched down. **An unreachable waypoint is worse than the CFIT it was
+       meant to prevent** — it fails 40 legs earlier. Every inserted vertex is a
+       new chance to fail this way, so insert as few as possible.
+    2. **Place the vertex where the vehicle has LEVELLED OFF**, not at the
+       geometric midpoint. Measured over 51 accepted arrivals (2026-07-24):
+       PX4 tracks altitude to 0.35 m mean / 0.64 m p95 at a waypoint it reaches
+       level — including a 27.8 m descent over 251 m, tracked to 0.22 m *unsplit*.
+       The midpoint of that same leg was missed by 1.58 m. So placement is scored
+       by :func:`_settle_margin_m`, the level-flight run before the endpoint.
+
+    ``predicted_amsl(x, y)`` must return the AMSL altitude an inserted vertex
+    would receive from the normal band + smoothing pass, so placement is scored
+    against the altitude the vertex will actually get.
+
+    Returns ``(points, inserted_count)``. Only *descending* legs are considered: a
+    front-loaded climb gains clearance, and a linear climb is what the check
+    already assumes.
+    """
     if len(pts) != len(amsl):
         raise ValueError("pts and amsl must be the same length")
+    if max_inserts_per_leg < 1:
+        raise ValueError("max_inserts_per_leg must be at least 1")
     if len(pts) < 2:
         return list(pts), 0
 
@@ -192,12 +246,94 @@ def densify_descending_legs(
     inserted = 0
     for i in range(len(pts) - 1):
         a, b = pts[i], pts[i + 1]
-        drop = amsl[i] - amsl[i + 1]
-        if drop > max_drop_m and _leg_length(a, b) > 0.0:
-            n = math.ceil(drop / max_drop_m)
-            for k in range(1, n):
-                frac = k / n
-                out.append((a[0] + (b[0] - a[0]) * frac, a[1] + (b[1] - a[1]) * frac))
-                inserted += 1
+        length = _leg_length(a, b)
+        leg_clears = assess_clearance(
+            [a, b],
+            [amsl[i], amsl[i + 1]],
+            ground_at,
+            profile,
+            margin_agl_m=margin_agl_m,
+            samples_per_leg=samples_per_leg,
+        ).clears
+        if leg_clears or length <= 0.0 or amsl[i] <= amsl[i + 1]:
+            out.append(b)
+            continue
+
+        placement = _best_placement(
+            a,
+            b,
+            amsl[i],
+            amsl[i + 1],
+            predicted_amsl=predicted_amsl,
+            ground_at=ground_at,
+            profile=profile,
+            margin_agl_m=margin_agl_m,
+            max_inserts=max_inserts_per_leg,
+            samples_per_leg=samples_per_leg,
+        )
+        out.extend(placement)
+        inserted += len(placement)
         out.append(b)
     return out, inserted
+
+
+def _best_placement(
+    a: Point,
+    b: Point,
+    amsl_a: float,
+    amsl_b: float,
+    *,
+    predicted_amsl: Callable[[float, float], float],
+    ground_at: GroundFn,
+    profile: FlownProfile,
+    margin_agl_m: float,
+    max_inserts: int,
+    samples_per_leg: int,
+) -> list[Point]:
+    """Interior vertices for one failing leg — fewest first, then most settled.
+
+    Tries 1 insert before 2, and among placements that clear, picks the one whose
+    *worst* sub-leg has the longest level-flight run. Returns ``[]`` when nothing
+    helps, leaving the leg intact for :func:`assess_clearance` to fail loudly —
+    silently shipping unreachable vertices is the failure mode this whole module
+    exists to avoid.
+    """
+
+    def at(frac: float) -> Point:
+        return (a[0] + (b[0] - a[0]) * frac, a[1] + (b[1] - a[1]) * frac)
+
+    def clears(fracs: tuple[float, ...]) -> tuple[bool, float]:
+        pts = [a, *(at(f) for f in fracs), b]
+        alts = [amsl_a, *(predicted_amsl(*at(f)) for f in fracs), amsl_b]
+        rep = assess_clearance(
+            pts,
+            alts,
+            ground_at,
+            profile,
+            margin_agl_m=margin_agl_m,
+            samples_per_leg=samples_per_leg,
+        )
+        worst_settle = min(
+            _settle_margin_m(_leg_length(pts[k], pts[k + 1]), alts[k] - alts[k + 1], profile)
+            for k in range(len(pts) - 1)
+        )
+        return rep.clears, worst_settle
+
+    for n in range(1, max_inserts + 1):
+        best: tuple[float, tuple[float, ...]] | None = None
+        for fracs in _candidate_sets(n):
+            ok, settle = clears(fracs)
+            if ok and (best is None or settle > best[0]):
+                best = (settle, fracs)
+        if best is not None:
+            return [at(f) for f in best[1]]
+    return []
+
+
+def _candidate_sets(n: int) -> list[tuple[float, ...]]:
+    """Insertion-fraction combinations to try for ``n`` interior vertices."""
+    if n == 1:
+        return [(f,) for f in _CANDIDATE_FRACTIONS]
+    # Beyond one vertex the search space explodes and the marginal gain is small,
+    # so fall back to even spacing — a leg needing 2+ inserts is already unusual.
+    return [tuple((k + 1) / (n + 1) for k in range(n))]

@@ -11,7 +11,7 @@
     },
     {
       "code": "descent_densified",
-      "message": "2 vertex/vertices inserted to split big-drop legs so the autopilot cannot descend ahead of the terrain (min clearance now 11.9 m AGL)",
+      "message": "1 vertex/vertices inserted to split the leg(s) whose flown descent hit terrain, so the autopilot cannot descend ahead of it (min clearance now 9.0 m AGL). Each inserted vertex is one PX4 must accept vertically to sequence past",
       "severity": "info"
     },
     {
@@ -20,15 +20,15 @@
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-07-27T00:45:09.175909Z",
+  "generated_at": "2026-07-27T01:35:05.978548Z",
   "kinematics": {
     "clearance_violations": 0,
     "climb_violations": 0,
-    "descent_vertices_inserted": 2,
+    "descent_vertices_inserted": 1,
     "feasible": true,
     "max_climb_rate_ms": 0.0,
     "max_descent_rate_ms": 0.0,
-    "min_clearance_agl_m": 11.883644104003906,
+    "min_clearance_agl_m": 9.018333435058594,
     "min_turn_radius_m": 8.0,
     "reversals": 0,
     "tightest_turn_radius_m": 8.0,

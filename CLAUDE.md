@@ -74,13 +74,19 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   vertical rate instead of spreading it along the ground track, so a plan clear at
   every vertex *and* along every linearly-interpolated leg can still fly into a
   falling slope — it did, in SITL, at 0.8 m AGL (SHORTFALLS "Recently closed").
-  `planner/terrain_profile.py` now (a) splits any leg dropping more than
-  `cruise_agl_m − 5 m` so the autopilot cannot get ahead of the terrain, and
-  (b) re-scores the final altitudes against real terrain under the flown profile —
-  (b) is the guarantee, (a) is only the mechanism. Demo AO: **−6.6 m → +11.9 m**
-  min AGL for **2 extra vertices**. A breach is CRITICAL → NO-GO and breaks
-  `feasible`. **Climb is modelled as linear on purpose** (prompt climbing only
-  adds clearance and is unvalidated — assuming it would make the check optimistic).
+  `planner/terrain_profile.py` (a) re-scores the final altitudes against real
+  terrain under the flown profile — **the guarantee** — and (b) splits only the
+  legs that check rejects, placing each insert where the level-flight run before
+  arrival is longest. Demo AO: **−6.6 m → +9.0 m** min AGL for **1 extra vertex**.
+  A breach is CRITICAL → NO-GO and breaks `feasible`. **Climb is modelled as
+  linear on purpose** (prompt climbing only adds clearance and is unvalidated —
+  assuming it would make the check optimistic).
+  🔴 **Never split on a drop threshold instead of the check.** v1 did, split a leg
+  already clear at +9.0 m, and that one gratuitous vertex **froze a SITL mission
+  at 11/79** — PX4 missed it by 1.58 m vertically (`NAV_MC_ALT_RAD` is 0.8 m),
+  never sequenced past it, and flew into the ground. A big drop is not unsafe by
+  itself: PX4 flew that leg's full 27.8 m drop *unsplit* to 0.22 m. Every inserted
+  vertex is a waypoint PX4 must accept vertically — insert as few as possible.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
