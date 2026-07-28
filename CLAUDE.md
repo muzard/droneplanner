@@ -30,11 +30,17 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         # add --flat for the diagnostic flat-DEM world
                         # add --forest-dsm demo_ao/dsm.tif for TREES (TEST-PLAN B2):
                         #   static trunk cylinders + a <out>_trunks.csv manifest that
-                        #   droneflight's perception oracle senses from. ⚠️ --base-world
-                        #   must be PX4's default.sdf, never an already-generated world.
+                        #   droneflight's perception oracle senses from.
+                        # ⚠️ --base-world must be PX4's default.sdf, never an already-
+                        #   generated world (terrain is APPENDED -> injected twice). On
+                        #   the Mac there is no PX4 checkout: use ../sim-logs/default.sdf.
+                        # ⚠️ --dem-path is the path on the VM, not here.
+                        # ⚠️ Keep --max-stems loadable: 1166 and 2500 load, 4000 hangs
+                        #   Gazebo. ONE MODEL PER TRUNK is required for collisions to
+                        #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 226 tests, ~95% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 228 tests, ~95% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
