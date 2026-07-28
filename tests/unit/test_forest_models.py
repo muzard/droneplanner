@@ -106,9 +106,9 @@ def test_manifest_and_sdf_describe_the_same_trees() -> None:
     csv = trunk_manifest_csv(trunks).strip().splitlines()
     sdf = trunks_to_sdf(trunks)
     assert len(csv) == len(trunks) + 1  # header
-    # ONE model, N collisions — not N models. See trunks_to_sdf: 4000 separate
-    # models made Gazebo hang before it ever published the world.
-    assert sdf.count("<model name=") == 1
+    # One model PER TRUNK is the default: that shape is the one whose collisions
+    # are demonstrated to work in flight. See trunks_to_sdf.
+    assert sdf.count("<model name=") == len(trunks)
     assert sdf.count("<collision name=") == len(trunks)
     first = trunks[0]
     assert f"{first.east_m:.3f},{first.north_m:.3f}" in csv[1]
@@ -121,6 +121,15 @@ def test_visuals_are_off_by_default_because_sitl_runs_headless() -> None:
     trunks, _ = _generate(max_stems=10)
     assert "<visual" not in trunks_to_sdf(trunks)
     assert trunks_to_sdf(trunks, visuals=True).count("<visual name=") == len(trunks)
+
+
+def test_merged_shape_is_available_but_not_the_default() -> None:
+    """The merged shape loads fast and (measured) does not collide — opt-in only."""
+    trunks, _ = _generate(max_stems=10)
+    merged = trunks_to_sdf(trunks, merged=True)
+    assert merged.count("<model name=") == 1
+    assert merged.count("<collision name=") == len(trunks)
+    assert trunks_to_sdf(trunks).count("<model name=") == len(trunks)
 
 
 def test_no_canopy_means_no_forest() -> None:

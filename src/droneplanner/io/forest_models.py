@@ -182,29 +182,66 @@ def _route_proximity(
     return float(distances.max()), int((distances < rotor_span_m).sum())
 
 
-def trunks_to_sdf(trunks: list[TrunkModel], *, visuals: bool = False) -> str:
-    """Render the whole forest as **one** static model with many collisions.
+def trunks_to_sdf(trunks: list[TrunkModel], *, merged: bool = False, visuals: bool = False) -> str:
+    """Render trunks as SDF. **Default is one model per trunk — do not change it lightly.**
 
-    ⚠️ **Not one model per trunk.** That was the first shape and it does not
-    scale: 4000 separate ``<model>`` entities made Gazebo take so long to build
-    the scene that PX4 sat on *"Waiting for Gazebo world..."* indefinitely. Each
-    model is a full entity with its own pose graph, canonical link and transform
-    publisher; the physics engine only ever needed the *collision shapes*.
+    Both shapes have been flown, and they fail in opposite directions:
 
-    One static model, one link, N posed collisions is the same geometry to ODE
-    and one entity to the scene graph.
+    * **one model per trunk (default)** — collisions demonstrably work: mission
+      mode aborted at 64/282 in a 4000-trunk world where the empty world flew
+      282/282. But Gazebo takes a long time to build the scene, and at 4000
+      models PX4 sat on *"Waiting for Gazebo world..."* indefinitely.
+    * **``merged=True``** — one static model, one link, N posed collisions. Loads
+      fast (2.8 MB -> 1.0 MB), and the scene graph is happy. But in the flight
+      that used it the vehicle passed **through** trunks: 269 of 270 horizontal
+      overlaps had it inside the trunk's vertical span, and it completed the
+      route anyway. Something about many collisions in a single static link is
+      not producing contacts, and it cannot be diagnosed from macOS.
 
-    ``visuals`` is off by default for the same reason — SITL runs headless
-    (``HEADLESS=1``), so the meshes are pure cost. Turn them on only to look at
-    the world in the GUI.
+    So the count, not the shape, is the knob: keep ``--max-stems`` low enough that
+    Gazebo loads (~1000-2000 is known-good) and leave the models separate. A world
+    that loads quickly and does not collide is worse than one that loads slowly,
+    because it looks like a pass.
+
+    ``visuals`` is off by default: SITL runs headless, so the meshes are pure cost.
     """
+    if merged:
+        return _merged_sdf(trunks, visuals=visuals)
+    parts: list[str] = []
+    for i, t in enumerate(trunks):
+        # A model's pose is the cylinder's centre, so lift it by half its height.
+        pose = f"{t.east_m:.3f} {t.north_m:.3f} {t.base_z_m + t.height_m / 2.0:.3f} 0 0 0"
+        geometry = (
+            f"<geometry><cylinder><radius>{t.radius_m:.3f}</radius>"
+            f"<length>{t.height_m:.3f}</length></cylinder></geometry>"
+        )
+        visual = (
+            f'<visual name="visual">{geometry}<material>'
+            "<ambient>0.25 0.18 0.11 1</ambient><diffuse>0.3 0.22 0.13 1</diffuse>"
+            "</material></visual>"
+            if visuals
+            else ""
+        )
+        parts.append(
+            f'    <model name="trunk_{i}">\n'
+            f"      <static>true</static>\n"
+            f"      <pose>{pose}</pose>\n"
+            f'      <link name="link">\n'
+            f'        <collision name="collision">{geometry}</collision>{visual}\n'
+            f"      </link>\n"
+            f"    </model>"
+        )
+    return "\n".join(parts)
+
+
+def _merged_sdf(trunks: list[TrunkModel], *, visuals: bool) -> str:
+    """One static model with N posed collisions — fast to load, see the warning above."""
     parts = [
         '    <model name="forest">',
         "      <static>true</static>",
         '      <link name="trunks">',
     ]
     for i, t in enumerate(trunks):
-        # A collision's pose is the cylinder's centre, so lift it by half its height.
         pose = f"{t.east_m:.3f} {t.north_m:.3f} {t.base_z_m + t.height_m / 2.0:.3f} 0 0 0"
         geometry = (
             f"<geometry><cylinder><radius>{t.radius_m:.3f}</radius>"
@@ -212,11 +249,7 @@ def trunks_to_sdf(trunks: list[TrunkModel], *, visuals: bool = False) -> str:
         )
         parts.append(f'        <collision name="c{i}"><pose>{pose}</pose>{geometry}</collision>')
         if visuals:
-            parts.append(
-                f'        <visual name="v{i}"><pose>{pose}</pose>{geometry}'
-                "<material><ambient>0.25 0.18 0.11 1</ambient>"
-                "<diffuse>0.3 0.22 0.13 1</diffuse></material></visual>"
-            )
+            parts.append(f'        <visual name="v{i}"><pose>{pose}</pose>{geometry}</visual>')
     parts.extend(["      </link>", "    </model>"])
     return "\n".join(parts)
 
