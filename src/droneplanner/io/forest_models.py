@@ -182,30 +182,42 @@ def _route_proximity(
     return float(distances.max()), int((distances < rotor_span_m).sum())
 
 
-def trunks_to_sdf(trunks: list[TrunkModel]) -> str:
-    """Render trunks as static SDF models (collision + a thin visual)."""
-    parts: list[str] = []
+def trunks_to_sdf(trunks: list[TrunkModel], *, visuals: bool = False) -> str:
+    """Render the whole forest as **one** static model with many collisions.
+
+    ⚠️ **Not one model per trunk.** That was the first shape and it does not
+    scale: 4000 separate ``<model>`` entities made Gazebo take so long to build
+    the scene that PX4 sat on *"Waiting for Gazebo world..."* indefinitely. Each
+    model is a full entity with its own pose graph, canonical link and transform
+    publisher; the physics engine only ever needed the *collision shapes*.
+
+    One static model, one link, N posed collisions is the same geometry to ODE
+    and one entity to the scene graph.
+
+    ``visuals`` is off by default for the same reason — SITL runs headless
+    (``HEADLESS=1``), so the meshes are pure cost. Turn them on only to look at
+    the world in the GUI.
+    """
+    parts = [
+        '    <model name="forest">',
+        "      <static>true</static>",
+        '      <link name="trunks">',
+    ]
     for i, t in enumerate(trunks):
-        # Pose is the cylinder's centre, so lift it by half its height.
-        z = t.base_z_m + t.height_m / 2.0
-        parts.append(
-            f"""    <model name="trunk_{i}">
-      <static>true</static>
-      <pose>{t.east_m:.3f} {t.north_m:.3f} {z:.3f} 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry><cylinder><radius>{t.radius_m:.3f}</radius>"""
-            f"""<length>{t.height_m:.3f}</length></cylinder></geometry>
-        </collision>
-        <visual name="visual">
-          <geometry><cylinder><radius>{t.radius_m:.3f}</radius>"""
-            f"""<length>{t.height_m:.3f}</length></cylinder></geometry>
-          <material><ambient>0.25 0.18 0.11 1</ambient>"""
-            """<diffuse>0.3 0.22 0.13 1</diffuse></material>
-        </visual>
-      </link>
-    </model>"""
+        # A collision's pose is the cylinder's centre, so lift it by half its height.
+        pose = f"{t.east_m:.3f} {t.north_m:.3f} {t.base_z_m + t.height_m / 2.0:.3f} 0 0 0"
+        geometry = (
+            f"<geometry><cylinder><radius>{t.radius_m:.3f}</radius>"
+            f"<length>{t.height_m:.3f}</length></cylinder></geometry>"
         )
+        parts.append(f'        <collision name="c{i}"><pose>{pose}</pose>{geometry}</collision>')
+        if visuals:
+            parts.append(
+                f'        <visual name="v{i}"><pose>{pose}</pose>{geometry}'
+                "<material><ambient>0.25 0.18 0.11 1</ambient>"
+                "<diffuse>0.3 0.22 0.13 1</diffuse></material></visual>"
+            )
+    parts.extend(["      </link>", "    </model>"])
     return "\n".join(parts)
 
 

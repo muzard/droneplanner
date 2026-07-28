@@ -106,12 +106,21 @@ def test_manifest_and_sdf_describe_the_same_trees() -> None:
     csv = trunk_manifest_csv(trunks).strip().splitlines()
     sdf = trunks_to_sdf(trunks)
     assert len(csv) == len(trunks) + 1  # header
-    assert sdf.count("<model name=") == len(trunks)
+    # ONE model, N collisions — not N models. See trunks_to_sdf: 4000 separate
+    # models made Gazebo hang before it ever published the world.
+    assert sdf.count("<model name=") == 1
+    assert sdf.count("<collision name=") == len(trunks)
     first = trunks[0]
     assert f"{first.east_m:.3f},{first.north_m:.3f}" in csv[1]
-    # SDF pose lifts the cylinder centre to base + height/2.
+    # A collision's pose lifts the cylinder centre to base + height/2.
     centre_z = first.base_z_m + first.height_m / 2
     assert f"{first.east_m:.3f} {first.north_m:.3f} {centre_z:.3f}" in sdf
+
+
+def test_visuals_are_off_by_default_because_sitl_runs_headless() -> None:
+    trunks, _ = _generate(max_stems=10)
+    assert "<visual" not in trunks_to_sdf(trunks)
+    assert trunks_to_sdf(trunks, visuals=True).count("<visual name=") == len(trunks)
 
 
 def test_no_canopy_means_no_forest() -> None:
