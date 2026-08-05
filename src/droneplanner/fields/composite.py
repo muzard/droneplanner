@@ -21,6 +21,7 @@ import numpy as np
 from droneplanner.crossings import ROAD_COST
 from droneplanner.fields.altitude import band_raster, canopy_height, planned_flight_agl
 from droneplanner.fields.snag import build_snag
+from droneplanner.fields.stem_density import build_stem_clutter
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_penalty
 from droneplanner.fields.util import normalize01
@@ -97,11 +98,22 @@ def build_cost_surface(
     drainage = drainage_proxy(dtm)
     slope = slope_penalty(dtm, grid.cell_size_m)
 
+    # Stem clutter: how far apart the trunks are, and therefore how fast the
+    # flight stack may go here (TEST-PLAN N3). Priced as extra *seconds per metre*
+    # rather than as an abstract risk, because seconds are what the endurance
+    # budget spends — so this term and the N1 check argue in the same currency.
+    clutter = build_stem_clutter(
+        chm,
+        cruise_speed_ms=mission.drone.cruise_speed_ms,
+        min_canopy_m=mission.altitude.min_canopy_m,
+    )
+
     raw = (
         BASE_COST
         + weights.exposure * exposure
         + weights.survivability * survivability
         + weights.snag * snag
+        + weights.clutter * clutter["clutter_time_penalty"]
         - weights.cover * drainage * COVER_SCALE
     )
 
@@ -116,6 +128,7 @@ def build_cost_surface(
         "ridge": ridge,
         "drainage": drainage,
         "slope": slope,
+        **clutter,
     }
     if road_mask is not None:
         raw = raw + ROAD_COST * road_mask.astype(np.float32)

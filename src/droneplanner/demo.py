@@ -114,6 +114,10 @@ def demo_mission(grid: Grid, weights: Weights | None = None) -> Mission:
             climb_rate_max_ms=3.0,
             descent_rate_max_ms=2.0,
             cruise_speed_ms=6.0,
+            # Usable hover endurance with the 5 km spool aboard (user, 2026-08-03):
+            # a Blue-UAS-class electric multirotor of this mass carrying ~1.6 kg.
+            # This is what makes TEST-PLAN N1 a check rather than a report.
+            endurance_s=1800.0,
         ),
         spool=SpoolSpec(length_m=8000.0, mass_kg=1.6),
         threat=ThreatModel(observers=observers),

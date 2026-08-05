@@ -34,6 +34,7 @@ from droneplanner.model.plan import (
     TrajectoryVertex,
 )
 from droneplanner.planner.corridor_width import assess_corridor
+from droneplanner.planner.endurance import route_budget
 from droneplanner.planner.kinematics import (
     KinematicLimits,
     fillet_path,
@@ -243,6 +244,20 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         margin_agl_m=clearance_floor,
     )
 
+    # --- Does the mission close on endurance? (TEST-PLAN N1) ---
+    # Scored on the FINAL vertices, after densification and altitude smoothing,
+    # and in AMSL so that terrain-driven climbing is charged for — the kinematic
+    # climb check runs in AGL and cannot see it (SHORTFALLS 0b).
+    # Per-vertex speed cap from the local stem spacing (TEST-PLAN N3). The
+    # aircraft cannot hold cruise through a stand whose gaps are tighter than its
+    # reaction distance, so the budget is scored at the speed each leg can
+    # actually be flown — not at a cruise figure the forest forbids.
+    speed_cap = surface.components["max_reactive_speed_ms"]
+    vertex_speeds = [float(min(speed, speed_cap[grid.world_to_pixel(p)])) for p in fpts]
+    endurance = route_budget(
+        [(p.x, p.y) for p in fpts], amsl, mission, speed_limits_ms=vertex_speeds
+    )
+
     # --- Lateral freedom the plan grants, and what it costs (TEST-PLAN A1) ---
     # The flight stack follows this route approximately, so concealment scored on
     # the centreline describes a line it will not fly. The corridor's width is
@@ -264,10 +279,12 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             altitude_agl_m=alt,
             ground_elev_m=float(surface.dtm[grid.world_to_pixel(p)]),
             flight_band=band,
-            speed_hint_ms=speed,
+            speed_hint_ms=max(vertex_speed, 0.1),
             corridor_half_width_m=half_width,
         )
-        for p, alt, band, half_width in zip(fpts, alts, bands, corridor.half_width_m, strict=True)
+        for p, alt, band, half_width, vertex_speed in zip(
+            fpts, alts, bands, corridor.half_width_m, vertex_speeds, strict=True
+        )
     )
     kinematics = KinematicReport(
         # Reversals are allowed (low payout speed mitigates snag), so they do not
@@ -382,6 +399,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             "corridor_half_width_median_m": corridor.median_half_width_m,
         },
         kinematics=kinematics,
+        endurance=endurance,
     )
 
 

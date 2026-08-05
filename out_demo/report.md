@@ -1,8 +1,8 @@
 # Flight plan risk report — demo-ao
 
-**Recommendation: REVIEW**
+**Recommendation: NO-GO**
 
-_Generated 2026-07-27T23:36:01.634625+00:00_
+_Generated 2026-08-03T17:52:41.350578+00:00_
 
 ## Summary
 
@@ -34,6 +34,24 @@ _Generated 2026-07-27T23:36:01.634625+00:00_
 | Max descent rate | 1.47 m/s |
 | Climb-rate violations | 0 |
 
+## Endurance budget
+
+**INFEASIBLE — outruns the battery**
+
+| Metric | Value |
+| --- | ---: |
+| Flight time | 57.1 min |
+| — cruise | 56.0 min |
+| — vertical-rate bound | 0.0 min |
+| — waypoint overhead | 0.8 min |
+| — route ends | 0.3 min |
+| Energy-equivalent time | 57.7 min |
+| Usable budget | 24.0 min |
+| Budget consumed | 240% |
+| Endurance required (incl. reserve) | 72.1 min |
+| Min sustainable cruise | 3.89 m/s |
+| Vertical travel commanded | 284 m |
+
 ## Objective scores
 
 | Objective | Score |
@@ -57,5 +75,7 @@ _Generated 2026-07-27T23:36:01.634625+00:00_
 - ⚠️ **warning** (below_canopy_flight): 2654 m of the route is flown below the canopy on canopy-top (DSM) evidence alone — trunks, branches and understory are unmodelled. The route is a corridor to follow approximately; clearing obstacles is the flight stack's job
 - ⚠️ **warning** (exposed_drone): 611 m of the route is flown in view of threat observers at the planned flight altitude — the aircraft is detectable there even where the cable beneath it is concealed
 - **info** (corridor_pinched): 32/282 waypoints (11%) grant no lateral freedom — the route runs at the edge of its cover there, so a deviation leaves the concealment the plan was scored on. Elsewhere the corridor is 50 m (median half-width)
+- ⛔ **critical** (endurance_exceeded): route needs 57.7 min of flight but the airframe has 30.0 min of endurance — it cannot be flown at 3.89 m/s or slower. Shorten the route, raise cruise speed, or fit a bigger battery
+- ⚠️ **warning** (stem_speed_capped): 191 leg(s) are slowed below cruise by modelled stem spacing, giving an effective 1.58 m/s against a 6.00 m/s airframe cruise. Stem density is derived from canopy height by a self-thinning relation (fields/stem_density.py), NOT measured — no stem inventory has been ingested. The ordering (taller stands are sparser) is more trustworthy than the absolute density
 - ⚠️ **warning** (flyability_not_analyzed): concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight — confirm before execution
 

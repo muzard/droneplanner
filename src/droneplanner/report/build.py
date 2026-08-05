@@ -270,6 +270,102 @@ def build_report(
                 )
             )
 
+    # --- Endurance: can the airframe fly this before the battery runs out? ---
+    # A hard constraint in the same class as the fiber budget and terrain
+    # clearance, and it became one only when TEST-PLAN B2 measured the forest's
+    # speed ceiling: route length is fixed, so every metre per second the trees
+    # take away is paid in flight time.
+    end = plan.endurance
+    if end is not None and end.stated:
+        if end.exceeds_raw:
+            findings.append(
+                Finding(
+                    severity=Severity.CRITICAL,
+                    code="endurance_exceeded",
+                    message=(
+                        f"route needs {end.energy_time_s / 60:.1f} min of flight but the "
+                        f"airframe has {(end.endurance_s or 0.0) / 60:.1f} min of endurance — "
+                        f"it cannot be flown at {end.min_sustainable_speed_ms:.2f} m/s or "
+                        "slower. Shorten the route, raise cruise speed, or fit a bigger "
+                        "battery"
+                    ),
+                )
+            )
+        elif not end.closes:
+            findings.append(
+                Finding(
+                    severity=Severity.CRITICAL,
+                    code="endurance_reserve_breached",
+                    message=(
+                        f"route needs {end.energy_time_s / 60:.1f} min against a usable "
+                        f"budget of {(end.usable_endurance_s or 0.0) / 60:.1f} min "
+                        f"({end.energy_fraction:.0%} of it) — it fits the battery only by "
+                        "spending the reserve, which is not a margin the plan may assume"
+                    ),
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    code="endurance_budget",
+                    message=(
+                        f"flight time {end.flight_time_s / 60:.1f} min, "
+                        f"{end.energy_fraction:.0%} of the usable budget; the route needs at "
+                        f"least {end.min_sustainable_speed_ms:.2f} m/s to get home"
+                    ),
+                )
+            )
+    elif end is not None:
+        # No endurance stated: report what the route demands rather than judging
+        # it. A default here would manufacture a NO-GO out of an assumption.
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="endurance_unknown",
+                message=(
+                    f"no airframe endurance stated, so the route cannot be checked: it "
+                    f"demands {end.required_endurance_s / 60:.1f} min including reserve "
+                    f"({end.flight_time_s / 60:.1f} min of flight). Set "
+                    "drone.endurance_s to make this a hard check"
+                ),
+            )
+        )
+    # --- Stem clutter: WHY the route is slow, and how much to trust that ---
+    # The endurance finding above can be driven entirely by this speed cap, so the
+    # operator must see that its density input is a forestry relation applied to a
+    # canopy height model — not a stem inventory, which this program has never
+    # ingested. It is stated next to the verdict it produces, not buried.
+    if end is not None and end.speed_capped_legs > 0:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="stem_speed_capped",
+                message=(
+                    f"{end.speed_capped_legs} leg(s) are slowed below cruise by modelled "
+                    f"stem spacing, giving an effective {end.effective_speed_ms:.2f} m/s "
+                    f"against a {plan.vertices[0].speed_hint_ms:.2f} m/s airframe cruise. "
+                    "Stem density is derived from canopy height by a self-thinning "
+                    "relation (fields/stem_density.py), NOT measured — no stem inventory "
+                    "has been ingested. The ordering (taller stands are sparser) is more "
+                    "trustworthy than the absolute density"
+                ),
+            )
+        )
+
+    if end is not None and end.sharp_corners > 0:
+        findings.append(
+            Finding(
+                severity=Severity.INFO,
+                code="endurance_sharp_corners",
+                message=(
+                    f"{end.sharp_corners} corner(s) exceed 20 deg, where PX4 decelerates on "
+                    "its own — the flight-time estimate does not charge for that and is "
+                    "optimistic here"
+                ),
+            )
+        )
+
     # --- Analysis coverage: how far up the M0->M2 ladder did we get? ---
     if not concealment_analyzed:
         findings.append(
@@ -313,6 +409,7 @@ def build_report(
         marginal_count=len(marginal),
         manipulation_crossings=len(manipulation),
         kinematics=plan.kinematics,
+        endurance=plan.endurance,
         segments=tuple(
             SegmentReport(
                 index=s.index,

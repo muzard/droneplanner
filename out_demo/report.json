@@ -4,6 +4,23 @@
   "corridor_half_width_min_m": 0.0,
   "crossings": [],
   "drone_exposed_length_m": 610.8550866710941,
+  "endurance": {
+    "cruise_time_s": 3359.706014841416,
+    "effective_speed_ms": 1.577205159909691,
+    "endurance_s": 1800.0,
+    "energy_fraction": 2.402483603790798,
+    "energy_time_s": 3459.576389458749,
+    "flight_time_s": 3424.208014841416,
+    "min_sustainable_speed_ms": 3.8940604914936086,
+    "required_endurance_s": 4324.470486823436,
+    "sharp_corners": 0,
+    "speed_capped_legs": 191,
+    "terminal_overhead_s": 19.1,
+    "usable_endurance_s": 1440.0,
+    "vertical_bound_time_s": 0.0,
+    "vertical_travel_m": 283.7131042480469,
+    "waypoint_overhead_s": 45.402
+  },
   "exposed_length_m": 287.195153608442,
   "fiber_available_m": 8000.0,
   "fiber_used_m": 5298.945662387502,
@@ -29,12 +46,22 @@
       "severity": "info"
     },
     {
+      "code": "endurance_exceeded",
+      "message": "route needs 57.7 min of flight but the airframe has 30.0 min of endurance \u2014 it cannot be flown at 3.89 m/s or slower. Shorten the route, raise cruise speed, or fit a bigger battery",
+      "severity": "critical"
+    },
+    {
+      "code": "stem_speed_capped",
+      "message": "191 leg(s) are slowed below cruise by modelled stem spacing, giving an effective 1.58 m/s against a 6.00 m/s airframe cruise. Stem density is derived from canopy height by a self-thinning relation (fields/stem_density.py), NOT measured \u2014 no stem inventory has been ingested. The ordering (taller stands are sparser) is more trustworthy than the absolute density",
+      "severity": "warning"
+    },
+    {
       "code": "flyability_not_analyzed",
       "message": "concealment/defilade analyzed, but forest flyability was not (no lidar/voxel model); route assumes open flight \u2014 confirm before execution",
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-07-27T23:36:01.634625Z",
+  "generated_at": "2026-08-03T17:52:41.350578Z",
   "kinematics": {
     "clearance_violations": 0,
     "climb_violations": 0,
@@ -66,7 +93,7 @@
     "mean_exposure_flown": 0.12940095590494,
     "path_cost": 263.788149488769
   },
-  "recommendation": "REVIEW",
+  "recommendation": "NO-GO",
   "route_index": 0,
   "segments": [
     {

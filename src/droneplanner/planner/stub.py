@@ -20,6 +20,7 @@ from droneplanner.model.plan import (
     RouteSegment,
     TrajectoryVertex,
 )
+from droneplanner.planner.endurance import route_budget
 
 
 def _sample_points(start: Coordinate, end: Coordinate, spacing_m: float) -> list[Coordinate]:
@@ -83,4 +84,9 @@ def straight_line_plan(mission: Mission, route_index: int = 0) -> Plan:
         total_length_m=total_length,
         fiber_used_m=fiber_used,
         objective_scores={"length_m": total_length},
+        # Endurance needs no terrain — only length, waypoint count, altitude and
+        # speed — so the stub answers it as well as the corridor planner does.
+        # Altitudes here are AGL over an unknown surface, which is the best this
+        # path has; with no DTM there is no terrain-driven climbing to charge for.
+        endurance=route_budget([(v.x, v.y) for v in vertices], [v.z for v in vertices], mission),
     )

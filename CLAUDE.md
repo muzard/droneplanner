@@ -164,6 +164,34 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   ⚠️ Widths come from a distance transform, so they quantise to the cell size —
   25 m on the demo AO. And the radius stops **one cell short** of the offending
   cell, or a corridor of exactly that radius would reach it.
+- **A plan now has to fit the battery, and the concealed one does not
+  (2026-08-03 — TEST-PLAN N1/N3).** `planner/endurance.py` turns route length,
+  waypoint count, altitude and speed into a flight time and raises
+  `endurance_exceeded` **CRITICAL → NO-GO**, in the same shape as the CFIT
+  clearance guarantee. Calibrated on B1's ULog: flight time is **not**
+  `length/cruise` — that is **7.6 % low** (883 s vs a flown **956.0 s**), because
+  PX4 loses **0.161 s per waypoint** decelerating into each acceptance radius
+  (**paid 282 times** at 25 m spacing) plus **19.1 s** at the route ends. The model
+  reproduces the flight to 948.3 s. ⚠️ Both constants were *fitted to that same
+  flight*, so it is a calibration, not a validation; N2's speed sweep is its first
+  independent test. Corner deceleration is deliberately omitted — the demo's
+  sharpest vertex is **6.7°**, where PX4's own cap is still ~6 m/s.
+  `fields/stem_density.py` supplies the other half: canopy height → stem density
+  (self-thinning, `N ~ H^-1.5`) → mean spacing → **local speed cap** → seconds per
+  metre, wired into `Weights.clutter` and every vertex's `speed_hint_ms`.
+  🔴 **The two constraints have crossed.** Endurance floors cruise at **4.00 m/s**
+  on a 30 min airframe; B2's forest ceiling is **3.5 m/s** at the density actually
+  flown. The demo AO's stands are **520–1290 stems/ha** (cap **1.07–1.68 m/s**) and
+  **0 of 19 272 treed cells** clear the floor — clearing it needs ≤92 stems/ha,
+  i.e. a ~70 m canopy. So the concealed route is **NO-GO at 57.1 min against 30**,
+  and routing between sparser stands cannot fix it.
+  **`weights.clutter` defaults to 0.0 and must stay there:** measuring the clutter
+  is unconditional (the cap always feeds the budget), but any nonzero weight drives
+  the route out of the forest — 57.1 → 16.3 min for **2.7× drone exposure**
+  (0.150 → 0.403). Trading concealment away is the operator's call, not a default.
+  ⚠️ The density relation is **forestry literature, not a measurement** — no stem
+  inventory has ever been ingested. Trust the ordering (taller = sparser), not the
+  absolute stems/ha; a `stem_speed_capped` WARNING says so beside the verdict.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
@@ -185,6 +213,11 @@ cover (drainage defilade). Non-navigable forest → Theta\* obstacle.
 `planner/corridor.py` runs the search then the kinematic pass.
 
 ## Top gaps (SHORTFALLS.md, before sims)
+0. 🔴 **The concealed route does not fit the battery.** 57.1 min against a 30 min
+   airframe once the forest's speed cap is priced (TEST-PLAN N1/N3). Not a planner
+   bug — an infeasibility the planner now *reports* instead of hiding. The four
+   ways out (shorter route / more endurance / less concealment / map the stems)
+   are in TEST-PLAN.md; all four are decisions, not fixes.
 1. 🔴 **The new low route is unflown.** 6.6 m min AGL (was 24) and 282 waypoints
    (was 145). PX4's vertical acceptance stalled two missions in the CFIT campaign
    at 87 waypoints and 30 m; nothing about this configuration is verified.
@@ -204,9 +237,11 @@ validation yet.
 
 ## Layout
 `model/` pydantic contracts + `Grid`. `io/` readers/writers (lazy GDAL/laspy).
-`fields/` cost layers (incl. `altitude.py`, the below-canopy band). `forest/`
-flyability. `planner/` Theta\* + corridor + kinematics + `terrain_profile.py`
-(CFIT) + `corridor_width.py` (lateral freedom) + `gates.py` (route reduction —
-analysis only, deliberately not wired into `.plan` emission; see TEST-PLAN A2).
+`fields/` cost layers (incl. `altitude.py`, the below-canopy band, and
+`stem_density.py`, the clutter speed cap). `forest/` flyability. `planner/`
+Theta\* + corridor + kinematics + `terrain_profile.py` (CFIT) +
+`corridor_width.py` (lateral freedom) + `endurance.py` (does the mission close?)
++ `gates.py` (route reduction — analysis only, deliberately not wired into
+`.plan` emission; see TEST-PLAN A2).
 `crossings/` roads. `report/` GO/REVIEW/NO-GO. `demo.py` procedural AO.
 `viz.py`/`serve.py` visualization. `pipeline.py` orchestration. `cli.py`.

@@ -159,6 +159,93 @@ class KinematicReport(BaseModel):
     )
 
 
+class EnduranceBudget(BaseModel):
+    """Whether the route fits the airframe's endurance (TEST-PLAN N1).
+
+    Separate from ``KinematicReport`` on purpose: that answers "is this shape
+    flyable", this answers "is it flyable *before the battery runs out*". They
+    fail independently — a perfectly smooth, perfectly cleared route is still
+    infeasible if the speed its forest demands makes it too slow to get home.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    flight_time_s: float = Field(ge=0)
+    cruise_time_s: float = Field(default=0.0, ge=0)
+    vertical_bound_time_s: float = Field(
+        default=0.0,
+        ge=0,
+        description="Extra time on legs where the climb/descent rate, not cruise, binds.",
+    )
+    waypoint_overhead_s: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "PX4's decelerate-in/accelerate-out at each acceptance radius, 0.161 s per "
+            "waypoint measured on B1. At 25 m spacing this is paid 282 times."
+        ),
+    )
+    terminal_overhead_s: float = Field(default=0.0, ge=0)
+    energy_time_s: float = Field(
+        default=0.0, ge=0, description="Flight time plus the climb power surcharge."
+    )
+    energy_fraction: float = Field(
+        default=0.0,
+        ge=0,
+        description="Fraction of USABLE endurance consumed; > 1.0 breaks into the reserve.",
+    )
+    required_endurance_s: float = Field(
+        default=0.0, ge=0, description="Endurance the route demands, reserve included."
+    )
+    endurance_s: float | None = None
+    usable_endurance_s: float | None = None
+    min_sustainable_speed_ms: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Slowest cruise that still gets home. Endurance floors speed from below "
+            "while obstacle avoidance caps it from above (TEST-PLAN B2); when the "
+            "floor exceeds the ceiling no feasible speed exists."
+        ),
+    )
+    sharp_corners: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Vertices past 20 deg, where PX4's own corner deceleration would add time "
+            "this model does not charge for. Zero on every planner route measured so "
+            "far (demo max: 6.7 deg)."
+        ),
+    )
+    vertical_travel_m: float = Field(default=0.0, ge=0)
+    effective_speed_ms: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Route length / cruise time — the speed the forest actually permits, "
+            "after per-vertex stem-spacing caps (TEST-PLAN N3). Below the airframe's "
+            "cruise speed wherever the stands are too tight to dodge at cruise."
+        ),
+    )
+    speed_capped_legs: int = Field(
+        default=0, ge=0, description="Legs the stems slowed below cruise speed."
+    )
+
+    @property
+    def stated(self) -> bool:
+        return self.endurance_s is not None
+
+    @property
+    def closes(self) -> bool:
+        """Fits inside the usable budget with the reserve intact."""
+        return self.stated and self.energy_fraction <= 1.0
+
+    @property
+    def exceeds_raw(self) -> bool:
+        """Outruns the whole battery, reserve spent."""
+        return self.endurance_s is not None and self.energy_time_s > self.endurance_s
+
+
 class Plan(BaseModel):
     """A single planned route (one of ``k`` for redundancy)."""
 
@@ -175,6 +262,7 @@ class Plan(BaseModel):
     fiber_used_m: float = Field(ge=0)
     objective_scores: dict[str, float] = Field(default_factory=dict)
     kinematics: KinematicReport | None = None
+    endurance: EnduranceBudget | None = None
 
     @property
     def start(self) -> Coordinate:

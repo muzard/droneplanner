@@ -4,6 +4,23 @@
   "corridor_half_width_min_m": 0.0,
   "crossings": [],
   "drone_exposed_length_m": 0.0,
+  "endurance": {
+    "cruise_time_s": 833.3333333333331,
+    "effective_speed_ms": 6.000000000000002,
+    "endurance_s": null,
+    "energy_fraction": 0.0,
+    "energy_time_s": 855.8143333333331,
+    "flight_time_s": 855.8143333333331,
+    "min_sustainable_speed_ms": 0.0,
+    "required_endurance_s": 1069.7679166666665,
+    "sharp_corners": 0,
+    "speed_capped_legs": 0,
+    "terminal_overhead_s": 19.1,
+    "usable_endurance_s": null,
+    "vertical_bound_time_s": 0.0,
+    "vertical_travel_m": 0.0,
+    "waypoint_overhead_s": 3.3810000000000002
+  },
   "exposed_length_m": 0.0,
   "fiber_available_m": 5000.0,
   "fiber_used_m": 5250.0,
@@ -12,6 +29,11 @@
       "code": "fiber_insufficient",
       "message": "route needs 5250 m of fiber but the spool holds 5000 m",
       "severity": "critical"
+    },
+    {
+      "code": "endurance_unknown",
+      "message": "no airframe endurance stated, so the route cannot be checked: it demands 17.8 min including reserve (14.3 min of flight). Set drone.endurance_s to make this a hard check",
+      "severity": "warning"
     },
     {
       "code": "analysis_not_performed",

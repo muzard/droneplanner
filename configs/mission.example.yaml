@@ -19,6 +19,12 @@ drone:
   climb_rate_max_ms: 3.0
   descent_rate_max_ms: 2.0
   cruise_speed_ms: 6.0
+  # Usable HOVER endurance carrying the fiber payload (seconds). Omit it and the
+  # planner reports the endurance the route demands instead of judging it — a
+  # default here would manufacture a NO-GO out of an assumption. Charging level
+  # flight at the hover rate is conservative for a multirotor.
+  endurance_s: 1800.0
+  energy_reserve_fraction: 0.20
 
 spool:
   length_m: 5000.0

@@ -33,6 +33,28 @@ class DroneSpec(BaseModel):
     climb_rate_max_ms: float = Field(gt=0)
     descent_rate_max_ms: float = Field(gt=0)
     cruise_speed_ms: float = Field(default=5.0, gt=0)
+    endurance_s: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Usable HOVER endurance carrying the fiber payload (seconds). Left None "
+            "when the airframe is not yet chosen: the planner then reports the "
+            "endurance the route *demands* instead of judging it, because a silent "
+            "default would manufacture a NO-GO out of an assumption. Charging level "
+            "flight at the hover rate is conservative for a multirotor — induced "
+            "power falls with forward speed long before parasitic drag grows."
+        ),
+    )
+    energy_reserve_fraction: float = Field(
+        default=0.20,
+        ge=0.0,
+        lt=1.0,
+        description=(
+            "Battery held back from the plan's budget. A route that fits the full "
+            "battery but eats this is REVIEW, not NO-GO — spending the reserve is a "
+            "command decision, outrunning the battery is arithmetic."
+        ),
+    )
 
     @property
     def rotor_radius_m(self) -> float:
@@ -122,6 +144,23 @@ class Weights(BaseModel):
     length: float = Field(default=0.5, ge=0, description="Path-length penalty.")
     survivability: float = Field(default=1.0, ge=0, description="Cable survivability penalty.")
     snag: float = Field(default=0.5, ge=0, description="Fiber snag-risk penalty.")
+    clutter: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "How hard to route AWAY from stands whose stem spacing forces the flight "
+            "stack to slow down (TEST-PLAN N3), priced as extra seconds per metre — "
+            "the currency the endurance budget spends.\n\n"
+            "**Defaults to 0.0 deliberately.** Measuring the clutter is "
+            "unconditional: the speed cap always feeds the endurance budget, so an "
+            "unflyable route is always reported as one. *Trading concealment for it* "
+            "is the operator's call, because on the demo AO the trade is brutal and "
+            "bimodal — any weight at all drives the route out of the forest, cutting "
+            "flight time 57.1 -> 16.3 min while raising drone exposure 0.150 -> 0.403 "
+            "(2.7x). Defaulting this above zero would silently abandon the "
+            "concealment posture the whole program exists for."
+        ),
+    )
 
 
 class LayerPaths(BaseModel):

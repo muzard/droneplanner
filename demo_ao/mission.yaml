@@ -13,6 +13,8 @@ drone:
   climb_rate_max_ms: 3.0
   descent_rate_max_ms: 2.0
   cruise_speed_ms: 6.0
+  endurance_s: 1800.0
+  energy_reserve_fraction: 0.2
 spool:
   length_m: 8000.0
   mass_kg: 1.6

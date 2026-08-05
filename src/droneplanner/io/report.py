@@ -71,6 +71,41 @@ def report_to_markdown(report: RiskReport) -> str:
         lines.append(f"| Climb-rate violations | {k.climb_violations} |")
         lines.append("")
 
+    if report.endurance is not None:
+        e = report.endurance
+        lines.append("## Endurance budget")
+        lines.append("")
+        if not e.stated:
+            verdict = "NOT CHECKED — no airframe endurance stated"
+        elif e.exceeds_raw:
+            verdict = "INFEASIBLE — outruns the battery"
+        elif not e.closes:
+            verdict = "INFEASIBLE — fits only by spending the reserve"
+        else:
+            verdict = "Closes"
+        lines.append(f"**{verdict}**")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | ---: |")
+        lines.append(f"| Flight time | {e.flight_time_s / 60:.1f} min |")
+        lines.append(f"| — cruise | {e.cruise_time_s / 60:.1f} min |")
+        lines.append(f"| — vertical-rate bound | {e.vertical_bound_time_s / 60:.1f} min |")
+        lines.append(f"| — waypoint overhead | {e.waypoint_overhead_s / 60:.1f} min |")
+        lines.append(f"| — route ends | {e.terminal_overhead_s / 60:.1f} min |")
+        lines.append(f"| Energy-equivalent time | {e.energy_time_s / 60:.1f} min |")
+        if e.stated:
+            lines.append(f"| Usable budget | {(e.usable_endurance_s or 0.0) / 60:.1f} min |")
+            lines.append(f"| Budget consumed | {e.energy_fraction:.0%} |")
+        lines.append(
+            f"| Endurance required (incl. reserve) | {e.required_endurance_s / 60:.1f} min |"
+        )
+        # The number the forest speed ceiling has to be compared against: below
+        # this the aircraft cannot get home, above it the trees are unavoidable.
+        if e.min_sustainable_speed_ms > 0.0:
+            lines.append(f"| Min sustainable cruise | {e.min_sustainable_speed_ms:.2f} m/s |")
+        lines.append(f"| Vertical travel commanded | {e.vertical_travel_m:.0f} m |")
+        lines.append("")
+
     if report.objective_scores:
         lines.append("## Objective scores")
         lines.append("")
