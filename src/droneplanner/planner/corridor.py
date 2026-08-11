@@ -363,7 +363,12 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         [(p.x, p.y) for p in fpts], amsl, profile, samples_per_leg=EXPOSURE_SAMPLES_PER_LEG
     )
     flown_exposure = point_exposure(
-        surface.dsm, grid, list(mission.threat.observers), flown_samples
+        surface.dsm,
+        grid,
+        list(mission.threat.observers),
+        flown_samples,
+        observer_height_m=mission.threat.observer_height_m,
+        canopy=mission.threat.canopy_occlusion,
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0

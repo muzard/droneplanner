@@ -89,8 +89,19 @@ def build_cost_surface(
     chm = canopy_height(dtm, dsm)
     flight_agl = planned_flight_agl(chm, mission.cruise_agl_m, mission.altitude, flyability)
     flight_band = band_raster(chm, mission.cruise_agl_m, mission.altitude, flyability)
-    exposure = cumulative_exposure(dsm, grid, observers, target_elev_m=dtm + flight_agl)
-    ground_exposure = cumulative_exposure(dsm, grid, observers)
+    eye_m = mission.threat.observer_height_m
+    exposure = cumulative_exposure(
+        dsm,
+        grid,
+        observers,
+        observer_height_m=eye_m,
+        target_elev_m=dtm + flight_agl,
+        canopy=mission.threat.canopy_occlusion,
+    )
+    # No canopy term for the ground field: its target *is* the DSM surface, so a
+    # cell's own crown is never between the observer and it. Whether that surface
+    # is the right proxy for a buried 0.28 mm fiber is roadmap C2's question.
+    ground_exposure = cumulative_exposure(dsm, grid, observers, observer_height_m=eye_m)
 
     survivability = build_survivability(dtm, dsm, grid, observers, openness=ground_exposure)
     snag = build_snag((grid.rows, grid.cols))

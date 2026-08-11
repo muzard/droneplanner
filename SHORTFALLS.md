@@ -431,6 +431,59 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## M1 — concealment / cost surface
 
+- ✅ **A cell's own canopy can now occlude what flies beneath it** (roadmap C1,
+  fixed 2026-08-11). `single_viewshed` excluded the target cell's own DSM from the
+  occluder set — right for an aircraft *above* the surface, wrong for one *under*
+  it. Measured on the demo AO from a 300 m sensor: **100 % of the 3722 m flown
+  below canopy scored visible** while the aircraft was physically beneath the
+  crowns. So the planner **could not represent sub-canopy concealment against any
+  look-down observer** — the single threat geometry the below-canopy posture
+  exists to defeat. Visibility is now a **weight in [0, 1]**
+  (`ThreatModel.canopy_occlusion`, default gap fraction **0.10**), and the same
+  rule is applied by `point_exposure`, so the flown re-score and the raster field
+  cannot disagree about a crown. `single_viewshed_bool` keeps the boolean contract
+  the A4 reference validation needs.
+  🔴 **The gap fraction is a guess with a wide range.** Closed Nordic stands run
+  5–20 %; no gap-fraction measurement has ever been ingested, and the C1 default
+  is the middle of a literature band. Sweep it before trusting any below-canopy
+  concealment claim — at 300 m the under-canopy scored-visible length moves
+  **675 → 1699 m across gap 0.0 → 0.20**.
+  ⚠️ Three conditions must hold before a crown is counted as in the way: the
+  target is under its own DSM, the **observer is above that DSM**, and the
+  sightline is steeper than `sub_canopy_max_elev_deg` (10°). The middle one was
+  missing in the first cut and is load-bearing — without it the model also
+  attenuates a trunk-space-to-trunk-space sightline, where nothing is in the way,
+  which *invents* concealment.
+- ✅ **Observer height is a mission input** (2026-08-11, found while running the
+  C1 gate). `build_cost_surface` hard-coded a 2 m eye, so **the planner could not
+  route against a mast or airborne sensor at all** — and C1 was therefore inert in
+  the pipeline (measured: the gap fraction changed the demo route by exactly
+  nothing). `ThreatModel.observer_height_m` now feeds both viewsheds and the flown
+  re-score, and `test_canopy_occlusion_reaches_the_cost_surface` pins the wiring.
+- 🔴 **The observer's eye sits on the DSM, i.e. on the crowns.**
+  `eye = dsm[observer] + observer_height_m`, so a "2 m dismount" standing in a
+  22 m stand is modelled at 24 m — above the canopy, with the sightlines of
+  something in the treetops. Every ground-observer number in the programme carries
+  this. On the demo AO the error is small (the standoff positions sit in 4–5 m
+  ridge scrub, not mature stand) but it is systematic and in the
+  adversary-favouring direction. Fixing it means choosing whether an observer
+  stands on the terrain (DTM) or on the surface, per observer — a mission-contract
+  question, and it moves every historical exposure figure.
+- 🔴 **The viewshed has no range term** (roadmap C2, **not yet built**). A cell
+  3 km from an observer scores exactly like one at 300 m. Measured: the median
+  exposed sample on every arm sits at **1.3–1.6 arcmin**, against **3–7′** where
+  real observers actually acquired real sUAS in trials. **Every exposure number in
+  `CLAUDE.md`, including the 0.55 → 0.15 that justified the below-canopy posture,
+  is in this unweighted currency**, and most of it is at ranges beyond 2 km where
+  an unaided observer sees nothing. Until C2 lands, read `mean_exposure*` as "a
+  line of sight exists", never as "detected".
+- 🟠 **`exposure_ground` is a line-of-sight proxy, not a detection probability,
+  and the name oversells it.** It scores the **DSM surface** — the canopy top —
+  not the fiber, which is 0.25–0.28 mm and is **never optically resolvable at any
+  range**. C1 deliberately does not touch it (its target *is* the surface, so no
+  crown is ever between it and the observer). Roadmap C2 must decide explicitly:
+  re-frame it as disturbed-ground / corridor exposure with its own target size, or
+  rename it so nobody reads it as a detection probability.
 - 🟠 **Land cover / vegetation is not ingested.** `LayerPaths.land_cover` exists
   in the contract but is unwired: `snag` is identically 0 and the survivability
   `(1 − veg_cover)` term is 0. Canopy is one of the strongest real concealment
@@ -533,6 +586,53 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   starting points — must be calibrated to the airframe in sim/flight).
 - 🟡 **Lidar currency / DSM-vs-canopy coupling** is not validated; below-canopy
   concealment credit assumes the DSM includes canopy.
+
+### 🔴 No stem-map capability at all — and TEST-PLAN N4 makes it the critical path
+
+Routing *between mapped stems* is now the only surviving architecture for
+below-canopy flight (reactive avoidance is dead: four independent negatives, see
+TEST-PLAN N2). It needs a **stem map** — individual trunk positions and diameters.
+**Nothing in this project produces one, and nothing has been validated against real
+data.** Stated precisely, because the adjacent machinery makes it look closer than
+it is:
+
+| capability | state |
+|---|---|
+| point-cloud reader (`io/pointcloud.py`, laspy 2.7.0) | ✅ built, **never called** by the pipeline or any test |
+| voxel occupancy / vertical segmentation / 3D EDT | ✅ built, but **per-column**, at 25 m corridor cells |
+| individual **stem detection** (position + DBH) | ❌ **does not exist** |
+| stem map from **imagery** | ❌ does not exist — and see the caveat below |
+| any real `.laz`/`.las` ever ingested | ❌ **none has ever existed in this repo** |
+
+⚠️ **The distinction that matters:** `forest/segment.py` splits each *column* into
+understory / trunk space / canopy and `navigability.py` reports a `trunk_window_m`.
+That is a **vertical free window per grid cell**, not a stem. No cylinder fitting,
+no clustering, no individual-tree detection. The only place trunks exist as objects
+is `io/forest_models.py`, which **generates synthetic** trunks from a canopy height
+model at an operator-set density — a *generator, not a detector*. **Every trunk
+manifest flown to date is fabricated**, so no result so far says anything about
+whether real stems can be found.
+
+⚠️ **Imagery alone probably cannot do this, and that is a geometry problem, not a
+software one.** Photogrammetry reconstructs what the camera sees, which from above
+is the canopy *top* — the same DSM the planner already has. The stems are
+underneath it. Getting them needs returns that penetrate the canopy: airborne or
+(better) UAV lidar, or an under-canopy/terrestrial survey. So "imagery and scans"
+should be read as **scans; imagery contributes the DSM/DTM context, not the stems.**
+
+🔑 **Map accuracy is a first-class requirement, not a detail.** TEST-PLAN N4 measured
+the air-gap budget at **2.4 m**. Stem position inferred from ALS crown centroids
+carries roughly 1-2 m of error, which would eat most of that budget before the
+aircraft has moved; high-density UAV lidar is substantially better. **So the
+required stem-map accuracy has to be derived and then verified against
+field-measured plots** — that is the acceptance test, and public forest inventory
+datasets with field-surveyed stem maps exist for exactly this purpose.
+
+**What to build, in order:** (1) a stem detector — slice the cloud in a band above
+ground, cluster, fit circles → position + DBH; (2) score it against a field-measured
+plot for detection rate and position error; (3) only then feed it into the planner,
+**as a cost-surface term rather than a post-filter** (N4 measured that composing
+concealment-then-stems has no admissible path in dense forest).
 
 ## Cross-cutting
 

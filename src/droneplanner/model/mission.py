@@ -87,6 +87,49 @@ class ThreatSector(BaseModel):
     label: str | None = None
 
 
+class CanopyOcclusion(BaseModel):
+    """Whether a cell's own canopy may hide something flying *beneath* it.
+
+    ``fields.viewshed`` marches over the DSM and deliberately excludes a cell's
+    own surface from its occluders — correct for an aircraft *above* the surface,
+    wrong for one *under* it. Without this the model sees straight down through
+    20 m of crown: from a 300 m observer it scored **1570 m of a 3244 m
+    below-canopy route as visible while the aircraft was physically beneath the
+    canopy**. That is the one threat geometry where being under the canopy is the
+    entire point, and the planner could not represent it at all.
+
+    Near-horizontal sightlines are left alone: they already cross many crown
+    cells, which the DSM march occludes correctly.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    sub_canopy_gap_fraction: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Probability a sub-canopy target is seen through a crown gap. Closed "
+            "Nordic stands run 5-20 %, so this is a configuration knob and not a "
+            "constant: it is the dominant uncertainty in any below-canopy "
+            "concealment claim, and no gap-fraction measurement for these stands "
+            "has ever been ingested. 0.0 gives the fully-hidden bound that brackets "
+            "a sensitivity analysis; 1.0 restores the pre-fix behaviour."
+        ),
+    )
+    sub_canopy_max_elev_deg: float = Field(
+        default=10.0,
+        ge=0.0,
+        le=90.0,
+        description=(
+            "Only sightlines steeper than this get the gap-fraction treatment. "
+            "Below it the DSM march already models intervening canopy correctly, so "
+            "the shallow path is left exactly as it was — this fix is about "
+            "look-down observers, which are the ones the old model could not see."
+        ),
+    )
+
+
 class ThreatModel(BaseModel):
     """Observer positions (viewshed sources) + threat fire sectors."""
 
@@ -94,6 +137,22 @@ class ThreatModel(BaseModel):
 
     observers: tuple[Coordinate, ...] = ()
     sectors: tuple[ThreatSector, ...] = ()
+    canopy_occlusion: CanopyOcclusion = CanopyOcclusion()
+    observer_height_m: float = Field(
+        default=2.0,
+        ge=0.0,
+        description=(
+            "Eye/mast/aperture height of every observer, above the surface they "
+            "stand on. 2 m is a dismount, 12-30 m a radar mast, 300-1000 m an "
+            "airborne sensor — and the industry guidance is explicit that raising a "
+            "sensor from 2 to 12 m dramatically extends its detection horizon, so "
+            "assume the adversary has read it.\n\n"
+            "Until 2026-08-11 this was hard-coded at 2.0 in ``build_cost_surface``, "
+            "which meant **the planner could not route against an elevated sensor at "
+            "all** — and that is exactly the geometry where the canopy earns its "
+            "keep, so :class:`CanopyOcclusion` had nothing to act on."
+        ),
+    )
 
 
 class AltitudePolicy(BaseModel):

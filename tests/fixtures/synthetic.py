@@ -72,6 +72,18 @@ def make_dem(
     return RasterGrid(data=z.astype(np.float32), transform=transform, crs=crs, nodata=None)
 
 
+def make_closed_canopy(size: int = 21, canopy_m: float = 20.0) -> tuple[np.ndarray, np.ndarray]:
+    """``(dtm, dsm)`` for flat ground under a uniform closed canopy.
+
+    The minimal scene for roadmap C1: with no relief, *every* occlusion in the
+    answer is the canopy's, so a look-down observer's result isolates the crown
+    layer instead of confounding it with terrain masking.
+    """
+    dtm = np.zeros((size, size), dtype=np.float32)
+    dsm = np.full((size, size), canopy_m, dtype=np.float32)
+    return dtm, dsm
+
+
 def make_las_bytes(n: int = 200, crs: str = _DEFAULT_CRS) -> bytes:
     """Serialize a tiny synthetic LAS point cloud to bytes (for I/O tests)."""
     import io

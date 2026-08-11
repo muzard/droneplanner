@@ -54,6 +54,23 @@ objects that genuinely sit *on* the surface, which is what the laid **cable** is
 is how a *flown* trajectory is re-scored at the altitudes it will actually be at
 (the raster is evaluated at the planned band altitude, which the climb-limited
 smoother and PX4's front-loaded descent both depart from).
+
+VISIBILITY IS A WEIGHT, NOT A BOOLEAN (roadmap C1, 2026-08-11)
+A cell's own surface never occludes the object standing on it — which is right
+for a drone *over* the canopy and wrong for one *under* it. The consequence was
+measured: from a 300 m observer the model called 1570 m of a 3244 m below-canopy
+route visible while the aircraft was beneath the crowns, so **sub-canopy
+concealment against a look-down observer could not be represented at all**. That
+is precisely the threat the below-canopy posture exists to defeat.
+
+:class:`~droneplanner.model.mission.CanopyOcclusion` fixes it by making
+visibility a **weight in [0, 1]**: a target under its own crown, on a sightline
+steep enough that the ray must cross the crown layer, is seen only through the
+stand's gap fraction. Shallow sightlines are untouched — they already cross many
+crown cells, and the DSM march occludes them correctly. Pass ``canopy=None`` (the
+default at this level) for the pre-C1 boolean geometry, or
+:func:`single_viewshed_bool` when the question really is "does a sightline
+exist" — which is what the A4 reference validation asks.
 """
 
 from __future__ import annotations
@@ -65,6 +82,7 @@ import numpy as np
 
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
+from droneplanner.model.mission import CanopyOcclusion
 from droneplanner.raster_lines import bresenham
 
 
@@ -90,6 +108,50 @@ def _target_surface(
     return target_elev_m
 
 
+def _canopy_terms(canopy: CanopyOcclusion | None) -> tuple[float, float]:
+    """``(gap_fraction, tan(max_elev))``. ``None`` disables the sub-canopy model.
+
+    The threshold is compared as a **tangent** against the sightline's rise/run,
+    which is what the march already carries — monotone in the angle, and it saves
+    an ``atan`` per cell on the hot loop.
+    """
+    if canopy is None:
+        return 1.0, math.inf
+    return (
+        canopy.sub_canopy_gap_fraction,
+        math.tan(math.radians(canopy.sub_canopy_max_elev_deg)),
+    )
+
+
+def _sub_canopy_weight(
+    view_angle: float,
+    target_elev: float,
+    surface_elev: float,
+    eye_elev: float,
+    gap: float,
+    steep_tan: float,
+) -> float:
+    """1.0, unless the target is under its own crown on a steep **look-down**.
+
+    Three conditions, and all of them are needed for the ray to have crossed the
+    crown layer rather than arrived under it through trunk space:
+
+    * ``target_elev < surface_elev`` — the target really is beneath its own crown;
+    * ``eye_elev > surface_elev`` — the observer is *above* that crown, so the ray
+      enters the column from the top. Without this the model also attenuates a
+      trunk-space-to-trunk-space sightline, where nothing is in the way, and that
+      **overstates** concealment — the one direction a concealment planner must
+      never err in;
+    * the sightline is steeper than the threshold, so it punches through the crown
+      near the target instead of grazing in from the side. ``view_angle`` is
+      signed (negative looking down) and the first two conditions already force it
+      negative, so the magnitude is what is tested.
+    """
+    if target_elev < surface_elev and eye_elev > surface_elev and abs(view_angle) > steep_tan:
+        return gap
+    return 1.0
+
+
 def single_viewshed(
     dsm: np.ndarray,
     observer_rc: tuple[int, int],
@@ -97,19 +159,24 @@ def single_viewshed(
     observer_height_m: float = 2.0,
     target_height_m: float = 0.0,
     target_elev_m: np.ndarray | None = None,
+    canopy: CanopyOcclusion | None = None,
 ) -> np.ndarray:
-    """Boolean visibility grid for one observer (True = visible).
+    """Per-cell visibility **weight** in [0, 1] for one observer (float32).
 
     ``target_elev_m`` (absolute elevation per cell) overrides ``target_height_m``
     (a uniform offset above the DSM) and is how a target *off* the surface — a
     drone at flight altitude — is scored. Occlusion always marches over the DSM.
+
+    ``canopy`` lets a cell's own crown hide a target beneath it (roadmap C1);
+    without it the result is 0.0/1.0 and identical to the pre-C1 boolean field.
     """
     rows, cols = dsm.shape
     r0, c0 = observer_rc
     target = _target_surface(dsm, target_height_m, target_elev_m)
-    visible = np.zeros((rows, cols), dtype=bool)
-    visible[r0, c0] = True
+    visible = np.zeros((rows, cols), dtype=np.float32)
+    visible[r0, c0] = 1.0
     eye = float(dsm[r0, c0]) + observer_height_m
+    gap, steep_tan = _canopy_terms(canopy)
 
     for rt, ct in _boundary_cells(rows, cols):
         max_angle = -math.inf
@@ -121,13 +188,38 @@ def single_viewshed(
                 continue
             # The running maximum covers *intervening* cells only: a cell's own
             # surface never occludes the object standing on (or flying over) it.
-            terrain_angle = (float(dsm[r, c]) - eye) / dist
+            # For an object *under* that surface the crown still does — which is
+            # what _sub_canopy_weight restores.
+            surface = float(dsm[r, c])
+            terrain_angle = (surface - eye) / dist
             view_angle = (float(target[r, c]) - eye) / dist
             if view_angle >= max_angle:
-                visible[r, c] = True
+                visible[r, c] = _sub_canopy_weight(
+                    view_angle, float(target[r, c]), surface, eye, gap, steep_tan
+                )
             if terrain_angle > max_angle:
                 max_angle = terrain_angle
     return visible
+
+
+def single_viewshed_bool(
+    dsm: np.ndarray,
+    observer_rc: tuple[int, int],
+    cell_size_m: float,
+    observer_height_m: float = 2.0,
+    target_height_m: float = 0.0,
+    target_elev_m: np.ndarray | None = None,
+) -> np.ndarray:
+    """Does *any* line of sight reach each cell (the pre-C1 boolean contract).
+
+    Line-of-sight geometry is a yes/no question and the A4 reference
+    implementation answers it that way; the weighted field answers a different
+    one — how likely a look down that line is to succeed.
+    """
+    weights = single_viewshed(
+        dsm, observer_rc, cell_size_m, observer_height_m, target_height_m, target_elev_m
+    )
+    return weights > 0.0
 
 
 def cumulative_exposure(
@@ -137,12 +229,14 @@ def cumulative_exposure(
     observer_height_m: float = 2.0,
     target_height_m: float = 0.0,
     target_elev_m: np.ndarray | None = None,
+    canopy: CanopyOcclusion | None = None,
 ) -> np.ndarray:
-    """Fraction of observers that can see each cell, in [0, 1] (float32).
+    """Mean per-observer visibility weight for each cell, in [0, 1] (float32).
 
     With no observers, returns an all-zero field (nothing is exposed). See
     :func:`single_viewshed` for ``target_elev_m`` — pass it to score the drone at
-    its planned flight altitude rather than the ground under it.
+    its planned flight altitude rather than the ground under it — and for
+    ``canopy``, which lets a stand hide what flies beneath it.
     """
     rows, cols = dsm.shape
     if not observers:
@@ -152,22 +246,29 @@ def cumulative_exposure(
     for obs in observers:
         rc = grid.world_to_pixel(obs)
         accum += single_viewshed(
-            dsm, rc, grid.cell_size_m, observer_height_m, target_height_m, target_elev_m
-        ).astype(np.float32)
+            dsm, rc, grid.cell_size_m, observer_height_m, target_height_m, target_elev_m, canopy
+        )
     return (accum / float(len(observers))).astype(np.float32)
 
 
-def _point_visible(
+def _point_weight(
     dsm: np.ndarray,
     observer_rc: tuple[int, int],
     eye_elev_m: float,
     target_rc: tuple[int, int],
     target_elev_m: float,
     cell_size_m: float,
-) -> bool:
-    """Line of sight from one observer to one 3D point, occluded by the DSM."""
+    canopy: CanopyOcclusion | None = None,
+) -> float:
+    """Visibility weight in [0, 1] from one observer to one 3D point.
+
+    The single-point twin of :func:`single_viewshed`, including its sub-canopy
+    rule — a trajectory re-score and the raster field must not disagree about
+    whether a crown is in the way.
+    """
     r0, c0 = observer_rc
     rt, ct = target_rc
+    gap, steep_tan = _canopy_terms(canopy)
     max_angle = -math.inf
     for r, c in bresenham(r0, c0, rt, ct):
         if r == r0 and c == c0:
@@ -176,11 +277,16 @@ def _point_visible(
         if dist <= 0.0:
             continue
         if (r, c) == (rt, ct):
-            return (target_elev_m - eye_elev_m) / dist >= max_angle
+            view_angle = (target_elev_m - eye_elev_m) / dist
+            if view_angle < max_angle:
+                return 0.0
+            return _sub_canopy_weight(
+                view_angle, target_elev_m, float(dsm[r, c]), eye_elev_m, gap, steep_tan
+            )
         angle = (float(dsm[r, c]) - eye_elev_m) / dist
         if angle > max_angle:
             max_angle = angle
-    return True  # target shares the observer's cell
+    return 1.0  # target shares the observer's cell
 
 
 def point_exposure(
@@ -189,8 +295,9 @@ def point_exposure(
     observers: list[Coordinate],
     points: Sequence[tuple[float, float, float]],
     observer_height_m: float = 2.0,
+    canopy: CanopyOcclusion | None = None,
 ) -> np.ndarray:
-    """Fraction of observers that can see each ``(x, y, z_amsl)`` point.
+    """Mean per-observer visibility weight for each ``(x, y, z_amsl)`` point.
 
     The raster :func:`cumulative_exposure` scores every cell at one assumed
     altitude; this scores specific 3D points, so a trajectory can be re-scored at
@@ -208,6 +315,5 @@ def point_exposure(
         eye = float(dsm[obs_rc]) + observer_height_m
         for i, (x, y, z) in enumerate(points):
             rc = grid.world_to_pixel(Coordinate(x=x, y=y))
-            if _point_visible(dsm, obs_rc, eye, rc, z, cell):
-                accum[i] += 1.0
+            accum[i] += _point_weight(dsm, obs_rc, eye, rc, z, cell, canopy)
     return (accum / float(len(observers))).astype(np.float32)

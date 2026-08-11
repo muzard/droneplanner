@@ -82,7 +82,12 @@ def demo_ao(
     out: Path = typer.Option(
         Path("demo_ao"), "--out", "-o", help="Directory for the layers + mission YAML."
     ),
-    size: int = typer.Option(160, "--size", help="Demo grid size (cells per side)."),
+    size: int = typer.Option(160, "--size", help="Demo *scene* size (cells per side)."),
+    threat_margin: float | None = typer.Option(
+        None,
+        "--threat-margin",
+        help="Metres of grid to keep behind the start for a threat sensor (default 2500).",
+    ),
 ) -> None:
     """Export the built-in demo AO as GeoTIFF layers + a mission YAML.
 
@@ -90,12 +95,37 @@ def demo_ao(
     with turns and a varying altitude profile instead of the no-terrain
     straight-line stub — and exercises the same ingestion path real DTM/DSM data
     will use.
+
+    `--threat-margin` pads the raster south and west of the start so an observer or
+    radar can be placed at realistic standoff *behind* the launch point. Without
+    it the start sits ~400 m from its own corner, the only sensor placement
+    available sees the CP directly, and every "receding threat" measurement is a
+    worst case (roadmap C0).
     """
-    from droneplanner.demo import export_demo_ao
+    from droneplanner.demo import (
+        THREAT_MARGIN_M,
+        demo_layout,
+        export_demo_ao,
+        point_behind_start,
+    )
 
     configure_logging()
-    mission_path = export_demo_ao(out, size=size)
+    margin = THREAT_MARGIN_M if threat_margin is None else threat_margin
+    mission_path = export_demo_ao(out, size=size, threat_margin_m=margin)
     typer.secho(f"wrote demo AO layers + mission -> {mission_path}", fg=typer.colors.GREEN)
+
+    layout = demo_layout(size=size, threat_margin_m=margin)
+    start, end = layout.endpoints()
+    typer.echo(
+        f"grid {layout.rows}x{layout.cols} cells "
+        f"({layout.size} scene + {layout.margin_cells} threat margin); "
+        f"standoff behind start {layout.threat_standoff_m():,.0f} m"
+    )
+    if margin > 0.0:
+        sensor = point_behind_start(start, end, margin)
+        typer.echo(
+            f"a sensor {margin:,.0f} m behind the start sits at {sensor.x:.1f} {sensor.y:.1f}"
+        )
     typer.echo(f"next: droneplanner plan --mission {mission_path} --out out/")
 
 

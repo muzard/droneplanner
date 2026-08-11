@@ -102,6 +102,27 @@ may be projected `{x, y}` in the mission `crs` **or** WGS84 `{lon, lat}` (conver
 on load). `crs` **must** be a projected metric CRS — the pipeline does all
 distance/clearance math in meters, never degrees.
 
+Threat-model keys that decide what "exposed" means:
+
+```yaml
+threat:
+  observers: [{x: 501687.5, y: 5202787.5}]
+  observer_height_m: 2.0        # 2 dismount | 12-30 mast | 300-1000 airborne.
+                                # Raising it is the single biggest lever on the
+                                # route — see Threat-Geometry-vs-Flight-Band §6a.
+  canopy_occlusion:
+    sub_canopy_gap_fraction: 0.10   # chance a sub-canopy target is seen through a
+                                    # crown gap. 5-20 % for closed Nordic stands;
+                                    # 0.0 = fully hidden, 1.0 = no canopy occlusion.
+    sub_canopy_max_elev_deg: 10.0   # only steeper sightlines cross the crown layer;
+                                    # shallower ones are already handled by the
+                                    # DSM march and are left untouched.
+```
+
+⚠️ `sub_canopy_gap_fraction` is a literature figure, not a measurement, and the
+below-canopy concealment result is roughly proportional to it. Sweep it before
+trusting any posture conclusion.
+
 ## Design invariants (do not regress)
 
 - **CRS discipline.** Every geospatial input carries an explicit CRS; all math

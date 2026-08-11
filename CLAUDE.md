@@ -147,6 +147,42 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   `mean_exposure_cable`, and `mean_exposure_flown` (line-of-sight along the
   *flown* 3D trajectory, sharing `sample_flown_profile` with the clearance
   guarantee); the report separates `exposed_cable` from `exposed_drone`.
+- **Visibility is a WEIGHT, and a stand can hide what flies under it
+  (2026-08-11, roadmap C1 — don't regress).** `single_viewshed` excluded the
+  target cell's own DSM from its occluders — correct above the surface, wrong
+  beneath it — so from a 300 m sensor **100 % of the 3722 m flown below canopy
+  scored visible** while the aircraft was under the crowns. The planner could not
+  represent sub-canopy concealment against a look-down observer *at all*, which
+  is the one geometry the whole posture exists for. It now returns **float32
+  weights in [0, 1]**; `ThreatModel.canopy_occlusion` supplies the crown gap
+  fraction (default **0.10**) and the 10° steepness threshold, and `point_exposure`
+  applies the identical rule so the flown re-score cannot disagree with the raster.
+  `single_viewshed_bool` keeps the boolean contract the A4 reference test needs.
+  🔑 **Three conditions, and the middle one is load-bearing:** target under its own
+  DSM, **observer above that DSM**, sightline steeper than the threshold. Drop the
+  middle one and the model also attenuates trunk-space-to-trunk-space sightlines,
+  where nothing is in the way — that *invents* concealment, the one direction a
+  concealment planner must never err in.
+- **`threat.observer_height_m` is a mission input (2026-08-11 — don't regress).**
+  `build_cost_surface` hard-coded a 2 m eye, so the planner **could not route
+  against a mast or an airborne sensor**, and C1 was measurably inert in the
+  pipeline: the gap fraction changed the demo route by *exactly nothing*, because
+  a dismount never looks down into a stand. Pinned by
+  `test_canopy_occlusion_reaches_the_cost_surface`. 🔴 Note the eye sits on the
+  **DSM**, so a "2 m dismount" in a 22 m stand is modelled at 24 m — in the
+  treetops (SHORTFALLS).
+- **The demo AO has room behind the start for a threat sensor (2026-08-11,
+  roadmap C0).** The start sat ~400 m from its own SW corner, so every "receding
+  threat" number was measured against a sensor that could see the CP directly.
+  `demo-ao --threat-margin` (default **2500 m**) pads the raster south and west —
+  the reverse-of-route bearing — as analytic continuation of the same surface, so
+  start, end, observers and the scene's terrain are **bit-identical** and the route
+  barely moves (5299 → 5316 m). Standoff 407 → **2528 m** for **0.09 s** of extra
+  plan time. ⚠️ It is not perfectly route-neutral: `fields/terrain` and
+  `fields/survivability` normalize over the whole raster, so extending the extent
+  rescales those layers everywhere. Endpoints were deliberately *not* moved inward
+  (the roadmap's suggested alternative) — that shortens the route 5.3 → ~3.1 km and
+  would silently close the N1 endurance NO-GO by shrinking the mission.
 - **The plan carries the lateral freedom it grants, and concealment is scored
   over it (2026-07-28 — don't regress).** The flight stack follows the route
   *approximately* (obstacle avoidance is onboard, user 2026-07-27), so scoring
@@ -211,6 +247,24 @@ DSM, evaluated at flight altitude) + survivability (which carries the *ground*
 viewshed, for the cable) + snag + road penalty + forest term (reward/penalty) −
 cover (drainage defilade). Non-navigable forest → Theta\* obstacle.
 `planner/corridor.py` runs the search then the kinematic pass.
+
+## 🟢 NEXT ARCHITECTURE: route between mapped stems (TEST-PLAN N4, 2026-08-11)
+Reactive avoidance is dead in the flight stack (four independent negatives). The
+surviving option is a planner that routes *through* the stem gaps. Measured on the
+real dense manifest it is cheap — **+1.6 % distance at ±25 m corridor, +2.9 % at
+3.0 m clearance** — and the forest is **99.9 % free area**, so the room is there.
+It converts avoidance into **localisation: know position to ≤2.4 m** (GPS-denied
+VTRN currently holds 11.8 m), and it **reopens the 6.0 m/s speed window** N1/N3
+closed, because a pre-planned path has nothing to react to.
+🔴 **Two planner-side blockers, both measured:**
+1. **Composition fails.** Against A1's real per-vertex corridor (32/282 vertices at
+   zero freedom) the dense manifest has **no admissible path at any clearance** —
+   2 pinch points have a trunk within 0.86 m. **Stem clearance must become a term
+   in the cost surface**, not a post-filter, so the centreline is never laid where
+   the aircraft cannot pass. The zero-freedom vertices are the concealment-critical
+   ones, so this is a trade to price, not a constraint to satisfy.
+2. **No stem map, and no way to make one** — see SHORTFALLS M2. Every trunk
+   manifest flown so far is *synthetic*.
 
 ## Top gaps (SHORTFALLS.md, before sims)
 0. 🔴 **The concealed route does not fit the battery.** 57.1 min against a 30 min

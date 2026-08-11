@@ -27,7 +27,7 @@ import math
 
 import numpy as np
 
-from droneplanner.fields.viewshed import _boundary_cells, single_viewshed
+from droneplanner.fields.viewshed import _boundary_cells, single_viewshed_bool
 from droneplanner.raster_lines import bresenham
 
 OBSERVER_HEIGHT_M = 2.0
@@ -122,7 +122,7 @@ def test_matches_the_reference_exactly_on_flat_ground() -> None:
     size = 41
     for name, obs in [("centre", (size // 2, size // 2)), ("corner", (0, 0))]:
         dsm = _flat(size)
-        prod = single_viewshed(dsm, obs, cell_size_m=10.0)
+        prod = single_viewshed_bool(dsm, obs, cell_size_m=10.0)
         assert np.array_equal(prod, reference_viewshed(dsm, obs)), name
 
 
@@ -140,7 +140,7 @@ def test_a_wall_casts_the_same_shadow_in_both() -> None:
     wall_col = size // 2
     dsm = _wall(size)
     obs = (size // 2, 2)
-    prod = single_viewshed(dsm, obs, cell_size_m=10.0)
+    prod = single_viewshed_bool(dsm, obs, cell_size_m=10.0)
     ref = reference_viewshed(dsm, obs)
 
     behind = np.zeros_like(prod)
@@ -169,7 +169,7 @@ def test_smooth_terrain_agrees_and_errs_toward_over_reporting_exposure() -> None
     """
     size = 41
     for name, dsm, obs in [("hill", _hill(size), (2, 2)), ("rough", _rough(size), (1, 1))]:
-        prod = single_viewshed(dsm, obs, cell_size_m=10.0)
+        prod = single_viewshed_bool(dsm, obs, cell_size_m=10.0)
         ref = reference_viewshed(dsm, obs)
         agreement = float((prod == ref).mean())
         over = int((prod & ~ref).sum())  # production says visible, reference hides

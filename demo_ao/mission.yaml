@@ -31,6 +31,7 @@ weights:
   length: 0.5
   survivability: 1.0
   snag: 0.5
+  clutter: 0.0
 layers:
   dtm: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/demo_ao/dtm.tif
   dsm: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/demo_ao/dsm.tif

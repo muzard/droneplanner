@@ -88,6 +88,46 @@ def test_exposure_is_scored_at_flight_altitude_not_on_the_ground() -> None:
     assert np.all(surface.flight_agl_m == mission.cruise_agl_m)  # type: ignore[attr-defined]
 
 
+def _canopy_mission(grid: Grid, **threat: object) -> object:
+    """A mission whose one observer overlooks a stand from directly above it."""
+    obs = grid.pixel_to_world(2, 2)
+    return make_mission(
+        crs="EPSG:32633",
+        cruise_agl_m=10.0,
+        altitude={"min_canopy_m": 12.0, "canopy_clearance_m": 3.0},
+        threat={"observers": [{"x": obs.x, "y": obs.y}], **threat},
+    )
+
+
+def test_canopy_occlusion_reaches_the_cost_surface() -> None:
+    """C1 must not be inert in the product it was written for.
+
+    The gap fraction has to move the drone's exposure field, and it only can when
+    the sensor is high enough to look *down* into the stand — which is why this
+    test also pins ``observer_height_m``. With the pre-2026-08-11 hard-coded 2 m
+    eye the planner could not represent that threat, and C1 changed nothing at all.
+    """
+    size = 24
+    grid = _grid_for(size)
+    dtm = np.zeros((size, size), dtype=np.float32)
+    dsm = np.full((size, size), 20.0, dtype=np.float32)  # closed 20 m canopy
+    dsm[0:4, 0:4] = 0.0  # ...with a clearing for the observer to stand in
+
+    def exposure(gap: float, height_m: float) -> float:
+        mission = _canopy_mission(
+            grid, observer_height_m=height_m, canopy_occlusion={"sub_canopy_gap_fraction": gap}
+        )
+        surface = build_cost_surface(dtm, dsm, grid, mission)  # type: ignore[arg-type]
+        return float(surface.components["exposure"].mean())
+
+    # A sensor 500 m up looks down steeply: the crowns must start to matter.
+    assert exposure(0.0, 500.0) < exposure(0.10, 500.0) < exposure(1.0, 500.0)
+    # A dismount in the clearing is *under* the crown line, so its sightline into
+    # the stand arrives through trunk space and no crown is in the way. The gap
+    # fraction must not touch it — attenuating that ray would invent concealment.
+    assert exposure(0.0, 2.0) == exposure(1.0, 2.0)
+
+
 def test_cable_survivability_is_unaffected_by_the_drone_altitude() -> None:
     """The cable lies on the ground, so its openness term must not move with cruise AGL."""
     dem = make_dem("ridge", size=24)
