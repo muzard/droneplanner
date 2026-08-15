@@ -6,10 +6,18 @@ visual exposure, cable survivability cost, and snag risk, and falls under cover
 (defilade). The individual layers are retained on the returned object so the
 visualizer can show *why* the planner chose a route.
 
-Note the deliberate split between the two visibility layers: ``exposure`` is the
-**drone** seen at its planned flight altitude, ``exposure_ground`` is the
-**surface** (what the laid cable is exposed to, via ``survivability``). They are
-different objects at different heights and are not interchangeable.
+Note the deliberate split between the two visibility layers, which since roadmap
+C2 answer **different questions** and not merely at different heights:
+
+* ``exposure`` — the **drone** at its planned flight altitude, weighted by crown
+  occlusion (C1) and by whether a 0.9 m airframe is resolvable at that slant range
+  (C2). Read it as an approximate probability that a searching observer acquires
+  the aircraft.
+* ``ground_los`` — the **surface** the cable lies on, pure line of sight with no
+  detection model, because a 0.28 mm fiber is not optically resolvable at any
+  range. Read it as openness, never as a detection probability. It was called
+  ``exposure_ground`` until C2; the name changed precisely so the two cannot be
+  compared as if they were the same currency.
 """
 
 from __future__ import annotations
@@ -97,13 +105,20 @@ def build_cost_surface(
         observer_height_m=eye_m,
         target_elev_m=dtm + flight_agl,
         canopy=mission.threat.canopy_occlusion,
+        detection=mission.threat.detection,
+        target_span_m=mission.drone.rotor_span_m,
     )
-    # No canopy term for the ground field: its target *is* the DSM surface, so a
-    # cell's own crown is never between the observer and it. Whether that surface
-    # is the right proxy for a buried 0.28 mm fiber is roadmap C2's question.
-    ground_exposure = cumulative_exposure(dsm, grid, observers, observer_height_m=eye_m)
+    # The ground field gets NEITHER model, and both omissions are deliberate.
+    # Canopy: its target *is* the DSM surface, so a cell's own crown is never
+    # between the observer and it. Detection: the laid fiber is 0.25-0.28 mm and is
+    # never optically resolvable at any range, so a visual acquisition model sized
+    # for it would zero the field and delete cable survivability from the cost
+    # surface. It therefore stays a **pure line-of-sight openness proxy** — and is
+    # named `ground_los`, not `exposure_*`, so it cannot be read as a detection
+    # probability now that `exposure` is one (roadmap C2; SHORTFALLS records this).
+    ground_los = cumulative_exposure(dsm, grid, observers, observer_height_m=eye_m)
 
-    survivability = build_survivability(dtm, dsm, grid, observers, openness=ground_exposure)
+    survivability = build_survivability(dtm, dsm, grid, observers, openness=ground_los)
     snag = build_snag((grid.rows, grid.cols))
     ridge = ridge_penalty(dtm)
     drainage = drainage_proxy(dtm)
@@ -129,8 +144,8 @@ def build_cost_surface(
     )
 
     components = {
-        "exposure": exposure,  # the drone, at flight altitude
-        "exposure_ground": ground_exposure,  # the cable, on the surface
+        "exposure": exposure,  # the drone: occlusion x crown gap x detection range
+        "ground_los": ground_los,  # the cable: line of sight only, no detection model
         "flight_agl": flight_agl,
         "canopy_height": chm,
         "flight_band": flight_band.astype(np.float32),

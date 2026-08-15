@@ -7,12 +7,16 @@ coordinate conversion) and is otherwise treated as immutable.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from droneplanner.model.geometry import Coordinate, validate_projected_crs
+
+_ARCMIN_RAD = math.pi / (180.0 * 60.0)
 
 
 class PayoutSide(StrEnum):
@@ -130,6 +134,67 @@ class CanopyOcclusion(BaseModel):
     )
 
 
+class DetectionModel(BaseModel):
+    """When a target is close enough to be *resolved*, not merely in line of sight.
+
+    The viewshed answers "does a sightline exist". It said nothing about whether a
+    0.9 m object is resolvable down that line, and had **no range term at all** — a
+    cell 3 km from an observer scored exactly like one at 300 m. Measured
+    consequence: the median exposed sample on every study arm sits at **1.3-1.6
+    arcmin**, two to five times below the angle at which observers actually
+    acquired real sUAS in trials, and against a far more favourable background
+    (sky, not forest). Most of the "exposure" the planner has been routing away
+    from is at ranges where nobody was going to see this aircraft at any altitude.
+
+    ⚠️ This models **acquisition by a searching human eye or optic** and nothing
+    else. It is not a radar model, not an acoustic one, and not a thermal one —
+    acoustic C-UAS ranges (300-500 m for small quadcopters) are of the same order
+    as the unaided visual threshold and are essentially independent of flight band.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    threshold_arcmin: float = Field(
+        default=3.0,
+        gt=0.0,
+        description=(
+            "Angular size at which the airframe is acquired. 3' is the empirical "
+            "figure and the agreement across independent trials is good: DJI Mavic "
+            "Pro (0.335 m) identified at 310 m = 3.7'; Inspire 2 (0.6 m) at 698 m = "
+            "2.95'; AeroVironment Wasp (0.72 m) at 760 m = 3.26'. NTSB's 'reasonable "
+            "chance of detection' figure is 12', which is far more forgiving, so 3.0 "
+            "is the **pessimistic, adversary-favouring** default: it grants the "
+            "observer roughly 4x the range NTSB would."
+        ),
+    )
+    optic_magnification: float = Field(
+        default=1.0,
+        ge=1.0,
+        description=(
+            "Observation optic in front of the eye. This is the input that can erase "
+            "the range argument entirely: at 12x the NTSB threshold reaches 3.1 km, "
+            "which covers a whole AO — so a tripod-mounted spotting scope searching "
+            "the right bearing is a different threat from a dismount, and the "
+            "difference belongs to the operator, not to a constant."
+        ),
+    )
+    falloff: Literal["hard", "ramp"] = Field(
+        default="ramp",
+        description=(
+            "'ramp' holds full weight to half the acquisition range and falls "
+            "linearly to zero at it — detection degrades, it does not switch off. "
+            "'hard' is the step function, for sensors quoted with a stated range."
+        ),
+    )
+
+    def max_range_m(self, target_span_m: float) -> float:
+        """Range at which ``target_span_m`` subtends exactly ``threshold_arcmin``.
+
+        For this programme's 0.9 m airframe unaided at 3', that is **1031 m**.
+        """
+        return target_span_m * self.optic_magnification / (self.threshold_arcmin * _ARCMIN_RAD)
+
+
 class ThreatModel(BaseModel):
     """Observer positions (viewshed sources) + threat fire sectors."""
 
@@ -138,6 +203,7 @@ class ThreatModel(BaseModel):
     observers: tuple[Coordinate, ...] = ()
     sectors: tuple[ThreatSector, ...] = ()
     canopy_occlusion: CanopyOcclusion = CanopyOcclusion()
+    detection: DetectionModel = DetectionModel()
     observer_height_m: float = Field(
         default=2.0,
         ge=0.0,

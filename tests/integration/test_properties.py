@@ -13,6 +13,8 @@ import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from droneplanner.fields.viewshed import single_viewshed
+from droneplanner.model.mission import DetectionModel
 from droneplanner.planner.stub import straight_line_plan
 from droneplanner.planner.theta_star import plan_path
 from droneplanner.raster_lines import bresenham
@@ -100,3 +102,39 @@ def test_theta_never_enters_obstacle(gap_row: int) -> None:
     obstacle[0:gap_row, 10] = True  # wall with a gap below gap_row
     path = plan_path(cost, (5, 0), (5, 20), obstacle=obstacle)
     assert not any(obstacle[r, c] for r, c in path)
+
+
+# --- C2: exposure must fall off with range, not merely exist -------------------
+
+
+@given(
+    threshold=st.floats(min_value=1.0, max_value=12.0),
+    magnification=st.floats(min_value=1.0, max_value=12.0),
+    span=st.floats(min_value=0.3, max_value=2.0),
+)
+@settings(max_examples=25, deadline=None)
+def test_exposure_never_rises_with_range_along_a_clear_sightline(
+    threshold: float, magnification: float, span: float
+) -> None:
+    """Over bare flat ground nothing occludes anything, so the profile away from
+    an observer isolates the detection model: it must be non-increasing.
+
+    A rising step would mean a cell got *more* exposed by being further away,
+    which is the failure mode a hand-rolled falloff invites.
+    """
+    size = 40
+    detection = DetectionModel(threshold_arcmin=threshold, optic_magnification=magnification)
+    # Scale the grid to the model rather than fixing it: acquisition range spans
+    # ~100 m to ~25 km across this parameter space, and a fixed cell size would
+    # either put every cell inside the full-weight zone or every cell beyond it.
+    cell_m = detection.max_range_m(span) / 8.0
+    dsm = np.zeros((size, size), dtype=np.float32)
+    weights = single_viewshed(
+        dsm, (0, 0), cell_size_m=cell_m, detection=detection, target_span_m=span
+    )
+    along = [float(weights[0, c]) for c in range(1, size)]
+    for near, far in pairwise(along):
+        assert far <= near + 1e-6, f"exposure rose with range: {near} -> {far}"
+    # ...and the whole shape is there: full weight up close, nothing at 4.9x range.
+    assert along[0] == 1.0
+    assert along[-1] == 0.0

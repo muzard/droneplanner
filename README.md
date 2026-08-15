@@ -117,11 +117,29 @@ threat:
     sub_canopy_max_elev_deg: 10.0   # only steeper sightlines cross the crown layer;
                                     # shallower ones are already handled by the
                                     # DSM march and are left untouched.
+  detection:
+    threshold_arcmin: 3.0           # angular size at acquisition. 3' is the trials
+                                    # figure, 12' is NTSB's more forgiving one.
+    optic_magnification: 1.0        # 1 unaided, 7 and 12 are the cases that matter.
+    falloff: ramp                   # full weight to half range, linear to 0; or
+                                    # "hard" for a stated-range sensor.
 ```
 
-⚠️ `sub_canopy_gap_fraction` is a literature figure, not a measurement, and the
-below-canopy concealment result is roughly proportional to it. Sweep it before
+`detection` is what makes `exposure` mean "probably acquired" rather than "a
+sightline exists": a 0.9 m airframe unaided at 3' is resolvable to **1031 m**, and
+beyond that it scores zero however open the ground is.
+
+⚠️ Two knobs carry most of the uncertainty. `sub_canopy_gap_fraction` is a
+literature figure, not a measurement, and the below-canopy result is roughly
+proportional to it. `optic_magnification` is the input that can erase the range
+argument outright — at 12x the acquisition range is 12.4 km, which covers a whole
+AO and restores the entire pre-detection-model exposure picture. Sweep both before
 trusting any posture conclusion.
+
+The two visibility layers are **not** in the same currency and must not be compared:
+`exposure` is the drone, weighted by crown occlusion and detection range;
+`ground_los` is plain line of sight to the surface the cable lies on, with no
+detection model, because a 0.28 mm fiber is not optically resolvable at any range.
 
 ## Design invariants (do not regress)
 

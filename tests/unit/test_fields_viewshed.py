@@ -8,7 +8,7 @@ import pytest
 from droneplanner.fields.viewshed import cumulative_exposure, point_exposure, single_viewshed
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import CanopyOcclusion
+from droneplanner.model.mission import CanopyOcclusion, DetectionModel
 from tests.fixtures.synthetic import make_closed_canopy
 
 
@@ -145,6 +145,102 @@ def test_point_exposure_no_observers_is_zero() -> None:
     grid = _flat_grid(8)
     assert np.all(point_exposure(dsm, grid, [], [(0.0, 0.0, 10.0)]) == 0.0)
     assert point_exposure(dsm, grid, [], []).size == 0
+
+
+# --- C2: line of sight is not detection ----------------------------------------
+#
+# Flat bare ground, one observer, nothing to occlude anything: whatever the field
+# says here is the range term and only the range term.
+
+_SPAN_M = 0.9  # the programme's airframe
+
+
+def _clear_ground(size: int, cell_m: float) -> tuple[np.ndarray, Grid]:
+    dsm = np.zeros((size, size), dtype=np.float32)
+    transform = (cell_m, 0.0, 0.0, 0.0, -cell_m, size * cell_m)
+    return dsm, Grid(transform=transform, rows=size, cols=size, crs="EPSG:32633")
+
+
+def _weight_at_range(detection: DetectionModel, range_m: float, cell_m: float = 50.0) -> float:
+    """Visibility weight of a target that far from the observer over clear ground."""
+    size = int(2 * range_m / cell_m) + 3
+    dsm, grid = _clear_ground(size, cell_m)
+    cells = round(range_m / cell_m)
+    weights = single_viewshed(
+        dsm,
+        observer_rc=(0, 0),
+        cell_size_m=cell_m,
+        detection=detection,
+        target_span_m=_SPAN_M,
+    )
+    return float(weights[0, cells])
+
+
+def test_max_range_is_where_the_airframe_subtends_the_threshold() -> None:
+    """The programme's 0.9 m airframe, unaided, at the empirical 3' figure."""
+    assert DetectionModel().max_range_m(_SPAN_M) == pytest.approx(1031.3, abs=0.5)
+    # NTSB's far more forgiving 12' figure, for scale.
+    assert DetectionModel(threshold_arcmin=12.0).max_range_m(_SPAN_M) == pytest.approx(
+        257.8, abs=0.5
+    )
+
+
+def test_clear_sightline_beyond_the_acquisition_range_is_not_exposure() -> None:
+    detection = DetectionModel()
+    beyond = 1.5 * detection.max_range_m(_SPAN_M)
+    assert _weight_at_range(detection, beyond) == 0.0
+
+
+def test_well_inside_the_acquisition_range_is_full_exposure() -> None:
+    detection = DetectionModel()
+    near = 0.25 * detection.max_range_m(_SPAN_M)
+    assert _weight_at_range(detection, near) == pytest.approx(1.0)
+
+
+def test_an_optic_extends_the_acquisition_range_by_exactly_its_magnification() -> None:
+    """The input that can erase the range argument for a ground observer."""
+    plain = DetectionModel().max_range_m(_SPAN_M)
+    for mag in (7.0, 12.0):
+        scoped = DetectionModel(optic_magnification=mag).max_range_m(_SPAN_M)
+        assert scoped == pytest.approx(mag * plain)
+    # ...and a target the plain eye cannot acquire is exposure through a 12x optic.
+    far = 3.0 * plain
+    assert _weight_at_range(DetectionModel(), far) == 0.0
+    assert _weight_at_range(DetectionModel(optic_magnification=12.0), far) == pytest.approx(1.0)
+
+
+def test_hard_falloff_steps_where_ramp_degrades() -> None:
+    ramp, hard = DetectionModel(), DetectionModel(falloff="hard")
+    three_quarters = 0.75 * ramp.max_range_m(_SPAN_M)
+    assert 0.0 < _weight_at_range(ramp, three_quarters) < 1.0
+    assert _weight_at_range(hard, three_quarters) == pytest.approx(1.0)
+
+
+def test_detection_is_off_by_default_at_this_level() -> None:
+    """``detection=None`` reproduces the pre-C2 field: range does not matter."""
+    dsm, _ = _clear_ground(60, 50.0)
+    weights = single_viewshed(dsm, (0, 0), cell_size_m=50.0)
+    assert weights[0, 59] == 1.0  # ~3 km away and still fully "exposed"
+
+
+def test_detection_and_canopy_occlusion_compose() -> None:
+    """Two independent reductions, multiplied — not one overriding the other."""
+    size, cell_m = 21, 10.0
+    dtm, dsm = make_closed_canopy(size=size, canopy_m=_CANOPY_M)
+    kwargs = dict(
+        observer_rc=(10, 9),
+        cell_size_m=cell_m,
+        observer_height_m=300.0,
+        target_elev_m=dtm + 10.0,
+        target_span_m=_SPAN_M,
+    )
+    canopy = CanopyOcclusion()  # gap 0.10
+    # At 300 m slant the ramp is already biting, so pin the product rather than a
+    # constant: the point is that neither model is being dropped on the floor.
+    range_only = float(single_viewshed(dsm, detection=DetectionModel(), **kwargs)[10, 10])
+    both = float(single_viewshed(dsm, canopy=canopy, detection=DetectionModel(), **kwargs)[10, 10])
+    assert 0.0 < range_only <= 1.0
+    assert both == pytest.approx(range_only * canopy.sub_canopy_gap_fraction)
 
 
 # --- C1: a cell's own canopy occludes what flies beneath it ---------------------

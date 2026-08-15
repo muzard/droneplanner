@@ -469,21 +469,56 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   adversary-favouring direction. Fixing it means choosing whether an observer
   stands on the terrain (DTM) or on the surface, per observer — a mission-contract
   question, and it moves every historical exposure figure.
-- 🔴 **The viewshed has no range term** (roadmap C2, **not yet built**). A cell
-  3 km from an observer scores exactly like one at 300 m. Measured: the median
-  exposed sample on every arm sits at **1.3–1.6 arcmin**, against **3–7′** where
-  real observers actually acquired real sUAS in trials. **Every exposure number in
-  `CLAUDE.md`, including the 0.55 → 0.15 that justified the below-canopy posture,
-  is in this unweighted currency**, and most of it is at ranges beyond 2 km where
-  an unaided observer sees nothing. Until C2 lands, read `mean_exposure*` as "a
-  line of sight exists", never as "detected".
-- 🟠 **`exposure_ground` is a line-of-sight proxy, not a detection probability,
-  and the name oversells it.** It scores the **DSM surface** — the canopy top —
-  not the fiber, which is 0.25–0.28 mm and is **never optically resolvable at any
-  range**. C1 deliberately does not touch it (its target *is* the surface, so no
-  crown is ever between it and the observer). Roadmap C2 must decide explicitly:
-  re-frame it as disturbed-ground / corridor exposure with its own target size, or
-  rename it so nobody reads it as a detection probability.
+- ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
+  at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
+  median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the
+  **3–7′** where real observers actually acquired real sUAS — and against sky, a
+  far more favourable background than forest. `ThreatModel.detection`
+  (`DetectionModel`) turns an acquisition angle and an optic magnification into a
+  **slant** range: **1031 m** for this 0.9 m airframe unaided at the empirical 3′,
+  full weight to half of that and a linear ramp to zero (`falloff="ramp"`). It
+  multiplies with C1's crown weight, so "exposure" is now an approximate
+  *probability a searching observer acquires the aircraft*.
+  ⚠️ **Visual acquisition only** — not radar, not thermal, and **not acoustic**,
+  where published C-UAS ranges (300–500 m for small quadcopters) are comparable to
+  the unaided visual threshold and are largely *independent of flight band*. A
+  posture argued on this field alone is argued on one of three detection modes.
+  🔴 **The default is not conservative in one direction that matters:**
+  `optic_magnification` defaults to 1.0, and a 12× observation optic multiplies the
+  acquisition range by 12 (12.4 km at 3′) — which covers any AO and erases the
+  range argument entirely. It requires the observer to be searching that bearing,
+  which is what `threat.sectors` (C3, still unimplemented) exists to express.
+- ✅ **`exposure_ground` is now `ground_los`, and gets no detection model**
+  (roadmap C2's explicit decision, 2026-08-11). It scores the **DSM surface**, not
+  the fiber — which at 0.25–0.28 mm is **never optically resolvable at any range**,
+  so a visual acquisition model sized for it would zero the field and delete cable
+  survivability from the cost surface. It therefore stays a **pure line-of-sight
+  openness proxy**, and was renamed precisely so it cannot be read in the same
+  currency as `exposure` now that `exposure` is a detection probability.
+  `objective_scores.mean_exposure_cable` became `mean_cable_los` for the same
+  reason. 🟠 The residual gap: nothing models what the *cable* actually presents to
+  an observer — disturbed ground, a corridor through vegetation, a trench line —
+  so `ground_los` answers "could someone see this patch of ground", which is a
+  proxy for cable survivability and not a measurement of it.
+- 🔴 **`min_canopy_m` is a hard band threshold with no hysteresis, and a stand
+  sitting at it makes the aircraft porpoise.** Under-canopy and over-canopy
+  altitudes are ~5 m apart with **no admissible altitude between them** (the crowns
+  are physically in the way), which is fine as a one-off transition and is not fine
+  along a canopy gradient that drifts across the threshold. Measured on the demo AO
+  at `size=120`: CHM 11.21 / 12.05 / 11.19 / 12.03 m over consecutive waypoints
+  gives commanded AGL **14.21 / 9.05 / 14.19 / 9.03**, i.e. **16.9 m/s of climb
+  demanded on a 2.46 m leg** against a 3.0 m/s airframe — `climb_violations=1`,
+  `feasible=False`. Guarded by an **xfail** test
+  (`test_canopy_band_does_not_oscillate_across_the_entry_threshold`).
+  ⚠️ **C2 did not cause this but makes it more likely**: with exposure range-limited
+  to zero over most of an AO, routes are driven by length and take shorter, steeper
+  lines across whatever stand is in the way. And PX4 flies **~3.6×** the vertical
+  travel a plan commands, so a sawtooth like this is worse in the air than on paper.
+  Fixing it is a **design choice, not a patch** — per-cell rasters cannot carry
+  hysteresis (the band raster and `planned_flight_agl` are deliberately one
+  definition), so the options are a band-instability term in the cost surface, or a
+  path-level rule that commits to over-canopy when the band flips repeatedly over a
+  short run. The second is cheap and costs concealment. **User's call.**
 - 🟠 **Land cover / vegetation is not ingested.** `LayerPaths.land_cover` exists
   in the contract but is unwired: `snag` is identically 0 and the survivability
   `(1 − veg_cover)` term is 0. Canopy is one of the strongest real concealment

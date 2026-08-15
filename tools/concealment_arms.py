@@ -43,7 +43,7 @@ import yaml
 from droneplanner.fields.viewshed import _point_weight
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import CanopyOcclusion
+from droneplanner.model.mission import CanopyOcclusion, DetectionModel
 
 ARCMIN = math.pi / (180 * 60)
 
@@ -90,6 +90,7 @@ def write_mission(
     dest: Path,
     canopy: CanopyOcclusion | None = None,
     observer_height_m: float | None = None,
+    detection: DetectionModel | None = None,
 ) -> Path:
     m = copy.deepcopy(base)
     m["name"] = arm.name
@@ -104,6 +105,8 @@ def write_mission(
         m.setdefault("threat", {})["canopy_occlusion"] = canopy.model_dump(mode="json")
     if observer_height_m is not None:
         m.setdefault("threat", {})["observer_height_m"] = observer_height_m
+    if detection is not None:
+        m.setdefault("threat", {})["detection"] = detection.model_dump(mode="json")
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(yaml.safe_dump(m, sort_keys=False))
     return dest
@@ -152,6 +155,7 @@ def rescore(
     observer_height_m: float = 2.0,
     detect_range_m: float = float("inf"),
     canopy: CanopyOcclusion | None = None,
+    detection: DetectionModel | None = None,
 ) -> dict:
     """What an observer could actually detect along the *flown* trajectory.
 
@@ -199,7 +203,7 @@ def rescore(
             rng = math.hypot(x - o[0], y - o[1])
             if rng > detect_range_m:
                 continue
-            w = _point_weight(dsm, rc_o, eye, rc, z, grid.cell_size_m, canopy)
+            w = _point_weight(dsm, rc_o, eye, rc, z, grid.cell_size_m, canopy, detection, span_m)
             if w > 0.0:
                 miss *= 1.0 - w
                 nearest = rng if nearest is None else min(nearest, rng)
@@ -302,6 +306,22 @@ def main() -> int:
         default=None,
         help="Sightlines steeper than this get the gap-fraction treatment (default 10).",
     )
+    ap.add_argument(
+        "--threshold-arcmin",
+        type=float,
+        default=None,
+        help=(
+            "Angular size at which the airframe is acquired (roadmap C2). Default 3.0, "
+            "the empirical trials figure; 12.0 is NTSB's far more forgiving one. Pass a "
+            "tiny value (1e-4) to reproduce the pre-C2 unweighted numbers."
+        ),
+    )
+    ap.add_argument(
+        "--optic",
+        type=float,
+        default=None,
+        help="Observer's optic magnification (1 unaided, 7 and 12 are the cases that matter).",
+    )
     args = ap.parse_args()
 
     fields = {}
@@ -310,6 +330,13 @@ def main() -> int:
     if args.max_elev_deg is not None:
         fields["sub_canopy_max_elev_deg"] = args.max_elev_deg
     canopy = CanopyOcclusion(**fields)
+
+    det_fields = {}
+    if args.threshold_arcmin is not None:
+        det_fields["threshold_arcmin"] = args.threshold_arcmin
+    if args.optic is not None:
+        det_fields["optic_magnification"] = args.optic
+    detection = DetectionModel(**det_fields)
 
     base = yaml.safe_load((args.ao / "mission.yaml").read_text())
     span = float(base["drone"]["rotor_span_m"])
@@ -344,7 +371,14 @@ def main() -> int:
     print("-" * len(hdr))
 
     for arm in build_arms(base, enemy):
-        mp = write_mission(base, arm, args.out / f"{arm.name}.yaml", canopy, args.observer_height)
+        mp = write_mission(
+            base,
+            arm,
+            args.out / f"{arm.name}.yaml",
+            canopy,
+            args.observer_height,
+            detection,
+        )
         rep = plan(mp, args.out / arm.name)
         base_obs = base.get("threat", {}).get("observers", [])
         obs = arm.observers or [(o["x"], o["y"]) for o in base_obs]
@@ -360,6 +394,7 @@ def main() -> int:
             observer_height_m=args.observer_height,
             detect_range_m=args.detect_range,
             canopy=canopy,
+            detection=detection,
         )
         o = rep["objective_scores"]
         print(

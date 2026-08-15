@@ -78,7 +78,7 @@ def render(mission: Mission, surface: CostSurface, plan: Plan) -> Figure:
     fig.suptitle(
         f"{mission.name}: concealment-aware route  "
         f"(drone exposure {scores.get('mean_exposure', 0):.2f} vs cable "
-        f"{scores.get('mean_exposure_cable', 0):.2f}, length {plan.total_length_m:.0f} m)",
+        f"{scores.get('mean_cable_los', 0):.2f}, length {plan.total_length_m:.0f} m)",
         fontsize=13,
     )
 
@@ -137,7 +137,7 @@ def save_figure(path: str | Path, mission: Mission, surface: CostSurface, plan: 
 
 LAYERS = (
     "exposure",
-    "exposure_ground",
+    "ground_los",
     "canopy",
     "flight_agl",
     "cost",
@@ -162,8 +162,8 @@ def layer_data(surface: CostSurface, layer: str) -> tuple[np.ndarray, str]:
         return surface.components["flight_agl"], "cividis"
     # Ground-level exposure: what the *cable* is exposed to, and the contrast that
     # shows how much the drone's altitude costs it (SHORTFALLS item 1).
-    if layer == "exposure_ground" and "exposure_ground" in surface.components:
-        return surface.components["exposure_ground"], "inferno"
+    if layer == "ground_los" and "ground_los" in surface.components:
+        return surface.components["ground_los"], "inferno"
     if layer == "flyability" and "flyability_class" in surface.components:
         # 0 flyable (green) -> 1 marginal -> 2 non-navigable (red)
         return surface.components["flyability_class"], "RdYlGn_r"

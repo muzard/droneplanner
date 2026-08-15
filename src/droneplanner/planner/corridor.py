@@ -144,9 +144,10 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
 
     cell_path = plan_path(surface.cost, start_rc, goal_rc, obstacle=surface.obstacle)
     # Two objects, two fields (SHORTFALLS item 1): the drone is scored at its
-    # flight altitude, the cable on the ground it is laid on.
+    # flight altitude with a detection model, the cable on the ground it is laid
+    # on with plain line of sight — see fields/composite.py for why they differ.
     exposure = surface.components["exposure"]
-    ground_exposure = surface.components["exposure_ground"]
+    ground_los = surface.components["ground_los"]
     flyability = surface.flyability
     speed = mission.drone.cruise_speed_ms
     clearance_floor = mission.altitude.min_agl_m
@@ -331,7 +332,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
                 length_m=coords[i].distance_to(coords[i + 1]),
                 flyability=_segment_flyability(flyability, seg_cells),
                 flight_band=_segment_band(seg_cells),
-                exposed=_mean_over(ground_exposure, seg_cells) > EXPOSED_THRESHOLD,
+                exposed=_mean_over(ground_los, seg_cells) > EXPOSED_THRESHOLD,
                 drone_exposed=_mean_over(exposure, seg_cells) > EXPOSED_THRESHOLD,
             )
         )
@@ -349,8 +350,8 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     exposed_fraction = (
         float(np.mean([e > EXPOSED_THRESHOLD for e in path_exposures])) if path_exposures else 0.0
     )
-    cable_exposures = [float(ground_exposure[r, c]) for r, c in all_cells]
-    mean_exposure_cable = float(np.mean(cable_exposures)) if cable_exposures else 0.0
+    cable_los = [float(ground_los[r, c]) for r, c in all_cells]
+    mean_cable_los = float(np.mean(cable_los)) if cable_los else 0.0
 
     # Re-score exposure along the trajectory the aircraft will actually fly. The
     # raster above assumes every cell is overflown at its *band* altitude; the
@@ -369,6 +370,8 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         flown_samples,
         observer_height_m=mission.threat.observer_height_m,
         canopy=mission.threat.canopy_occlusion,
+        detection=mission.threat.detection,
+        target_span_m=mission.drone.rotor_span_m,
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0
@@ -395,7 +398,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             # informative, not noise — see the comment above.
             "mean_exposure_flown": mean_exposure_flown,
             "max_exposure_flown": max_exposure_flown,
-            "mean_exposure_cable": mean_exposure_cable,
+            "mean_cable_los": mean_cable_los,
             # And of the CORRIDOR — the area the flight stack may actually use.
             # This is the honest number if the route is followed approximately.
             "mean_exposure_corridor": corridor.mean_exposure,

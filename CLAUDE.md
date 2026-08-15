@@ -163,6 +163,34 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   middle one and the model also attenuates trunk-space-to-trunk-space sightlines,
   where nothing is in the way — that *invents* concealment, the one direction a
   concealment planner must never err in.
+- **Exposure is a DETECTION probability, not "a sightline exists" (2026-08-11,
+  roadmap C2 — don't regress).** The viewshed had **no range term at all**: a cell
+  3 km from an observer scored exactly like one at 300 m, while the median exposed
+  sample on every study arm sat at **1.3–1.6 arcmin** against the **3–7′** where
+  observers actually acquired real sUAS in trials — and against sky, not forest.
+  `ThreatModel.detection` (`DetectionModel`) turns an acquisition angle x an optic
+  magnification into a **slant** range: **1031 m** for the 0.9 m airframe unaided
+  at 3′, full weight to half of that, linear ramp to zero. It **multiplies** with
+  C1's crown weight, so occlusion x canopy x range compose.
+  🔑 **On the demo AO this takes unaided exposure to exactly 0.000 for every
+  flight band** (was 0.123 below canopy / 0.319 canopy top / 0.512 flat 30) —
+  the route simply stays outside 1031 m of both observers, and against a dismount
+  at these ranges *the flight band stops mattering*. **A 12× optic restores the
+  entire pre-C2 picture to three decimals**, so the live question is whether the
+  adversary has magnified optics on that bearing — i.e. `threat.sectors` (C3),
+  now the highest-value unbuilt item.
+  ⚠️ Beyond the acquisition range the term is flat zero, so concealment stops being
+  a graded field and becomes a **keep-out radius** the planner is indifferent
+  outside of. Fine while a zero-exposure route exists; not a general property.
+  ⚠️ **Visual acquisition only** — not radar, not thermal, and not acoustic, where
+  ranges are 300–500 m and *independent of flight band* (C8 unbuilt).
+- **`exposure_ground` → `ground_los`, and it gets no detection model (C2's
+  explicit decision).** The laid fiber is 0.25–0.28 mm and is **never optically
+  resolvable at any range**, so a visual model sized for it would zero the field
+  and delete cable survivability from the cost surface. It stays a pure
+  line-of-sight openness proxy and was **renamed so it cannot be read in the same
+  currency as `exposure`** now that `exposure` is a probability.
+  `objective_scores.mean_exposure_cable` → `mean_cable_los` likewise.
 - **`threat.observer_height_m` is a mission input (2026-08-11 — don't regress).**
   `build_cost_surface` hard-coded a 2 m eye, so the planner **could not route
   against a mast or an airborne sensor**, and C1 was measurably inert in the

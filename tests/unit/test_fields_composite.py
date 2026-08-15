@@ -47,7 +47,7 @@ def test_cost_surface_positive_and_has_components() -> None:
     assert surface.cost.min() >= COST_FLOOR
     for key in (
         "exposure",
-        "exposure_ground",
+        "ground_los",
         "flight_agl",
         "survivability",
         "snag",
@@ -81,7 +81,7 @@ def test_exposure_is_scored_at_flight_altitude_not_on_the_ground() -> None:
     surface = build_cost_surface(dem.data, dem.data, grid, mission)  # type: ignore[arg-type]
 
     drone = surface.components["exposure"]
-    ground = surface.components["exposure_ground"]
+    ground = surface.components["ground_los"]
     assert np.all(drone >= ground)  # nothing hides by climbing over bare terrain
     assert drone.mean() > ground.mean()  # and the ridge stops hiding the aircraft
     # DSM == DTM here: no canopy to get under, so the target altitude stands.
@@ -140,5 +140,5 @@ def test_cable_survivability_is_unaffected_by_the_drone_altitude() -> None:
     )  # type: ignore[arg-type]
 
     assert np.array_equal(low.components["survivability"], high.components["survivability"])
-    assert np.array_equal(low.components["exposure_ground"], high.components["exposure_ground"])
+    assert np.array_equal(low.components["ground_los"], high.components["ground_los"])
     assert high.components["exposure"].mean() > low.components["exposure"].mean()
