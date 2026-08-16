@@ -256,6 +256,44 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   ⚠️ The density relation is **forestry literature, not a measurement** — no stem
   inventory has ever been ingested. Trust the ordering (taller = sparser), not the
   absolute stems/ha; a `stem_speed_capped` WARNING says so beside the verdict.
+- **Threat sectors are implemented, and they buy concealment on credit
+  (2026-08-15, roadmap C3 — don't regress).** `ThreatModel.sectors` was in the
+  contract from M0 and **read by nothing**, so "the enemy is that way and we are
+  flying away from them" could not be said to the planner — which is why the demo
+  AO ended up with observers *flanking* the route. `fields/sectors.py` implements
+  both halves the spec names: a sector **with** an observer masks that observer's
+  viewshed to its arc (reducing the drone `exposure` *and* the cable `ground_los`),
+  a sector **without** one becomes `openness_to_threat_sectors`, the terrain-
+  masking term `build_survivability` has always listed as `w1` and never had.
+  Compass azimuths, swept **clockwise**; a degenerate arc (start == end) is the
+  **full circle**, never a zero-width one — the safe reading of an ambiguous input
+  is the one that cannot silently erase a threat. Same reason a sector naming an
+  observer that is *not* in `threat.observers` **adds** that observer instead of
+  being dropped.
+  🔑 **The mask is applied to the finished viewshed, never to the march** —
+  occlusion is geometry and does not care where anyone is looking, so terrain
+  outside the arc must still raise the running horizon for cells inside it.
+  Exposure aggregates as **max over an observer's elements, mean over observers**:
+  one observer holding two optics is not two threats. `point_exposure` runs the
+  identical bearing test so the flown re-score cannot disagree with the raster.
+  **Per-sector `detection` override** is the input C2 left dangling: with unaided
+  exposure at 0.000 for every band on this AO and 12× restoring the whole pre-C2
+  picture, the live question is not how high to fly but whether a *magnified optic
+  searches that bearing*. Now expressible per arc.
+  🔴 **A sector is an intelligence assumption that removes cost from the surface,
+  and the planner spends the slack.** Demo AO at 12×, 90° arc: `exp_flown`
+  **0.123 → 0.056** below canopy, **0.512 → 0.211** at flat 30 m, route 5316 →
+  5209 m and **240 m less flown below canopy**. So the aircraft is *less concealed
+  in absolute terms* than the all-round plan and relies on the adversary facing
+  where the mission says. The report carries every sector by label
+  (`threat_sectors`) plus a `threat_sectors_applied` INFO; supplying sectors on a
+  path that cannot use them raises `threat_sectors_ignored` **WARNING** rather
+  than dropping them silently.
+  ⚠️ Bearing-only sectors have **no sensor**, so masking is scored against a
+  threat assumed to be *at the horizon* within `horizon_m` (default 2000 m). That
+  assumption moves the answer — fully-masked AO fraction **19.1 % → 28.0 %**
+  between a 500 m and a 2000 m horizon. ⚠️ Sectors are **azimuth only**: no
+  elevation extent, so a 300 m sensor searching a 90° arc searches it to zenith.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
@@ -266,8 +304,8 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   navigable band (not "fly high"); kinematic smoother keeps climb feasible.
 - **Reversals allowed** (user): low payout speed mitigates snag → reversal is an
   INFO finding, not NO-GO; only turn-radius/climb violations break feasibility.
-- **Ingested today:** DTM, DSM, threat observers, weights, lidar point cloud,
-  roads. **Not yet:** land cover (snag/veg terms are 0), threat *sectors*.
+- **Ingested today:** DTM, DSM, threat observers, threat *sectors*, weights,
+  lidar point cloud, roads. **Not yet:** land cover (snag/veg terms are 0).
 
 ## What ingests what (cost surface)
 `fields/composite.py` blends: base move cost + drone exposure (viewshed over the
@@ -314,8 +352,8 @@ closed, because a pre-planned path has nothing to react to.
    exist yet** on this hardware (Track B, x86+RTX). The report says so per route.
 4. Forest voxelized at corridor grid res, not 0.25–0.5 m (flyability optimistic).
 5. Performance won't scale to a real 5 km AO (pure-Python viewshed/Theta\*).
-Plus land cover + threat sectors unwired; OMPL 3D refinement deferred; no real-AO
-validation yet.
+Plus land cover unwired; OMPL 3D refinement deferred; no real-AO validation yet.
+(Threat sectors were on this list until 2026-08-15 — see the C3 entry above.)
 
 ## Layout
 `model/` pydantic contracts + `Grid`. `io/` readers/writers (lazy GDAL/laspy).

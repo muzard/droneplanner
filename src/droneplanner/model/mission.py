@@ -76,21 +76,6 @@ class SpoolSpec(BaseModel):
     payout_side: PayoutSide = PayoutSide.DRONE
 
 
-class ThreatSector(BaseModel):
-    """A threat fire sector: an azimuth range, optionally from an observer point.
-
-    "Threat" enters the planner solely as a passive survivability cost on cable
-    placement (Software-Spec §8) — never as targeting logic.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    azimuth_start_deg: float = Field(ge=0, le=360)
-    azimuth_end_deg: float = Field(ge=0, le=360)
-    observer: Coordinate | None = None
-    label: str | None = None
-
-
 class CanopyOcclusion(BaseModel):
     """Whether a cell's own canopy may hide something flying *beneath* it.
 
@@ -193,6 +178,44 @@ class DetectionModel(BaseModel):
         For this programme's 0.9 m airframe unaided at 3', that is **1031 m**.
         """
         return target_span_m * self.optic_magnification / (self.threshold_arcmin * _ARCMIN_RAD)
+
+
+class ThreatSector(BaseModel):
+    """A threat fire sector: an azimuth range, optionally from an observer point.
+
+    "Threat" enters the planner solely as a passive survivability cost on cable
+    placement (Software-Spec §8) — never as targeting logic.
+
+    Azimuths are compass bearings (0 = grid north, clockwise) and the arc sweeps
+    **clockwise** from start to end, so 350->20 is a 30 deg arc through north.
+    A degenerate arc (start == end) reads as the full circle — see
+    ``fields.sectors``, which is where the geometry lives.
+
+    With an ``observer`` this restricts *that observer's* viewshed to the arc.
+    Without one it is a threat **bearing** with no located sensor, which feeds
+    the cable's ``openness_to_threat_sectors`` field instead (Software-Spec
+    §5.1). The two are different questions, so they drive different layers.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    azimuth_start_deg: float = Field(ge=0, le=360)
+    azimuth_end_deg: float = Field(ge=0, le=360)
+    observer: Coordinate | None = None
+    label: str | None = None
+    detection: DetectionModel | None = Field(
+        default=None,
+        description=(
+            "Optic searching *this* arc, overriding ``ThreatModel.detection``. This "
+            "is the input roadmap C2 left dangling: once exposure became a detection "
+            "probability, unaided exposure on the demo AO went to 0.000 for every "
+            "flight band while a 12x optic restored the whole pre-C2 picture — so the "
+            "live question is not how high to fly but whether magnified optics are "
+            "searching that bearing. A spotting scope on one arc with dismounts "
+            "elsewhere is a real posture and now expressible. None inherits the "
+            "mission-wide model."
+        ),
+    )
 
 
 class ThreatModel(BaseModel):

@@ -13,15 +13,22 @@ ground. "Threat" is a passive placement cost only - never targeting logic
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
+from droneplanner.fields.sectors import (
+    DEFAULT_HORIZON_M,
+    bearing_only_sectors,
+    openness_to_threat_sectors,
+)
 from droneplanner.fields.terrain import ridge_penalty, slope_penalty
 from droneplanner.fields.util import normalize01
 from droneplanner.fields.viewshed import cumulative_exposure
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
+from droneplanner.model.mission import ThreatSector
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,8 @@ def build_survivability(
     weights: SurvivabilityWeights | None = None,
     tpi_radius_cells: int = 5,
     openness: np.ndarray | None = None,
+    sectors: Sequence[ThreatSector] = (),
+    horizon_m: float = DEFAULT_HORIZON_M,
 ) -> np.ndarray:
     """Build the normalized 0..1 cable-survivability cost field.
 
@@ -50,12 +59,30 @@ def build_survivability(
     the expensive field is not built twice. It must stay ground-level: unlike the
     drone (SHORTFALLS item 1, now scored at flight altitude) the cable really
     does lie on the surface, so target height 0 is the right question for it.
+
+    ``sectors`` (roadmap C3) restores the ``w1*openness_to_threat_sectors`` term
+    this formula has named since M0 and never had. Only the sectors that name **no
+    observer** are used here — a bearing the threat is expected from, with no
+    located sensor to run a viewshed from. Sectors that do name an observer are
+    already accounted for in ``openness``, because they mask that observer's
+    viewshed upstream.
+
+    The two are combined by **maximum**, not by mean: they are two ways of being
+    exposed to the same threat, and a cell an observer can see is exposed whether
+    or not terrain masks the bearing. Averaging them would let one dilute the
+    other, which on a concealment planner means promising cover that is not there.
     """
     w = weights or SurvivabilityWeights()
 
     # Openness to the threat: what the threat observers can see of the ground.
     if openness is None:
-        openness = cumulative_exposure(dsm, grid, threat_observers)
+        openness = cumulative_exposure(dsm, grid, threat_observers, sectors=sectors)
+    bearings = bearing_only_sectors(sectors)
+    if bearings:
+        openness = np.maximum(
+            openness,
+            openness_to_threat_sectors(dsm, grid, bearings, horizon_m=horizon_m),
+        )
 
     # Ridgelines/crests are both exposed and un-maskable for a cable.
     pos_tpi = ridge_penalty(dtm, tpi_radius_cells)

@@ -98,9 +98,14 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from droneplanner.fields.sectors import (
+    element_mask,
+    element_sees_bearing,
+    resolve_threat_elements,
+)
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import CanopyOcclusion, DetectionModel
+from droneplanner.model.mission import CanopyOcclusion, DetectionModel, ThreatSector
 from droneplanner.raster_lines import bresenham
 
 
@@ -201,6 +206,7 @@ def single_viewshed(
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
+    sector_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-cell visibility **weight** in [0, 1] for one observer (float32).
 
@@ -208,15 +214,22 @@ def single_viewshed(
     (a uniform offset above the DSM) and is how a target *off* the surface — a
     drone at flight altitude — is scored. Occlusion always marches over the DSM.
 
-    Three independent things can reduce the weight, and they multiply:
+    Four independent things can reduce the weight, and they multiply:
 
     * occlusion — the DSM march, 0 or 1 (roadmap pre-history);
     * ``canopy`` — a cell's own crown hiding a target beneath it (C1);
     * ``detection`` — whether ``target_span_m`` is resolvable at that **slant**
-      range (C2).
+      range (C2);
+    * ``sector_mask`` — whether the observer is searching that bearing at all
+      (C3; build it with ``fields.sectors.element_mask``).
 
-    With both models absent the result is 0.0/1.0 and identical to the original
+    With all of them absent the result is 0.0/1.0 and identical to the original
     boolean field.
+
+    The sector mask is applied to the finished field and **not** to the march,
+    which is the whole point: occlusion is geometry and does not care where an
+    observer is looking, so terrain outside the arc must still raise the running
+    horizon for cells inside it.
     """
     rows, cols = dsm.shape
     r0, c0 = observer_rc
@@ -255,6 +268,10 @@ def single_viewshed(
                 )
             if terrain_angle > max_angle:
                 max_angle = terrain_angle
+    if sector_mask is not None:
+        if sector_mask.shape != dsm.shape:
+            raise ValueError("sector_mask must have the same shape as the DSM")
+        visible = visible * sector_mask.astype(np.float32)
     return visible
 
 
@@ -288,6 +305,7 @@ def cumulative_exposure(
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
+    sectors: Sequence[ThreatSector] = (),
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each cell, in [0, 1] (float32).
 
@@ -296,26 +314,43 @@ def cumulative_exposure(
     its planned flight altitude rather than the ground under it — for ``canopy``,
     which lets a stand hide what flies beneath it, and for ``detection``, which
     asks whether the thing is resolvable at that range at all.
+
+    ``sectors`` (C3) says which way each observer is facing. Sectors that name an
+    observer restrict it; sectors that name none are threat *bearings* with no
+    sensor and are ignored here — they belong to
+    :func:`~droneplanner.fields.sectors.openness_to_threat_sectors`. A sector
+    naming an unlisted point adds that observer rather than dropping the sector.
     """
     rows, cols = dsm.shape
-    if not observers:
+    if not observers and not any(s.observer is not None for s in sectors):
         return np.zeros((rows, cols), dtype=np.float32)
 
+    views = resolve_threat_elements(observers, sectors)
     accum = np.zeros((rows, cols), dtype=np.float32)
-    for obs in observers:
-        rc = grid.world_to_pixel(obs)
-        accum += single_viewshed(
-            dsm,
-            rc,
-            grid.cell_size_m,
-            observer_height_m,
-            target_height_m,
-            target_elev_m,
-            canopy,
-            detection,
-            target_span_m,
-        )
-    return (accum / float(len(observers))).astype(np.float32)
+    for group in views:
+        rc = grid.world_to_pixel(group[0].observer)
+        # Max over one observer's elements, mean over observers: an observer
+        # watching two arcs through two optics is still one observer.
+        seen = np.zeros((rows, cols), dtype=np.float32)
+        for element in group:
+            np.maximum(
+                seen,
+                single_viewshed(
+                    dsm,
+                    rc,
+                    grid.cell_size_m,
+                    observer_height_m,
+                    target_height_m,
+                    target_elev_m,
+                    canopy,
+                    detection if element.detection is None else element.detection,
+                    target_span_m,
+                    element_mask(grid, element),
+                ),
+                out=seen,
+            )
+        accum += seen
+    return (accum / float(len(views))).astype(np.float32)
 
 
 def _point_weight(
@@ -370,6 +405,7 @@ def point_exposure(
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
+    sectors: Sequence[ThreatSector] = (),
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each ``(x, y, z_amsl)`` point.
 
@@ -377,19 +413,40 @@ def point_exposure(
     altitude; this scores specific 3D points, so a trajectory can be re-scored at
     the altitudes it is actually flown at. Cost is
     ``O(observers * points * ray_len)`` — cheap next to a full viewshed.
+
+    ``sectors`` applies the identical binding and bearing test the raster uses,
+    so the flown re-score and the field cannot disagree about which way an
+    observer faces.
     """
     n = len(points)
-    if n == 0 or not observers:
+    if n == 0 or (not observers and not any(s.observer is not None for s in sectors)):
         return np.zeros(n, dtype=np.float32)
 
+    views = resolve_threat_elements(observers, sectors)
     accum = np.zeros(n, dtype=np.float32)
     cell = grid.cell_size_m
-    for obs in observers:
-        obs_rc = grid.world_to_pixel(obs)
+    for group in views:
+        obs_rc = grid.world_to_pixel(group[0].observer)
         eye = float(dsm[obs_rc]) + observer_height_m
         for i, (x, y, z) in enumerate(points):
             rc = grid.world_to_pixel(Coordinate(x=x, y=y))
-            accum[i] += _point_weight(
-                dsm, obs_rc, eye, rc, z, cell, canopy, detection, target_span_m
-            )
-    return (accum / float(len(observers))).astype(np.float32)
+            seen = 0.0
+            for element in group:
+                if not element_sees_bearing(element, x, y):
+                    continue
+                seen = max(
+                    seen,
+                    _point_weight(
+                        dsm,
+                        obs_rc,
+                        eye,
+                        rc,
+                        z,
+                        cell,
+                        canopy,
+                        detection if element.detection is None else element.detection,
+                        target_span_m,
+                    ),
+                )
+            accum[i] += seen
+    return (accum / float(len(views))).astype(np.float32)

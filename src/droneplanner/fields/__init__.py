@@ -10,6 +10,10 @@ planner minimizes). The forest voxel flyability field lands in M2.
 from __future__ import annotations
 
 from droneplanner.fields.composite import CostSurface, build_cost_surface
+from droneplanner.fields.sectors import (
+    openness_to_threat_sectors,
+    resolve_threat_elements,
+)
 from droneplanner.fields.snag import build_snag
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import (
@@ -28,6 +32,8 @@ __all__ = [
     "build_survivability",
     "cumulative_exposure",
     "drainage_proxy",
+    "openness_to_threat_sectors",
+    "resolve_threat_elements",
     "ridge_penalty",
     "slope",
     "slope_penalty",

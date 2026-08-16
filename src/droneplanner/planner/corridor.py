@@ -372,6 +372,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         canopy=mission.threat.canopy_occlusion,
         detection=mission.threat.detection,
         target_span_m=mission.drone.rotor_span_m,
+        sectors=mission.threat.sectors,
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0

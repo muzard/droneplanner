@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from droneplanner.fields.sectors import describe_threat_sectors
 from droneplanner.model.mission import Mission
 from droneplanner.model.plan import CrossingMethod, FlightBand, FlyabilityClass, Plan
 from droneplanner.model.report import (
@@ -149,6 +150,38 @@ def build_report(
                     f"{drone_exposed_length:.0f} m of the route is flown in view of threat "
                     "observers at the planned flight altitude — the aircraft is detectable "
                     "there even where the cable beneath it is concealed"
+                ),
+            )
+        )
+
+    # --- Threat sectors: what the plan assumed about where the enemy is looking ---
+    # A sector is an intelligence assumption that *removes* cost from the surface,
+    # so it has to be visible in the artifact that a human signs off. And a mission
+    # that supplies one only for the stub path to discard it must not look like a
+    # mission that supplied none — that is the failure mode C3 exists to close.
+    threat_sectors = describe_threat_sectors(mission.threat.observers, mission.threat.sectors)
+    if threat_sectors and not concealment_analyzed:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="threat_sectors_ignored",
+                message=(
+                    f"{len(threat_sectors)} threat sector(s) were supplied but no "
+                    "concealment analysis ran, so they shaped nothing — this route is "
+                    "not the one the stated threat posture implies"
+                ),
+            )
+        )
+    elif threat_sectors:
+        findings.append(
+            Finding(
+                severity=Severity.INFO,
+                code="threat_sectors_applied",
+                message=(
+                    f"{len(threat_sectors)} threat sector(s) narrowed the threat: "
+                    + "; ".join(threat_sectors)
+                    + ". Concealment here rests on the adversary facing where the "
+                    "mission says they are facing"
                 ),
             )
         )
@@ -405,6 +438,7 @@ def build_report(
         below_canopy_length_m=below_canopy_length,
         corridor_half_width_min_m=corridor_min,
         corridor_half_width_median_m=corridor_median,
+        threat_sectors=threat_sectors,
         non_navigable_count=len(non_navigable),
         marginal_count=len(marginal),
         manipulation_crossings=len(manipulation),

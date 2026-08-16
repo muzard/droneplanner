@@ -101,6 +101,16 @@ class RiskReport(BaseModel):
     )
     corridor_half_width_median_m: float = Field(default=0.0, ge=0)
 
+    threat_sectors: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "One line per threat sector saying how it bound — which observer it "
+            "masked, or that it fed the bearing-only cable openness field. A "
+            "mission that supplies sectors and gets them silently ignored is the "
+            "failure mode this exists to make impossible (roadmap C3)."
+        ),
+    )
+
     non_navigable_count: int = Field(ge=0, default=0)
     marginal_count: int = Field(ge=0, default=0)
     manipulation_crossings: int = Field(ge=0, default=0)

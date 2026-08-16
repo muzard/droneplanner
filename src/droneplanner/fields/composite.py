@@ -87,6 +87,9 @@ def build_cost_surface(
     """
     weights = mission.weights
     observers = list(mission.threat.observers)
+    # Which way each observer is facing (roadmap C3). Empty sectors reproduce the
+    # all-round threat exactly, so this is inert until a mission states a posture.
+    sectors = mission.threat.sectors
 
     # Two viewsheds, two different objects — see SHORTFALLS item 1. The DRONE is
     # scored at the altitude it will fly (terrain + planned AGL: under the canopy
@@ -107,6 +110,7 @@ def build_cost_surface(
         canopy=mission.threat.canopy_occlusion,
         detection=mission.threat.detection,
         target_span_m=mission.drone.rotor_span_m,
+        sectors=sectors,
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -116,9 +120,15 @@ def build_cost_surface(
     # surface. It therefore stays a **pure line-of-sight openness proxy** — and is
     # named `ground_los`, not `exposure_*`, so it cannot be read as a detection
     # probability now that `exposure` is one (roadmap C2; SHORTFALLS records this).
-    ground_los = cumulative_exposure(dsm, grid, observers, observer_height_m=eye_m)
+    ground_los = cumulative_exposure(dsm, grid, observers, observer_height_m=eye_m, sectors=sectors)
 
-    survivability = build_survivability(dtm, dsm, grid, observers, openness=ground_los)
+    # Sectors reach survivability twice, and deliberately so: the observer-bound
+    # ones are already inside `ground_los` (they masked the viewshed), while the
+    # bearing-only ones have no sensor to run a viewshed from and become the
+    # terrain-masking openness term the formula has named since M0.
+    survivability = build_survivability(
+        dtm, dsm, grid, observers, openness=ground_los, sectors=sectors
+    )
     snag = build_snag((grid.rows, grid.cols))
     ridge = ridge_penalty(dtm)
     drainage = drainage_proxy(dtm)

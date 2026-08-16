@@ -54,6 +54,16 @@ def report_to_markdown(report: RiskReport) -> str:
     lines.append(f"| Crossings needing manipulation | {report.manipulation_crossings} |")
     lines.append("")
 
+    # Sectors get their own section rather than a findings line: they are an
+    # intelligence *assumption* that removed cost from the surface, so the person
+    # signing this off should see exactly what was assumed (roadmap C3).
+    if report.threat_sectors:
+        lines.append("## Threat sectors applied")
+        lines.append("")
+        for sector in report.threat_sectors:
+            lines.append(f"- {sector}")
+        lines.append("")
+
     if report.kinematics is not None:
         k = report.kinematics
         lines.append("## Kinematic feasibility")

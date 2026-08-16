@@ -33,6 +33,7 @@ import json
 import math
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,6 +41,7 @@ import numpy as np
 import rasterio
 import yaml
 
+from droneplanner.fields.sectors import arc_contains, bearing_deg
 from droneplanner.fields.viewshed import _point_weight
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
@@ -91,6 +93,7 @@ def write_mission(
     canopy: CanopyOcclusion | None = None,
     observer_height_m: float | None = None,
     detection: DetectionModel | None = None,
+    sectors: Sequence[tuple[float, float]] = (),
 ) -> Path:
     m = copy.deepcopy(base)
     m["name"] = arm.name
@@ -98,6 +101,21 @@ def write_mission(
     m.setdefault("altitude", {})["min_canopy_m"] = arm.min_canopy_m
     if arm.observers is not None:
         m.setdefault("threat", {})["observers"] = [{"x": x, "y": y} for x, y in arm.observers]
+    if sectors:
+        # Every observer searches every arc. This is the "receding geometry" arm
+        # expressed as a posture rather than by hand-placing observers where they
+        # happen not to look — roadmap C3's acceptance case.
+        observers = m.get("threat", {}).get("observers", [])
+        m.setdefault("threat", {})["sectors"] = [
+            {
+                "azimuth_start_deg": start,
+                "azimuth_end_deg": end,
+                "observer": dict(observer),
+                "label": f"arc{i}_obs{j}",
+            }
+            for i, (start, end) in enumerate(sectors)
+            for j, observer in enumerate(observers)
+        ]
     # The planner must route against the same threat the re-score grades against,
     # or the arm optimises one world and is scored in another. Sensor height is the
     # variable the whole gate turns on, so it is the one that must not drift.
@@ -156,6 +174,7 @@ def rescore(
     detect_range_m: float = float("inf"),
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
+    sectors: Sequence[tuple[float, float]] = (),
 ) -> dict:
     """What an observer could actually detect along the *flown* trajectory.
 
@@ -174,6 +193,11 @@ def rescore(
     ``under_canopy_m`` / ``under_canopy_seen_m`` isolate C1's acceptance case: the
     part of the route flown *beneath* the surface, and how much of it still scores
     as seen.
+
+    ``sectors`` (roadmap C3) are ``(start, end)`` arcs every observer is searching.
+    They apply here as well as in the planned mission, using the same containment
+    rule ``fields.sectors`` uses, because an arm planned against a facing threat
+    and scored against an all-round one would be measuring two different worlds.
     """
     gj = json.loads(traj_path.read_text())
     coords = [(c[0], c[1], c[2]) for c in gj["geometry"]["coordinates"]]
@@ -203,6 +227,10 @@ def rescore(
             rng = math.hypot(x - o[0], y - o[1])
             if rng > detect_range_m:
                 continue
+            if sectors and not any(
+                arc_contains(bearing_deg(o[0], o[1], x, y), start, end) for start, end in sectors
+            ):
+                continue  # this observer is not searching that bearing
             w = _point_weight(dsm, rc_o, eye, rc, z, grid.cell_size_m, canopy, detection, span_m)
             if w > 0.0:
                 miss *= 1.0 - w
@@ -322,7 +350,21 @@ def main() -> int:
         default=None,
         help="Observer's optic magnification (1 unaided, 7 and 12 are the cases that matter).",
     )
+    ap.add_argument(
+        "--sector",
+        type=float,
+        nargs=2,
+        action="append",
+        metavar=("START", "END"),
+        default=None,
+        help=(
+            "Azimuth arc (compass deg, swept clockwise) every observer is searching "
+            "(roadmap C3). Repeatable. Applied to the planned mission AND to the "
+            "re-score, so the arm is graded in the world it was planned for."
+        ),
+    )
     args = ap.parse_args()
+    sectors: list[tuple[float, float]] = [(s, e) for s, e in (args.sector or [])]
 
     fields = {}
     if args.gap_fraction is not None:
@@ -360,7 +402,9 @@ def main() -> int:
     print(
         f"  observer height {args.observer_height:g} m | detect range "
         f"{args.detect_range:,.0f} m | canopy gap {canopy.sub_canopy_gap_fraction:g} "
-        f"above {canopy.sub_canopy_max_elev_deg:g} deg\n"
+        f"above {canopy.sub_canopy_max_elev_deg:g} deg | sectors "
+        + (", ".join(f"{s:g}-{e:g}" for s, e in sectors) if sectors else "all-round")
+        + "\n"
     )
     hdr = (
         f"{'arm':<22}{'len':>7}{'exp_flown':>10}{'exposed':>9}{'time':>8}"
@@ -378,6 +422,7 @@ def main() -> int:
             canopy,
             args.observer_height,
             detection,
+            sectors,
         )
         rep = plan(mp, args.out / arm.name)
         base_obs = base.get("threat", {}).get("observers", [])
@@ -395,6 +440,7 @@ def main() -> int:
             detect_range_m=args.detect_range,
             canopy=canopy,
             detection=detection,
+            sectors=sectors,
         )
         o = rep["objective_scores"]
         print(

@@ -59,8 +59,9 @@ live — the fastest way to build intuition for the cost function.
 
 > **Before sims:** fly the new low route (it is 3× denser and a third of the
 > altitude, and unflown), fix the M2 navigable-altitude band datum (it is not
-> AGL), wire land cover + threat sectors, and voxelize at fine resolution — see
-> [SHORTFALLS.md](SHORTFALLS.md) for the prioritized list.
+> AGL), wire land cover, and voxelize at fine resolution — see
+> [SHORTFALLS.md](SHORTFALLS.md) for the prioritized list. (Threat sectors landed
+> 2026-08-15; `threat.sectors` in the mission YAML now shapes the route.)
 
 ## Install
 
@@ -123,11 +124,34 @@ threat:
     optic_magnification: 1.0        # 1 unaided, 7 and 12 are the cases that matter.
     falloff: ramp                   # full weight to half range, linear to 0; or
                                     # "hard" for a stated-range sensor.
+  sectors:                          # which way the threat is looking. Compass
+                                    # azimuths, swept CLOCKWISE start -> end, so
+                                    # 350 -> 20 is a 30 deg arc through north.
+                                    # start == end means the FULL circle.
+    - azimuth_start_deg: 180.0      # with an observer: masks THAT observer's
+      azimuth_end_deg: 270.0        # viewshed to the arc (drone + cable both).
+      observer: {x: 501687.5, y: 5202787.5}
+      label: overwatch-sw
+      detection:                    # optional: the optic searching THIS arc,
+        optic_magnification: 12.0   # overriding the mission-wide model.
+    - azimuth_start_deg: 90.0       # with NO observer: a threat *bearing*, scored
+      azimuth_end_deg: 180.0        # as terrain masking (openness_to_threat_
+      label: fires-from-east        # sectors) into cable survivability.
 ```
 
 `detection` is what makes `exposure` mean "probably acquired" rather than "a
 sightline exists": a 0.9 m airframe unaided at 3' is resolvable to **1031 m**, and
 beyond that it scores zero however open the ground is.
+
+`sectors` is the other half of that question: a 12x optic only matters if it is
+searching your bearing. A sector **removes** cost from the surface and the planner
+spends the slack — on the demo AO at 12x a 90 deg arc takes `mean_exposure_flown`
+from 0.123 to 0.056 below canopy and shortens the route by 107 m, flying 240 m
+*less* below the canopy. Read that as concealment bought on credit against an
+intelligence assumption: an adversary who turns around invalidates the plan, and
+nothing here models that. Every applied sector is listed in `report.json`
+(`threat_sectors`), and sectors supplied to a run that cannot use them raise a
+`threat_sectors_ignored` warning rather than vanishing.
 
 ⚠️ Two knobs carry most of the uncertainty. `sub_canopy_gap_fraction` is a
 literature figure, not a measurement, and the below-canopy result is roughly

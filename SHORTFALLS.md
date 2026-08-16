@@ -487,7 +487,9 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   `optic_magnification` defaults to 1.0, and a 12× observation optic multiplies the
   acquisition range by 12 (12.4 km at 3′) — which covers any AO and erases the
   range argument entirely. It requires the observer to be searching that bearing,
-  which is what `threat.sectors` (C3, still unimplemented) exists to express.
+  which is what `threat.sectors` expresses — **implemented 2026-08-15** (C3, below),
+  including a per-sector `detection` override, so "a spotting scope watches this
+  bearing, dismounts hold the rest" is now a statement the planner can consume.
 - ✅ **`exposure_ground` is now `ground_los`, and gets no detection model**
   (roadmap C2's explicit decision, 2026-08-11). It scores the **DSM surface**, not
   the fiber — which at 0.25–0.28 mm is **never optically resolvable at any range**,
@@ -525,10 +527,35 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   and snag drivers — currently the only "cover" reward comes from terrain
   defilade (drainage/negative TPI), not vegetation. (`fields/composite.py`,
   `fields/snag.py`, `fields/survivability.py`.)
-- 🟠 **Threat *sectors* are ignored.** `ThreatModel.sectors` (azimuth ranges,
-  optionally without an observer point) are accepted but never used;
-  survivability "openness to threat" uses observer *points* only. Sector-only
-  threat definitions have no effect on the plan. (`fields/survivability.py`.)
+- ✅ **Threat *sectors* now reach the plan** (roadmap C3, 2026-08-15).
+  `ThreatModel.sectors` had been accepted and read by nothing since M0, so the
+  premise *"the enemy is over there and we are flying away from them"* could not
+  be stated to the planner at all. `fields/sectors.py` implements both halves:
+  a sector **with** an observer masks that observer's viewshed to its arc (so it
+  reduces the drone `exposure` field *and* the cable's `ground_los`), and a
+  sector **without** one becomes `openness_to_threat_sectors` — the terrain-
+  masking term the survivability formula has named since M0 and never had.
+  Measured on the demo AO with a 12× optic (the case where C2 leaves any exposure
+  at all), a 90° arc cuts `mean_exposure_flown` **0.123 → 0.056** below canopy and
+  **0.512 → 0.211** at flat 30 m, and the planner spends the slack: the route
+  shortens 5316 → 5209 m and flies **240 m less** below canopy.
+  🔴 **That is the danger of the feature, and it is not a bug:** a sector is an
+  *intelligence assumption* that removes cost from the surface, so it buys
+  concealment on credit against the adversary facing where the mission says. An
+  adversary who turns around invalidates the plan, and nothing here models that.
+  `report.json` carries `threat_sectors` (one line per sector, naming what it
+  bound to) and the report raises `threat_sectors_applied`; a mission that
+  supplies sectors on a path that cannot use them raises
+  `threat_sectors_ignored` **WARNING** instead of silently dropping them.
+  🟠 **Residual — the bearing-only field rests on a range assumption.** With no
+  observer there is nothing to run a viewshed from, so a cell is masked along a
+  bearing when terrain within `horizon_m` rises above it, i.e. the threat is
+  treated as being *at the horizon*. The default 2000 m is not principled and the
+  field is sensitive to it: on the demo AO the fully-masked fraction moves
+  **19.1 % → 28.0 %** between a 500 m and a 2000 m horizon (mean openness 0.340 →
+  0.264). Trust the ordering, not the level.
+  🟠 **Azimuth only.** A sector has no elevation extent, so an airborne sensor
+  searching a 90° arc is modelled as searching it from horizon to zenith.
 - 🟡 **Cost weights are uncalibrated.** The composite blend (`BASE_COST`,
   `COVER_SCALE`, `FOREST_COVER_REWARD`, `FOREST_MARGINAL_PENALTY`, `ROAD_COST`,
   the survivability sub-weights) is heuristic; there is no cross-AO normalization
@@ -740,7 +767,8 @@ concealment-then-stems has no admissible path in dense forest).
    at a third of the altitude — nothing about this is verified.
 3. **Fix the M2 band datum (item 1b)** — prerequisite for any real-lidar run, and
    for trusting the altitude band when a voxel model overrides the canopy one.
-4. Wire land cover + threat sectors — completes the M1 concealment inputs.
+4. Wire land cover — threat sectors landed 2026-08-15 (C3); land cover is what is
+   left of the M1 concealment inputs.
 5. Fine-resolution voxelization + aggregation — makes flyability trustworthy.
 6. Then SITL/Gazebo export (M4) with a real AO; treat OMPL 3D refinement and
    laydown (M3) as parallel tracks.
