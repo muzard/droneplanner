@@ -212,9 +212,7 @@ class TestOnboardPlanningEnvelope:
         harness = dict(HARNESS_ENVELOPE)
         for density, speed in ONBOARD_PLANNING_ENVELOPE:
             assert speed <= harness[density]
-        assert (
-            dict(ONBOARD_PLANNING_ENVELOPE)[200.0] == 2.0
-        )  # the speed SITL flew on every seed set
+        assert dict(ONBOARD_PLANNING_ENVELOPE)[200.0] == 3.0  # SITL: clean on 4/4 seed sets
 
     def test_anchors_are_reproduced(self) -> None:
         from droneplanner.fields.stem_density import (
