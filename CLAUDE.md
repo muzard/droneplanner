@@ -440,6 +440,35 @@ pass was **+0.03 m of air**: at 600/ha (median gap 1.9 m) the 0.9 m airframe is
 near what can be threaded at all; 2 m/s was also strike-free (min +0.12 m) and
 is not adopted on margins that thin. Askola's median flyable stand is 640/ha.
 
+## 🇫🇮 FIRST REAL AO — ASKOLA, FROM OPEN DATA (2026-09-25)
+User: *"do that"* (build a real Finnish AO). `tools/build_finnish_ao.py` builds an AO
+from three open sources (all CC BY 4.0, downloads approved; files under `data/`,
+gitignored): **MML 10 m terrain** (read for the window from the Funet/CSC mirror's
+VRT — no registration), **Metsäkeskus Latvusmalli 1 m canopy height** (p95 per 16 m
+cell = canopy top), and **Metsäkeskus stand polygons** as `layers.stand_data`.
+AO: 4.5 × 4.5 km on Askola's west side (281² cells of 16 m, terrain 29-84 m, canopy
+≥ 12 m on 59 % of cells), 5.5 km route SW → NE, two observers 1.5 km off one side.
+Mission: `data/askola_ao/mission.yaml`; run the zone study with `--solve --as-is`
+(radius only, the AO's own densities).
+
+| `weights.clutter` | largest zone that closes | below-canopy flight at it | 1500 m zone |
+|---|---|---|---|
+| 0 (default: pure concealment) | **600 m** (0.98) | ~620 m | 1.50 — NO-GO |
+| 0.5 | 1200 m (0.98) | ~590 m | 1.03 — NO-GO |
+| 1.0 | 1200 m (0.99) | ~580 m | 1.04 — NO-GO |
+
+🔑 **On a real Finnish AO one battery buys ~550-600 m of below-canopy flight**,
+however the zone is drawn: with `clutter` on, the planner simply routes round the
+densest stands (over the canopy / in the open) and the zone grows while the
+covered flight does not. The 1500 m MVP zone does not close here.
+⚠️ The first ~900 m of forest by the start is **not in the stand data** (outside
+private-forest coverage), so it is priced from the canopy relation (now fitted to
+Askola) — and real canopy relief costs vertical work: even a 100 m zone uses 0.78
+of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
+⚠️ With the default unaided 2 m ground observers 1.5 km away, exposure is 0
+everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
+endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
+
 ## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
 User: *"look up finnish forest data from a reliable source, and keep in mind that
 a large part of it is talousmetsää."* Detail and sources in the

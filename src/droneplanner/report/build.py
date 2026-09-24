@@ -491,7 +491,7 @@ def build_report(
                 message=(
                     f"{end.speed_capped_legs} leg(s) are slowed below cruise by stem density, "
                     f"giving an effective {end.effective_speed_ms:.2f} m/s against a "
-                    f"{plan.vertices[0].speed_hint_ms:.2f} m/s airframe cruise, at the speeds "
+                    f"{mission.drone.cruise_speed_ms:.2f} m/s airframe cruise, at the speeds "
                     "the onboard local planner flew clean in the harness. "
                     f"{measured_note}Unless the "
                     "mission states stem.density_per_ha, density elsewhere is inferred from "

@@ -87,6 +87,79 @@ def _plan(
     }
 
 
+def solve_as_is(ao: Path, mission_file: str) -> None:
+    """Largest covered radius that closes, with the mission's OWN density sources
+    (stand data / canopy inference) — the answer for a real AO."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    radii = [SOLVE_STEP_M * k for k in range(1, int(SOLVE_MAX_M / SOLVE_STEP_M) + 1)]
+    with ProcessPoolExecutor() as ex:
+        rows = list(
+            ex.map(
+                _plan_as_is,
+                [ao] * len(radii),
+                radii,
+                [mission_file] * len(radii),
+            )
+        )
+    print(f"{'radius':>8}{'energy':>8}{'time':>7}{'below':>7}{'measured':>9}  verdict")
+    largest = None
+    for row in rows:
+        print(
+            f"{row['radius']:>8.0f}{row['energy']:>8.2f}{row['time_min']:>6.1f}m"
+            f"{row['below']:>7.0f}{row['measured']:>9.0f}  {'closes' if row['closes'] else 'NO-GO'}"
+        )
+    for row in rows:
+        if not row["closes"]:
+            break
+        largest = row["radius"]
+    print(
+        f"largest radius below which every step closes: {largest:.0f} m"
+        if largest is not None
+        else "not even an uncovered route closes"
+    )
+
+
+def _plan_as_is(ao: Path, radius: float, mission_file: str) -> dict[str, float]:
+    _, dtm, dsm, grid = _load(ao, mission_file)
+    m = yaml.safe_load((ao / mission_file).read_text())
+    m["covered_radius_m"] = radius
+    plan, _ = plan_over_terrain(Mission.model_validate(m), dtm, dsm, grid, route_index=0)
+    end = plan.endurance
+    assert end is not None
+    return {
+        "radius": radius,
+        "energy": end.energy_fraction,
+        "time_min": end.flight_time_s / 60.0,
+        "closes": float(end.closes),
+        "below": float(
+            sum(
+                float(np.hypot(b.x - a.x, b.y - a.y))
+                for a, b in zip(plan.vertices, plan.vertices[1:], strict=False)
+                if a.flight_band in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+            )
+        ),
+        "measured": plan.objective_scores.get("below_canopy_density_measured_m", 0.0),
+    }
+
+
+def _load(ao: Path, mission_file: str) -> tuple[dict[str, object], np.ndarray, np.ndarray, Grid]:
+    """Rasters named by the mission's own layers (a real AO keeps its data elsewhere)."""
+    m = yaml.safe_load((ao / mission_file).read_text())
+    with rasterio.open(m["layers"]["dtm"]) as ds:
+        dtm = ds.read(1).astype(np.float64)
+        t = ds.transform
+    with rasterio.open(m["layers"]["dsm"]) as ds:
+        dsm = ds.read(1).astype(np.float64)
+    grid = Grid(
+        transform=(t.a, t.b, t.c, t.d, t.e, t.f),
+        rows=dtm.shape[0],
+        cols=dtm.shape[1],
+        crs=str(m["crs"]),
+    )
+    return m, dtm, dsm, grid
+
+
 def solve(ao: Path, mission_file: str) -> None:
     """Largest covered radius that closes one sortie, per density.
 
@@ -137,7 +210,16 @@ def main() -> int:
         help="Per density, find the largest covered radius that closes one sortie.",
     )
     ap.add_argument("--mission", default="mission.yaml", help="Mission file in the AO for --solve.")
+    ap.add_argument(
+        "--as-is",
+        action="store_true",
+        help="With --solve: sweep the radius only, keeping the mission's own density "
+        "(stand data / canopy inference) — for a real AO.",
+    )
     args = ap.parse_args()
+    if args.solve and args.as_is:
+        solve_as_is(args.ao, args.mission)
+        return 0
     if args.solve:
         solve(args.ao, args.mission)
         return 0
