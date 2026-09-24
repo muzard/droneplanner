@@ -344,7 +344,9 @@ on evidence.
 
 **1. The speed cap is now the ONBOARD PLANNER's measured envelope, not reactive
 coherence.** `fields/stem_density.ONBOARD_PLANNING_ENVELOPE`:
-**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0**, measured in droneflight's
+**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0** (⚠️ superseded 2026-09-24 after
+four planner fixes: 200 → 5, 400 → 4, … 1200 → 0.75 — see "HOW MUCH THE ZONE MUST
+SHRINK"), measured in droneflight's
 accel/jerk-limited harness with the new local planner (`droneflight/local_planner.py`).
 At 800/ha it stalls or strikes at every speed tried, so anything past 400 is
 flagged `beyond_envelope` and raises **`stem_density_beyond_envelope` CRITICAL**;
@@ -361,7 +363,7 @@ the cover reward are zeroed, no stem speed cap. **The cable's survivability term
 stays everywhere** — the fiber remains on the ground after the aircraft has gone.
 None = whole route (unchanged default).
 
-**3. DECISION: 1500 m.** `tools/concealment_zone_study.py` sweeps radius × density:
+**3. DECISION: 1500 m** (re-checked 2026-09-24 on the new envelope: closes up to ~900 stems/ha). `tools/concealment_zone_study.py` sweeps radius × density:
 
 | stand density | largest radius that closes | energy at 1500 m |
 |---|---|---|
@@ -396,12 +398,72 @@ params[4:6], so a speed item would have added a route point at (0, 0) and drawn
 the forest band along a line to the equator. It now reads waypoints only.
 
 **The MVP mission is `demo_ao/mission_mvp.yaml`** (radius 1500, density 200):
-**5180 m, 1166 m below canopy at 3.0 m/s, 19.0 min, energy 0.82 → REVIEW (was
-NO-GO at 47.6 min).** Its world: `gz-world --stems-per-ha 200 --forest-radius
+**5180 m, 1166 m below canopy, REVIEW (was NO-GO at 47.6 min)** — 19.0 min /
+0.82 at the old 3.0 m/s forest speed; **16.2 min / 0.70 at 5.0 m/s** on the
+2026-09-24 envelope. Its world: `gz-world --stems-per-ha 200 --forest-radius
 1500` → `worlds/forest_mvp.*` (1562 trunks over 7.8 ha, median NN 3.4 m).
 ⚠️ `demo_ao/dtm.tif` is 220×220 since the AO was enlarged; the older worlds were
 built from the 160×160 version. Terrain in the overlap is identical (a constant
 7.2 m zero-basing offset the world pose absorbs), so both are valid.
+
+## 📏 HOW MUCH THE ZONE MUST SHRINK IN DENSER FOREST (2026-09-24)
+User: *"Calculate how much the zone has to shrink if the forest is denser."*
+`tools/concealment_zone_study.py --solve --mission mission_mvp.yaml` steps the
+covered radius in 100 m and reports, per stand density, the largest radius below
+which every step still closes one sortie (30 min airframe, 20 % reserve), on the
+**re-measured** envelope (`ONBOARD_PLANNING_ENVELOPE`, 2026-09-24 — 200 → 5 m/s,
+400 → 4, 500-600 → 3, 800 → 2.5, 1000 → 1.5, 1200 → 0.75):
+
+| stems/ha | largest zone that closes | energy with the 1500 m zone |
+|---|---|---|
+| 200-600 | **the whole route** | 0.70-0.82 |
+| 700 | 4100 m | 0.84 |
+| 800 | 3700 m | 0.88 |
+| 900 | **1800 m** | 0.96 |
+| 1000 | **1100 m** | 1.11 — NO-GO |
+| 1200-1500 | **700 m** | 1.70-1.99 — NO-GO |
+
+🔑 **The 1500 m decision holds for Finnish managed stands up to ~900 stems/ha**
+(the advanced-thinning and mature classes below). At 1000/ha the zone must come
+in to ~1.1 km, and in young thinning stands (1000-2500/ha) to ~0.7 km — though
+those are mostly too low to fly under at all (canopy < ~16 m). The cliff between
+900 and 1000 is the envelope's step from 2.5 to 1.5 m/s.
+⚠️ Harness envelope; SITL has flown this planner at 200 and 400 only. Uniform
+density over the whole covered stretch; with `layers.stand_data` the planner can
+route through the sparser stands instead, which only helps. The earlier answer on
+the old envelope (1800 m at 400/ha, 800 m at 800/ha) is superseded.
+
+## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
+User: *"look up finnish forest data from a reliable source, and keep in mind that
+a large part of it is talousmetsää."* Detail and sources in the
+`fields/stem_density.py` docstring; the short version:
+
+* **Most of it is managed.** Luke (2025): 13 % of forest + poorly productive land
+  is protected (6 % south, 20 % north); the rest is talousmetsä, thinned to Tapio's
+  published targets. VMI11 development classes on production forest land:
+  **19 % seedling, 36 % young thinning, 30 % advanced thinning, 13 % mature.**
+* **Stems/ha by class** (Tapio *Metsänhoidon suositukset*): first thinning at
+  12–17 m dominant height leaves **pine 900–1200, spruce 700–1200, silver birch
+  700–800**; later thinnings and mature stands come down to **~400–900**. The
+  existing self-thinning anchors (600/ha at 20 m, N ∝ H^-1.5 → 1291 @ 12 m, 838 @
+  16 m, 429 @ 25 m) sit inside those ranges — the literature relation holds up.
+* 🔑 **The stands tall enough to fly under (~43 % of production forest) are
+  ~400–900 stems/ha — at and past the onboard planner's envelope.** Young thinning
+  stands are denser and their live crowns reach into the 5–10 m flight band, which
+  a trunk-only count flatters. Thinned talousmetsä is *easier* than unmanaged
+  forest of the same height — the one favourable fact.
+* **`layers.stand_data` — a measured density source now exists** (`io/stand_data.py`).
+  Suomen metsäkeskus publishes *Metsävarakuviot*: ~1.4 ha stand polygons from
+  airborne-laser inventory, updated twice a week, **free, CC BY 4.0**, GeoPackage
+  in EPSG:3067. `stand → treestand (type 2 = grown to today) → treestandsummary.stemcount`
+  replaces the canopy-height inference on treed cells; the canopy model still
+  decides treed vs open, and `stem.density_per_ha` still wins. Reported as
+  `below_canopy_density_measured_m`. ⚠️ Accuracy targets are on height (±2 m),
+  diameter (±3 cm) and basal area (±3 m²/ha) on 8 stands in 10 — stem count is
+  derived, roughly ±30 %. A planning prior only (user rule: never depended on in
+  flight); staleness errs *denser*, since stands are thinned and felled between
+  updates. ⚠️ Metsäkeskus has announced a data-model renewal; the reader fails
+  loudly if the tables change. Not yet run on a real download.
 
 ## ✅ STEM DETECTION FROM LIDAR (2026-09-14) — `forest/stem_detect.py`
 `layers.point_cloud` → `pipeline._load_stems` → detected `StemMap` → the stem
