@@ -410,6 +410,15 @@ class LayerPaths(BaseModel):
     chm: Path | None = Field(default=None, description="Canopy height model GeoTIFF.")
     land_cover: Path | None = None
     point_cloud: Path | None = Field(default=None, description="ALS/UAV lidar LAZ/LAS 1.4.")
+    stand_data: Path | None = Field(
+        default=None,
+        description=(
+            "Finnish Forest Centre stand GeoPackage (Metsävarakuviot, CC BY 4.0). "
+            "Its per-stand stemcount replaces the canopy-height density inference "
+            "wherever a stand covers a treed cell (io/stand_data.py). A planning "
+            "prior only: stem.density_per_ha, if stated, still wins."
+        ),
+    )
     roads: Path | None = None
     stem_map: Path | None = Field(
         default=None,

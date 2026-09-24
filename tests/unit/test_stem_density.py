@@ -139,6 +139,7 @@ class TestBuildStemClutter:
             "max_reactive_speed_ms",
             "max_speed_ms",
             "beyond_envelope",
+            "stem_density_measured",
             "clutter_time_penalty",
         }
         # Open ground: no stems, no penalty, full cruise.

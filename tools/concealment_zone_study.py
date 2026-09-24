@@ -33,6 +33,19 @@ from droneplanner.planner.corridor import plan_over_terrain
 
 RADII_M: tuple[float | None, ...] = (500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0, None)
 DENSITIES: tuple[float | None, ...] = (107.0, 200.0, 400.0, None)
+SOLVE_DENSITIES: tuple[float, ...] = (
+    200.0,
+    300.0,
+    400.0,
+    500.0,
+    600.0,
+    700.0,
+    800.0,
+    1000.0,
+    1200.0,
+)
+SOLVE_STEP_M = 100.0
+SOLVE_MAX_M = 5000.0
 
 
 def load_ao(ao: Path) -> tuple[dict[str, object], np.ndarray, np.ndarray, Grid]:
@@ -51,10 +64,81 @@ def load_ao(ao: Path) -> tuple[dict[str, object], np.ndarray, np.ndarray, Grid]:
     return base, dtm, dsm, grid
 
 
+def _plan(
+    ao: Path, density: float | None, radius: float | None, mission_file: str
+) -> dict[str, float]:
+    _, dtm, dsm, grid = load_ao(ao)
+    m = yaml.safe_load((ao / mission_file).read_text())
+    m["covered_radius_m"] = radius
+    stem = dict(m.get("stem", {}) or {})
+    stem["density_per_ha"] = density
+    m["stem"] = stem
+    plan, _ = plan_over_terrain(Mission.model_validate(m), dtm, dsm, grid, route_index=0)
+    end = plan.endurance
+    assert end is not None
+    return {
+        "radius": radius or 0.0,
+        "energy": end.energy_fraction,
+        "time_min": end.flight_time_s / 60.0,
+        "closes": float(end.closes),
+        "beyond": plan.objective_scores.get("below_canopy_beyond_envelope_m", 0.0),
+    }
+
+
+def solve(ao: Path, mission_file: str) -> None:
+    """Largest covered radius that closes one sortie, per density.
+
+    Radii are stepped, not bisected: the route changes with the radius, so energy
+    is not guaranteed monotone, and the answer reported is the largest radius
+    below which EVERY step closes.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+
+    radii = [SOLVE_STEP_M * k for k in range(1, int(SOLVE_MAX_M / SOLVE_STEP_M) + 1)]
+    print(f"{'stems/ha':>9}{'max radius':>12}{'energy':>8}{'time':>7}  at 1500 m  envelope")
+    with ProcessPoolExecutor() as ex:
+        for density in SOLVE_DENSITIES:
+            rows = list(
+                ex.map(
+                    _plan,
+                    [ao] * len(radii),
+                    [density] * len(radii),
+                    radii,
+                    [mission_file] * len(radii),
+                )
+            )
+            best = None
+            for row in rows:
+                if not row["closes"]:
+                    break
+                best = row
+            at1500 = next(r for r in rows if r["radius"] == 1500.0)
+            max_r = f"{best['radius']:.0f} m" if best else "< 100 m"
+            if best is rows[-1]:
+                max_r = "whole route"
+            energy = f"{best['energy']:.2f}" if best else "-"
+            time_min = f"{best['time_min']:.1f}m" if best else "-"
+            verdict = "closes" if at1500["closes"] else "NO-GO"
+            envelope = "extrapolated" if at1500["beyond"] > 0 else "measured"
+            print(
+                f"{density:>9.0f}{max_r:>12}{energy:>8}{time_min:>7}"
+                f"  {at1500['energy']:.2f} {verdict:>6}  {envelope}"
+            )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ao", type=Path, default=Path("demo_ao"))
+    ap.add_argument(
+        "--solve",
+        action="store_true",
+        help="Per density, find the largest covered radius that closes one sortie.",
+    )
+    ap.add_argument("--mission", default="mission.yaml", help="Mission file in the AO for --solve.")
     args = ap.parse_args()
+    if args.solve:
+        solve(args.ao, args.mission)
+        return 0
     base, dtm, dsm, grid = load_ao(args.ao)
 
     hdr = (

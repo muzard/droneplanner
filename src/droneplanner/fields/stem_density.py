@@ -53,6 +53,40 @@ available range sits an order of magnitude inside the infeasible region, so no
 amount of routing between stands recovers the mission. Proving the term *works*
 therefore needs a stand structure the demo does not contain, which is what the
 unit tests supply.
+
+FINNISH MANAGED FOREST ("talousmetsä") — CHECKED 2026-09-24
+Most Finnish forest is managed for wood: Luke's 2025 statistics put **13 %** of
+forest and poorly productive land under protection (6 % in the south, 20 % in the
+north), so the rest is talousmetsä, thinned to published targets. Those targets
+are the best available prior for stems/ha, and they corroborate the anchors above:
+
+====================================  =========  ==============  =============
+development class (VMI11 share of      height      stems/ha         this module
+production forest land)                                              (N ~ H^-1.5)
+====================================  =========  ==============  =============
+seedling stand, taimikko (19 %)        < 7 m      2000+ small      open ground (*)
+young thinning stand (36 %)            7-16 m     1500-2500 before, 1291 @ 12 m
+                                                  700-1200 after
+                                                  first thinning
+advanced thinning stand (30 %)         16-22 m    ~500-900         838 @ 16 m
+mature stand, uudistuskypsä (13 %)     20-28 m    ~400-700         429 @ 25 m
+====================================  =========  ==============  =============
+
+(*) below ``AltitudePolicy.min_canopy_m`` the planner flies over, not under.
+Sources: Luke, *Suomen metsät 2009-2013* (LuoBio 59/2017), §4.2.1 class shares;
+Tapio, *Metsänhoidon suositukset*, first-thinning targets by species and site
+(pine 900-1200, spruce 700-1200, silver birch 700-800 stems/ha after thinning at
+12-17 m dominant height); later-thinning and mature figures are the ranges those
+targets thin down to, not a table value.
+
+🔑 **What it means for the aircraft.** The stands tall enough to fly *under* —
+advanced thinning and mature, ~43 % of production forest land — sit at roughly
+**400-900 stems/ha**, i.e. right at and beyond the onboard planner's measured
+envelope (:data:`ONBOARD_PLANNING_ENVELOPE`). Young thinning stands are denser
+still and their live crowns reach down into the 5-10 m band the aircraft would fly
+in; a trunk-only stem count flatters them. Thinned talousmetsä is *easier* than an
+unmanaged stand of the same height (fewer stems, less understory after pre-harvest
+clearing), which is the one favourable fact here.
 """
 
 from __future__ import annotations
@@ -239,6 +273,7 @@ def build_stem_clutter(
     min_canopy_m: float = 2.0,
     among_stems: np.ndarray | None = None,
     density_override_per_ha: float | None = None,
+    measured_per_ha: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """All four rasters at once — density, spacing, speed cap, time penalty.
 
@@ -249,6 +284,13 @@ def build_stem_clutter(
     below-canopy cells coincide, but wrong as soon as a route goes over a stand.
     """
     density = stem_density_per_ha(chm, min_canopy_m=min_canopy_m)
+    measured = np.zeros(density.shape, dtype=bool)
+    if measured_per_ha is not None and density_override_per_ha is None:
+        # Stand data (io/stand_data.py) replaces the inference where a stand
+        # covers a treed cell. The canopy model still decides treed vs open: it is
+        # the newer of the two, and a stand felled since its inventory is open.
+        measured = (density > 0.0) & np.isfinite(measured_per_ha) & (measured_per_ha > 0.0)
+        density = np.where(measured, measured_per_ha, density).astype(np.float32)
     if density_override_per_ha is not None:
         # An operator's stated density replaces the canopy-height inference on
         # every treed cell (open cells stay open).
@@ -270,5 +312,6 @@ def build_stem_clutter(
         "max_reactive_speed_ms": reactive,
         "max_speed_ms": speed,
         "beyond_envelope": outside.astype(np.float32),
+        "stem_density_measured": measured.astype(np.float32),
         "clutter_time_penalty": traversal_time_penalty(speed, cruise_speed_ms=cruise_speed_ms),
     }

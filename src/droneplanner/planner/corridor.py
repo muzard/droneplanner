@@ -434,13 +434,21 @@ def plan_corridor(
     # How much of the route is flown among stems denser than the onboard planner
     # has been shown to handle (fields/stem_density.ONBOARD_PLANNING_ENVELOPE).
     beyond = surface.components.get("beyond_envelope")
+    measured = surface.components.get("stem_density_measured")
+    band = surface.components.get("flight_band")
     beyond_m = 0.0
-    if beyond is not None:
-        for a, b in pairwise(fpts):
-            if beyond[grid.world_to_pixel(a)] > 0.0:
-                beyond_m += a.distance_to(b)
+    measured_m = 0.0
+    for a, b in pairwise(fpts):
+        cell = grid.world_to_pixel(a)
+        if beyond is not None and beyond[cell] > 0.0:
+            beyond_m += a.distance_to(b)
+        if measured is not None and band is not None and measured[cell] > 0.0 and band[cell] >= 2:
+            measured_m += a.distance_to(b)
 
-    stem_scores: dict[str, float] = {"below_canopy_beyond_envelope_m": beyond_m}
+    stem_scores: dict[str, float] = {
+        "below_canopy_beyond_envelope_m": beyond_m,
+        "below_canopy_density_measured_m": measured_m,
+    }
     if stems is not None and len(stems) > 0:
         sc = assess_stem_clearance(
             [(p.x, p.y) for p in fpts],

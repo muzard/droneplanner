@@ -40,6 +40,7 @@ from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_pen
 from droneplanner.fields.util import normalize01
 from droneplanner.fields.viewshed import cumulative_exposure
 from droneplanner.forest.navigability import FlyabilityField
+from droneplanner.io.stand_data import stand_density_raster
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import Mission
 
@@ -165,12 +166,18 @@ def build_cost_surface(
     # flight stack may go here (TEST-PLAN N3). Priced as extra *seconds per metre*
     # rather than as an abstract risk, because seconds are what the endurance
     # budget spends — so this term and the N1 check argue in the same currency.
+    measured = (
+        stand_density_raster(mission.layers.stand_data, grid)
+        if mission.layers.stand_data is not None
+        else None
+    )
     clutter = build_stem_clutter(
         chm,
         cruise_speed_ms=mission.drone.cruise_speed_ms,
         min_canopy_m=mission.altitude.min_canopy_m,
         among_stems=flight_band >= 2,
         density_override_per_ha=mission.stem.density_per_ha,
+        measured_per_ha=measured,
     )
 
     # Drone concealment terms apply only inside the concealment zone; the cable's

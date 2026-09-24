@@ -476,6 +476,13 @@ def build_report(
     # canopy height model — not a stem inventory, which this program has never
     # ingested. It is stated next to the verdict it produces, not buried.
     if end is not None and end.speed_capped_legs > 0:
+        measured_m = float(plan.objective_scores.get("below_canopy_density_measured_m", 0.0))
+        measured_note = (
+            f"{measured_m:.0f} m of below-canopy flight is priced from MEASURED stand "
+            "data (layers.stand_data, Metsäkeskus stemcount). "
+            if measured_m > 0.0
+            else ""
+        )
         findings.append(
             Finding(
                 severity=Severity.WARNING,
@@ -484,9 +491,10 @@ def build_report(
                     f"{end.speed_capped_legs} leg(s) are slowed below cruise by stem density, "
                     f"giving an effective {end.effective_speed_ms:.2f} m/s against a "
                     f"{plan.vertices[0].speed_hint_ms:.2f} m/s airframe cruise, at the speeds "
-                    "the onboard local planner flew clean in the harness. Unless the "
-                    "mission states stem.density_per_ha, density is inferred from canopy "
-                    "height by a self-thinning relation (fields/stem_density.py), NOT "
+                    "the onboard local planner flew clean in the harness. "
+                    f"{measured_note}Unless the "
+                    "mission states stem.density_per_ha, density elsewhere is inferred from "
+                    "canopy height by a self-thinning relation (fields/stem_density.py), NOT "
                     "measured; the ordering (taller stands are sparser) is more "
                     "trustworthy than the absolute density"
                 ),
