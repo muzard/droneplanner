@@ -201,6 +201,19 @@ class TestRoutingBehaviour:
 class TestOnboardPlanningEnvelope:
     """The speed cap is the local planner's MEASURED envelope, not reactive coherence."""
 
+    def test_the_planning_envelope_never_exceeds_the_harness(self) -> None:
+        """SITL is the arbiter and it is slower: 5 m/s at 200/ha failed 2/2 in SITL
+        where the harness flew it clean. The planner must never price faster."""
+        from droneplanner.fields.stem_density import (
+            HARNESS_ENVELOPE,
+            ONBOARD_PLANNING_ENVELOPE,
+        )
+
+        harness = dict(HARNESS_ENVELOPE)
+        for density, speed in ONBOARD_PLANNING_ENVELOPE:
+            assert speed <= harness[density]
+        assert dict(ONBOARD_PLANNING_ENVELOPE)[200.0] == 3.0  # fix5, flown clean
+
     def test_anchors_are_reproduced(self) -> None:
         from droneplanner.fields.stem_density import (
             ONBOARD_PLANNING_ENVELOPE,
@@ -214,7 +227,7 @@ class TestOnboardPlanningEnvelope:
     def test_beyond_the_envelope_is_flagged_and_still_monotone(self) -> None:
         from droneplanner.fields.stem_density import beyond_envelope, max_planned_speed_ms
 
-        d = np.array([800.0, 1600.0, 3200.0])
+        d = np.array([800.0, 1300.0, 1500.0])  # above the 0.3 m/s extrapolation floor
         v = max_planned_speed_ms(d, cruise_speed_ms=6.0)
         assert v[0] > v[1] > v[2] > 0.0
         assert list(beyond_envelope(d)) == [False, True, True]
@@ -234,4 +247,6 @@ class TestOnboardPlanningEnvelope:
         )
         assert out["stem_density_per_ha"][0, 0] == 0.0  # open ground stays open
         assert out["stem_density_per_ha"][0, 1] == pytest.approx(107.0)
-        assert out["max_speed_ms"][0, 1] == pytest.approx(min(6.0, CRUISE))
+        from droneplanner.fields.stem_density import ONBOARD_PLANNING_ENVELOPE
+
+        assert out["max_speed_ms"][0, 1] == pytest.approx(ONBOARD_PLANNING_ENVELOPE[0][1])

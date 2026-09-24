@@ -344,9 +344,9 @@ on evidence.
 
 **1. The speed cap is now the ONBOARD PLANNER's measured envelope, not reactive
 coherence.** `fields/stem_density.ONBOARD_PLANNING_ENVELOPE`:
-**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0** (⚠️ superseded 2026-09-24 after
-four planner fixes: 200 → 5, 400 → 4, … 1200 → 0.75 — see "HOW MUCH THE ZONE MUST
-SHRINK"), measured in droneflight's
+**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0** (⚠️ re-measured 2026-09-24 after
+four planner fixes and anchored to SITL: 200 → 3.0, 400 → 2.0, 800 → 1.25, 1200 →
+0.4 — see "HOW MUCH THE ZONE MUST SHRINK"), measured in droneflight's
 accel/jerk-limited harness with the new local planner (`droneflight/local_planner.py`).
 At 800/ha it stalls or strikes at every speed tried, so anything past 400 is
 flagged `beyond_envelope` and raises **`stem_density_beyond_envelope` CRITICAL**;
@@ -363,7 +363,7 @@ the cover reward are zeroed, no stem speed cap. **The cable's survivability term
 stays everywhere** — the fiber remains on the ground after the aircraft has gone.
 None = whole route (unchanged default).
 
-**3. DECISION: 1500 m** (re-checked 2026-09-24 on the new envelope: closes up to ~900 stems/ha). `tools/concealment_zone_study.py` sweeps radius × density:
+**3. DECISION: 1500 m** (re-checked 2026-09-24: closes up to ~400 stems/ha; denser Finnish stands need 0.8-1.1 km). `tools/concealment_zone_study.py` sweeps radius × density:
 
 | stand density | largest radius that closes | energy at 1500 m |
 |---|---|---|
@@ -398,9 +398,9 @@ params[4:6], so a speed item would have added a route point at (0, 0) and drawn
 the forest band along a line to the equator. It now reads waypoints only.
 
 **The MVP mission is `demo_ao/mission_mvp.yaml`** (radius 1500, density 200):
-**5180 m, 1166 m below canopy, REVIEW (was NO-GO at 47.6 min)** — 19.0 min /
-0.82 at the old 3.0 m/s forest speed; **16.2 min / 0.70 at 5.0 m/s** on the
-2026-09-24 envelope. Its world: `gz-world --stems-per-ha 200 --forest-radius
+**5180 m, 1166 m below canopy at 3.0 m/s, 19.0 min, energy 0.82 → REVIEW (was
+NO-GO at 47.6 min).** (At the harness's 5.0 m/s it would be 16.2 min / 0.70 — and
+SITL hit a trunk twice at that speed.) Its world: `gz-world --stems-per-ha 200 --forest-radius
 1500` → `worlds/forest_mvp.*` (1562 trunks over 7.8 ha, median NN 3.4 m).
 ⚠️ `demo_ao/dtm.tif` is 220×220 since the AO was enlarged; the older worlds were
 built from the 160×160 version. Terrain in the overlap is identical (a constant
@@ -411,27 +411,32 @@ User: *"Calculate how much the zone has to shrink if the forest is denser."*
 `tools/concealment_zone_study.py --solve --mission mission_mvp.yaml` steps the
 covered radius in 100 m and reports, per stand density, the largest radius below
 which every step still closes one sortie (30 min airframe, 20 % reserve), on the
-**re-measured** envelope (`ONBOARD_PLANNING_ENVELOPE`, 2026-09-24 — 200 → 5 m/s,
-400 → 4, 500-600 → 3, 800 → 2.5, 1000 → 1.5, 1200 → 0.75):
+**SITL-anchored** envelope (`ONBOARD_PLANNING_ENVELOPE`: 200 → 3.0 m/s, 400 → 2.0,
+500-600 → 1.5, 800 → 1.25, 1000 → 0.75, 1200 → 0.4):
 
 | stems/ha | largest zone that closes | energy with the 1500 m zone |
 |---|---|---|
-| 200-600 | **the whole route** | 0.70-0.82 |
-| 700 | 4100 m | 0.84 |
-| 800 | 3700 m | 0.88 |
-| 900 | **1800 m** | 0.96 |
-| 1000 | **1100 m** | 1.11 — NO-GO |
-| 1200-1500 | **700 m** | 1.70-1.99 — NO-GO |
+| 200 | the whole route | 0.82 |
+| 300 | 3700 m | 0.88 |
+| **400** | **1800 m** | 0.96 |
+| 500-600 | **1100 m** | 1.11 — NO-GO |
+| 700 | 1000 m | 1.16 — NO-GO |
+| 800 | 900 m | 1.23 — NO-GO |
+| 900 | **800 m** | 1.41 — NO-GO |
+| ≥ 1000 | 700 m | NO-GO |
 
-🔑 **The 1500 m decision holds for Finnish managed stands up to ~900 stems/ha**
-(the advanced-thinning and mature classes below). At 1000/ha the zone must come
-in to ~1.1 km, and in young thinning stands (1000-2500/ha) to ~0.7 km — though
-those are mostly too low to fly under at all (canopy < ~16 m). The cliff between
-900 and 1000 is the envelope's step from 2.5 to 1.5 m/s.
-⚠️ Harness envelope; SITL has flown this planner at 200 and 400 only. Uniform
-density over the whole covered stretch; with `layers.stand_data` the planner can
-route through the sparser stands instead, which only helps. The earlier answer on
-the old envelope (1800 m at 400/ha, 800 m at 800/ha) is superseded.
+🔑 **For Finnish managed stands (~400-900 stems/ha under the canopy) the zone is
+1.8 km at the sparse end and ~0.8-1.1 km through most of the range.** The 1500 m
+decision holds only up to ~400/ha. It stays the MVP setting because the MVP forest
+is 200/ha; **on a real Finnish AO use `layers.stand_data` and re-solve** — the
+planner then prices each stand at its own density and routes through the sparser
+ones, which only helps.
+⚠️ **Why "SITL-anchored"**: the harness flies faster (`HARNESS_ENVELOPE`: 200 →
+5.0, 400 → 4.0 … ) but SITL failed 2/2 at 5 m/s at 200/ha where the harness was
+clean. Measured anchors: 200 @ 3.0 and 400 @ 2.0 (both flown clean GPS-denied);
+the rest are harness × the SITL/harness ratio (0.6 / 0.5). On the harness numbers
+the zone would be ~2.5× larger through 400-900/ha — a real prize if SITL confirms
+faster anchors, one ~20 min flight each.
 
 ## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
 User: *"look up finnish forest data from a reliable source, and keep in mind that

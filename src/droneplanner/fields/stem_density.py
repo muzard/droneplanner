@@ -81,8 +81,8 @@ targets thin down to, not a table value.
 
 🔑 **What it means for the aircraft.** The stands tall enough to fly *under* —
 advanced thinning and mature, ~43 % of production forest land — sit at roughly
-**400-900 stems/ha**: inside the onboard planner's measured envelope since
-2026-09-24 (:data:`ONBOARD_PLANNING_ENVELOPE`, 4.0-2.0 m/s across that range),
+**400-900 stems/ha**: inside the onboard planner's envelope since 2026-09-24
+(:data:`ONBOARD_PLANNING_ENVELOPE`, 2.0-1.25 m/s across that range, SITL-anchored),
 though flown in SITL only at 200 and 400. Young thinning stands are denser
 still and their live crowns reach down into the 5-10 m band the aircraft would fly
 in; a trunk-only stem count flatters them. Thinned talousmetsä is *easier* than an
@@ -185,7 +185,7 @@ def max_reactive_speed_ms(
     return np.minimum(spacing / reaction_time_s, cruise_speed_ms).astype(np.float32)
 
 
-ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
+HARNESS_ENVELOPE: tuple[tuple[float, float], ...] = (
     (107.0, 6.0),
     (200.0, 5.0),
     (400.0, 4.0),
@@ -195,7 +195,32 @@ ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
     (1000.0, 1.5),
     (1200.0, 0.75),
 )
-"""``(stems/ha, fastest clean speed m/s)`` for the onboard local planner.
+"""What the offline harness flies clean — an UPPER BOUND, not a planning number.
+See :data:`ONBOARD_PLANNING_ENVELOPE` for why the planner does not use it."""
+
+ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
+    (107.0, 3.6),
+    (200.0, 3.0),
+    (400.0, 2.0),
+    (500.0, 1.5),
+    (600.0, 1.5),
+    (800.0, 1.25),
+    (1000.0, 0.75),
+    (1200.0, 0.4),
+)
+"""``(stems/ha, speed m/s)`` the planner prices below-canopy flight at: the
+harness envelope **anchored to SITL**, which is the arbiter.
+
+DECISION 2026-09-24. SITL (PX4 + Gazebo, GPS-denied, the local planner with all
+fixes) has flown **200/ha clean at 3.0 m/s** (fix5, +0.676 m) and **400/ha clean at
+2.0** (d400n), and **failed 2/2 at 5.0 m/s at 200/ha** (mvp2, mvp3 — one strike
+each) where the harness below flies 5.0 clean. So above ~3 m/s the harness is
+optimistic, and it never reproduced any of the five SITL contacts of that day.
+Rule: the two SITL-validated anchors are taken as measured; every other harness
+anchor is discounted by the SITL/harness ratio at the nearest validated density
+(3/5 = 0.6 at <=200, 2/4 = 0.5 at >=400). Overturn an anchor by flying it in SITL.
+
+The harness measurement behind it (:data:`HARNESS_ENVELOPE`):
 
 MEASURED 2026-09-24 with ``droneflight/tools/envelope_sweep.py``: the harness
 (`reactive.fly_with_local_planner`) flying the measured PX4 offboard response
@@ -223,11 +248,10 @@ measured before four planner defects were fixed — see ``droneflight/CLAUDE.md`
 a speed-blind pursuit lookahead that deadlocked, and no momentum limit. The
 same fixes took two GPS-denied SITL contacts to a clean flight (fix5).
 
-⚠️ **Harness numbers.** SITL has flown this planner at 200/ha (3.0 m/s, clean
-GPS-denied) and 400/ha (2.0 m/s) only; every faster anchor is unflown. And the
-harness did NOT reproduce the two SITL contacts the fixes came from — it is
-necessary, not sufficient. Past 1200 the extrapolation (speed inversely
-proportional to density) rests on nothing, and :func:`beyond_envelope` says so.
+⚠️ The harness is necessary, not sufficient: it did not reproduce the SITL
+contacts the fixes came from, and it passes 5 m/s at 200/ha where SITL fails.
+Past 1200 the extrapolation (speed inversely proportional to density) rests on
+nothing, and :func:`beyond_envelope` says so.
 
 Replaces :func:`max_reactive_speed_ms` as the planner's speed cap: the reactive
 policy it modelled is dead in flight (N2, 34-41 strikes), so capping speed by
@@ -247,8 +271,11 @@ def max_planned_speed_ms(stems_per_ha: np.ndarray, *, cruise_speed_ms: float) ->
     number for a demonstrated one.
     """
     density = np.asarray(stems_per_ha, dtype=np.float32)
-    xs = np.array([d for d, _ in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
-    ys = np.array([v for _, v in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
+    # Open ground (0 stems/ha) is cruise, and a stand sparser than the first
+    # anchor interpolates up to it — not clamped to the first anchor's speed,
+    # which slowed every open cell once that anchor fell below cruise.
+    xs = np.array([0.0] + [d for d, _ in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
+    ys = np.array([cruise_speed_ms] + [v for _, v in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
     last_d, last_v = ONBOARD_PLANNING_ENVELOPE[-1]
     inside = np.interp(density, xs, ys)
     with np.errstate(divide="ignore"):
