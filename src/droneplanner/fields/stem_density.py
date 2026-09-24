@@ -199,8 +199,8 @@ HARNESS_ENVELOPE: tuple[tuple[float, float], ...] = (
 See :data:`ONBOARD_PLANNING_ENVELOPE` for why the planner does not use it."""
 
 ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
-    (107.0, 3.6),
-    (200.0, 3.0),
+    (107.0, 2.4),
+    (200.0, 2.0),
     (400.0, 2.0),
     (500.0, 1.5),
     (600.0, 1.5),
@@ -211,14 +211,25 @@ ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
 """``(stems/ha, speed m/s)`` the planner prices below-canopy flight at: the
 harness envelope **anchored to SITL**, which is the arbiter.
 
-DECISION 2026-09-24. SITL (PX4 + Gazebo, GPS-denied, the local planner with all
-fixes) has flown **200/ha clean at 3.0 m/s** (fix5, +0.676 m) and **400/ha clean at
-2.0** (d400n), and **failed 2/2 at 5.0 m/s at 200/ha** (mvp2, mvp3 — one strike
-each) where the harness below flies 5.0 clean. So above ~3 m/s the harness is
-optimistic, and it never reproduced any of the five SITL contacts of that day.
-Rule: the two SITL-validated anchors are taken as measured; every other harness
-anchor is discounted by the SITL/harness ratio at the nearest validated density
-(3/5 = 0.6 at <=200, 2/4 = 0.5 at >=400). Overturn an anchor by flying it in SITL.
+DECISION 2026-09-24. On the final flight stack (planner fixes, fixes bled over
+30 m), GPS-denied SITL through the 200/ha MVP forest, per EV noise seed set:
+
+=========  =============================  ==================================
+speed      clean                          contact
+=========  =============================  ==================================
+5.0 m/s    —                              0/1 (mvp2, mvp3: before final fixes)
+4.0 m/s    0/1 (s4)                       2/3 (s4b), 2/3 (s4c)
+3.0 m/s    2/3 (s3c), 0/1 (s3d), 6/7 (s3g)  **4/5 twice (s3e, s3f)**
+2.0 m/s    **4/5 (s2f, +1.05 m of air)**  —
+=========  =============================  ==================================
+
+A touch is a crash for a 0.9 m airframe, and one noise seed in four reproducibly
+fails at 3 m/s, so **200/ha is anchored at 2.0**. 400/ha is anchored at 2.0 too
+(flown clean on the same hard seeds, forest-only, +0.34 m of air). Every other
+harness anchor is discounted by the SITL/harness ratio at the nearest validated
+density (2/5 = 0.4 at <= 200, 2/4 = 0.5 at >= 400). The harness passes 3-5 m/s
+here: it is necessary, not sufficient. Overturn an anchor with SITL flights over
+several seed sets, never one.
 
 The harness measurement behind it (:data:`HARNESS_ENVELOPE`):
 

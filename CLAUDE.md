@@ -345,8 +345,8 @@ on evidence.
 **1. The speed cap is now the ONBOARD PLANNER's measured envelope, not reactive
 coherence.** `fields/stem_density.ONBOARD_PLANNING_ENVELOPE`:
 **107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0** (⚠️ re-measured 2026-09-24 after
-four planner fixes and anchored to SITL: 200 → 3.0, 400 → 2.0, 800 → 1.25, 1200 →
-0.4 — see "HOW MUCH THE ZONE MUST SHRINK"), measured in droneflight's
+the planner fixes and anchored to SITL: 200 and 400 → 2.0, 800 → 1.25, 1200 → 0.4
+— see "HOW MUCH THE ZONE MUST SHRINK"), measured in droneflight's
 accel/jerk-limited harness with the new local planner (`droneflight/local_planner.py`).
 At 800/ha it stalls or strikes at every speed tried, so anything past 400 is
 flagged `beyond_envelope` and raises **`stem_density_beyond_envelope` CRITICAL**;
@@ -398,9 +398,9 @@ params[4:6], so a speed item would have added a route point at (0, 0) and drawn
 the forest band along a line to the equator. It now reads waypoints only.
 
 **The MVP mission is `demo_ao/mission_mvp.yaml`** (radius 1500, density 200):
-**5180 m, 1166 m below canopy at 3.0 m/s, 19.0 min, energy 0.82 → REVIEW (was
-NO-GO at 47.6 min).** (At the harness's 5.0 m/s it would be 16.2 min / 0.70 — and
-SITL hit a trunk twice at that speed.) Its world: `gz-world --stems-per-ha 200 --forest-radius
+**5180 m, 1166 m below canopy, REVIEW (was NO-GO at 47.6 min)** — at the
+SITL-anchored **2.0 m/s: 22.5 min, energy 0.96**, one sortie with little margin.
+(19.0 min / 0.82 at 3.0 m/s, which grazed on one noise seed set in four.) Its world: `gz-world --stems-per-ha 200 --forest-radius
 1500` → `worlds/forest_mvp.*` (1562 trunks over 7.8 ha, median NN 3.4 m).
 ⚠️ `demo_ao/dtm.tif` is 220×220 since the AO was enlarged; the older worlds were
 built from the 160×160 version. Terrain in the overlap is identical (a constant
@@ -411,14 +411,12 @@ User: *"Calculate how much the zone has to shrink if the forest is denser."*
 `tools/concealment_zone_study.py --solve --mission mission_mvp.yaml` steps the
 covered radius in 100 m and reports, per stand density, the largest radius below
 which every step still closes one sortie (30 min airframe, 20 % reserve), on the
-**SITL-anchored** envelope (`ONBOARD_PLANNING_ENVELOPE`: 200 → 3.0 m/s, 400 → 2.0,
-500-600 → 1.5, 800 → 1.25, 1000 → 0.75, 1200 → 0.4):
+**SITL-anchored** envelope (`ONBOARD_PLANNING_ENVELOPE`: 200 and 400 → 2.0 m/s as
+flown, 500-600 → 1.5, 800 → 1.25, 1000 → 0.75, 1200 → 0.4):
 
 | stems/ha | largest zone that closes | energy with the 1500 m zone |
 |---|---|---|
-| 200 | the whole route | 0.82 |
-| 300 | 3700 m | 0.88 |
-| **400** | **1800 m** | 0.96 |
+| 200-400 | **1800 m** | 0.96 |
 | 500-600 | **1100 m** | 1.11 — NO-GO |
 | 700 | 1000 m | 1.16 — NO-GO |
 | 800 | 900 m | 1.23 — NO-GO |
@@ -427,16 +425,14 @@ which every step still closes one sortie (30 min airframe, 20 % reserve), on the
 
 🔑 **For Finnish managed stands (~400-900 stems/ha under the canopy) the zone is
 1.8 km at the sparse end and ~0.8-1.1 km through most of the range.** The 1500 m
-decision holds only up to ~400/ha. It stays the MVP setting because the MVP forest
-is 200/ha; **on a real Finnish AO use `layers.stand_data` and re-solve** — the
-planner then prices each stand at its own density and routes through the sparser
-ones, which only helps.
-⚠️ **Why "SITL-anchored"**: the harness flies faster (`HARNESS_ENVELOPE`: 200 →
-5.0, 400 → 4.0 … ) but SITL failed 2/2 at 5 m/s at 200/ha where the harness was
-clean. Measured anchors: 200 @ 3.0 and 400 @ 2.0 (both flown clean GPS-denied);
-the rest are harness × the SITL/harness ratio (0.6 / 0.5). On the harness numbers
-the zone would be ~2.5× larger through 400-900/ha — a real prize if SITL confirms
-faster anchors, one ~20 min flight each.
+MVP decision holds up to ~400/ha (energy 0.96 — tight). **On a real Finnish AO
+use `layers.stand_data` and re-solve**: stands are then priced at their own
+density and the route can take the sparser ones.
+⚠️ **Why the envelope is SITL-anchored and slow:** the harness (`HARNESS_ENVELOPE`)
+flies 200/ha at 5 m/s clean; GPS-denied SITL on the final stack grazed on one EV
+noise seed set in four at 3 m/s (reproducibly) and was clean at 2 m/s with four
+times the margin (docstring table). A touch is a crash. Raising an anchor needs
+SITL flights over several seed sets; each confirmed step up enlarges the zone.
 
 ## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
 User: *"look up finnish forest data from a reliable source, and keep in mind that
