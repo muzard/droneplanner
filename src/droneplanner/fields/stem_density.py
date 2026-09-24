@@ -225,20 +225,26 @@ DECISION 2026-09-24. GPS-denied SITL on the final flight stack (planner fixes
 incl. "steer, don't brake", VTRN fixes bled over 30 m), swept over four EV noise
 seed sets (0/1, 2/3, 4/5, 6/7) — one run is one noise draw:
 
-==============  ======================  =================================
-stand / speed   clean seed sets         contact
-==============  ======================  =================================
-200/ha 3 m/s    **4/4** (+0.63-0.87 m)  —
-200/ha 4 m/s    4/5                     **0/1**
-400/ha 2 m/s    see RUNBOOK §4.14       —
-400/ha 3 m/s    —                       **4/5 (2 contacts)**
-==============  ======================  =================================
+==============  ============================  =============================
+stand / speed   clean seed sets (min air)     contact
+==============  ============================  =============================
+200/ha 3 m/s    **4/4** (+0.18 m)             —
+200/ha 4 m/s    4/5                           **0/1**
+400/ha 2 m/s    **4/4** (+0.28 m)             —
+400/ha 3 m/s    —                             **4/5 (2 contacts)**
+600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
+600/ha 2 m/s    4/4 (+0.12 m)                 —
+==============  ============================  =============================
 
-So **200/ha is anchored at 3.0 and 400/ha at 2.0**. Every other harness anchor is
-discounted by the SITL/harness ratio at the nearest validated density (3/5 = 0.6
-at <= 200, 2/4 = 0.5 at >= 400). The harness passes 4-5 m/s at 200/ha: it is
-necessary, not sufficient. Overturn an anchor with a four-seed SITL sweep
-(``~/sweep.sh`` on the VM), never one run. Before "steer, don't brake" the same
+(Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5 are measured**. 600/ha also flew
+2 m/s strike-free, but at 600/ha the margin is thin at *both* speeds — a 1.9 m
+median gap threaded by a 0.9 m airframe — so it is not raised on that evidence.
+The remaining anchors are the harness discounted by the SITL/harness ratio at the
+nearest validated density (3/5 = 0.6 at <= 200, 2/4 = 0.5 at >= 400).
+The harness passes 4-5 m/s at 200/ha: it is necessary, not sufficient.
+Overturn an anchor with a four-seed SITL sweep (``~/sweep.sh`` on the VM), never
+one run. Before "steer, don't brake" the same
 3 m/s grazed on seed set 4/5 three times out of three.
 
 The harness measurement behind it (:data:`HARNESS_ENVELOPE`):

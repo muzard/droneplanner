@@ -433,9 +433,12 @@ and re-solve**: stands are then priced at their own density.
 clean; GPS-denied SITL on the final stack is clean at 3 m/s on 4/4 seed sets and
 touches at 4 m/s (200/ha) and 3 m/s (400/ha). Raising an anchor = a four-seed
 SITL sweep (`~/sweep.sh`), each confirmed step enlarging the zone.
-⚠️ 400/ha at 2 m/s was flown clean on the hardest seed set before the last
-planner fix ("steer, don't brake"); its four-seed re-validation on the final code
-was cut short (host CPU contention) — pending.
+✅ Four-seed SITL sweeps on the final code: 400/ha at 2 m/s clean 4/4 (min air
++0.28 m); **600/ha at 1.5 m/s clean 4/4** (world `forest_mvp600n`, 1725 trunks,
+±15 m band) — so the 500-600 anchor is measured, not discounted. ⚠️ Its thinnest
+pass was **+0.03 m of air**: at 600/ha (median gap 1.9 m) the 0.9 m airframe is
+near what can be threaded at all; 2 m/s was also strike-free (min +0.12 m) and
+is not adopted on margins that thin. Askola's median flyable stand is 640/ha.
 
 ## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
 User: *"look up finnish forest data from a reliable source, and keep in mind that
