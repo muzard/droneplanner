@@ -118,14 +118,25 @@ def generate_trunks(
     max_stems: int = 4000,
     rotor_span_m: float = 0.9,
     seed: int = 0,
+    within_m: float | None = None,
 ) -> tuple[list[TrunkModel], ForestStats]:
-    """Place trunks where the planner believed there was cover, near the route."""
+    """Place trunks where the planner believed there was cover, near the route.
+
+    ``within_m`` limits the forest to that distance of ``home`` — the mission's
+    concealment zone, outside which the route flies over the canopy.
+    """
     if stems_per_ha <= 0.0:
         raise ValueError("stems_per_ha must be positive")
     if max_stems < 1:
         raise ValueError("max_stems must be at least 1")
 
     forested = (chm >= min_canopy_m) & _route_band_mask(route, grid, band_m, chm.shape)
+    if within_m is not None:
+        a, b, c, d, e, f = grid.transform
+        rr, cc = np.mgrid[0 : chm.shape[0], 0 : chm.shape[1]].astype(np.float64)
+        wx = a * (cc + 0.5) + b * (rr + 0.5) + c
+        wy = d * (cc + 0.5) + e * (rr + 0.5) + f
+        forested &= np.hypot(wx - home.x, wy - home.y) <= within_m
     cells = np.argwhere(forested)
     cell_area = grid.cell_size_m**2
     area_ha = len(cells) * cell_area / _SQM_PER_HA

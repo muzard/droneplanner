@@ -140,6 +140,7 @@ def _build_forest(
     stems_per_ha: float,
     max_stems: int,
     trunk_radius_m: float,
+    radius_m: float | None = None,
 ) -> str:
     """Generate trunks along the plan's route and write the perception manifest.
 
@@ -177,6 +178,11 @@ def _build_forest(
     to_crs = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
     route = []
     for item in items:
+        # Waypoints only. A DO_CHANGE_SPEED item has zeros in params[4:6], which
+        # read as lat/lon would add a route point at (0, 0) and draw the forest
+        # band along a line to the equator.
+        if item.get("command") != 16:
+            continue
         params = item.get("params") or []
         if len(params) >= 6 and params[4] is not None and params[5] is not None:
             x, y = to_crs.transform(float(params[5]), float(params[4]))
@@ -194,6 +200,7 @@ def _build_forest(
         stems_per_ha=stems_per_ha,
         trunk_radius_m=trunk_radius_m,
         max_stems=max_stems,
+        within_m=radius_m,
     )
 
     manifest = out.parent / f"{out.stem}_trunks.csv"
@@ -277,6 +284,15 @@ def gz_world(
         4000, "--max-stems", help="Cap on trunk count; density is reduced, never the band."
     ),
     trunk_radius_m: float = typer.Option(0.15, "--trunk-radius", help="Trunk radius (m)."),
+    forest_radius_m: float | None = typer.Option(
+        None,
+        "--forest-radius",
+        help=(
+            "Only place trunks within this distance of home. Set it to the mission's "
+            "covered_radius_m: beyond that the route flies OVER the canopy, and "
+            "droneflight's perception is 2D (it would dodge trunks far beneath it)."
+        ),
+    ),
 ) -> None:
     """Generate a Gazebo world whose heightmap is the planned terrain.
 
@@ -346,6 +362,7 @@ def gz_world(
             stems_per_ha=stems_per_ha,
             max_stems=max_stems,
             trunk_radius_m=trunk_radius_m,
+            radius_m=forest_radius_m,
         )
 
     out.write_text(

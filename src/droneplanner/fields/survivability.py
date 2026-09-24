@@ -28,7 +28,7 @@ from droneplanner.fields.util import normalize01
 from droneplanner.fields.viewshed import cumulative_exposure
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import ThreatSector
+from droneplanner.model.mission import DEFAULT_OFF_AXIS_VIGILANCE, ThreatSector
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,7 @@ def build_survivability(
     openness: np.ndarray | None = None,
     sectors: Sequence[ThreatSector] = (),
     horizon_m: float = DEFAULT_HORIZON_M,
+    off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
 ) -> np.ndarray:
     """Build the normalized 0..1 cable-survivability cost field.
 
@@ -76,7 +77,9 @@ def build_survivability(
 
     # Openness to the threat: what the threat observers can see of the ground.
     if openness is None:
-        openness = cumulative_exposure(dsm, grid, threat_observers, sectors=sectors)
+        openness = cumulative_exposure(
+            dsm, grid, threat_observers, sectors=sectors, off_axis_vigilance=off_axis_vigilance
+        )
     bearings = bearing_only_sectors(sectors)
     if bearings:
         openness = np.maximum(

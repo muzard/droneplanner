@@ -31,3 +31,7 @@ data/**
 out/
 *.plan
 !configs/*.plan
+
+# Generated point-cloud fixtures (regenerate: tools/make_synthetic_scan.py)
+*.las
+*.laz

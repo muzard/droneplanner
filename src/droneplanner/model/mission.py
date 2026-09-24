@@ -218,6 +218,16 @@ class ThreatSector(BaseModel):
     )
 
 
+# Detection weight outside a stated search arc, as a fraction of on-axis. A sector
+# concentrates attention; it does not blind the observer elsewhere (user,
+# 2026-09-14). This is the default EVERYWHERE - this model field and the viewshed
+# signatures alike - so a call site that forgets to pass the mission's value errs
+# toward a MORE attentive adversary. The opposite default (0.0, a hard mask)
+# shipped for one afternoon and immediately desynchronised the flown re-score from
+# the raster, which is precisely the failure mode C3 warned about.
+DEFAULT_OFF_AXIS_VIGILANCE = 0.25
+
+
 class ThreatModel(BaseModel):
     """Observer positions (viewshed sources) + threat fire sectors."""
 
@@ -227,6 +237,27 @@ class ThreatModel(BaseModel):
     sectors: tuple[ThreatSector, ...] = ()
     canopy_occlusion: CanopyOcclusion = CanopyOcclusion()
     detection: DetectionModel = DetectionModel()
+    off_axis_vigilance: float = Field(
+        default=DEFAULT_OFF_AXIS_VIGILANCE,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Detection weight on bearings OUTSIDE an observer's stated search "
+            "arcs, as a fraction of the on-axis weight. A sector says where "
+            "attention is concentrated, not where the observer is blind - per "
+            "the user (2026-09-14), 'realistically observers will be looking "
+            "around, even by accident'. "
+            "0.0 is the pre-2026-09-14 behaviour: a hard mask, an adversary who "
+            "physically cannot see off-axis. That is the optimistic direction, "
+            "and a concealment planner must not err that way - it lets the route "
+            "hug ground the enemy is merely less likely to be watching and score "
+            "it as unobservable. 1.0 collapses the sector back to an all-round "
+            "threat. WARNING: the default 0.25 is an ASSUMPTION, not a "
+            "measurement - roughly 'three-quarters of attention on the stated "
+            "arc'. No trial data backs it. Sweep it before quoting any sectored "
+            "exposure number."
+        ),
+    )
     observer_height_m: float = Field(
         default=2.0,
         ge=0.0,
@@ -240,6 +271,60 @@ class ThreatModel(BaseModel):
             "which meant **the planner could not route against an elevated sensor at "
             "all** — and that is exactly the geometry where the canopy earns its "
             "keep, so :class:`CanopyOcclusion` had nothing to act on."
+        ),
+    )
+
+
+class StemPolicy(BaseModel):
+    """How much room to leave around a mapped stem, and how far the line may move.
+
+    ``clearance_margin_m`` is added to the airframe half-width to get the air gap
+    the refined route must keep. The default 0.5 m is the *geometric* minimum and
+    is deliberately conservative about nothing: N4's sweep showed **5x the margin
+    costs 1.3 % more distance** (0.50 m of air -> 1.016x, 2.40 m -> 1.029x), with
+    the cliff at 3.40 m where the 4.6 m mean spacing runs out.
+
+    🔴 The number that should drive this is not geometry, it is **tracking error**.
+    PX4 mission mode held cross-track to mean 0.42 m but **max 2.28 m** over B1, so
+    a route planned with 0.95 m of air can still be flown into a trunk by ordinary
+    tracking error. Raise the margin to cover the tracking the executor actually
+    achieves; the distance cost of doing so is close to free.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    clearance_margin_m: float = Field(default=0.5, ge=0.0)
+    min_half_width_m: float = Field(
+        default=4.0,
+        ge=0.0,
+        description=(
+            "Lateral room the refinement may use even where the concealment "
+            "corridor grants none. A route that cannot deviate cannot avoid a "
+            "trunk standing on it; spending this is a concealment cost and is "
+            "reported as such."
+        ),
+    )
+    max_half_width_m: float = Field(
+        default=8.0,
+        gt=0.0,
+        description=(
+            "Upper clamp, and the load-bearing one. Given A1's median 50 m "
+            "corridor an A* does not refine the route, it SHORTCUTS it — taking "
+            "the straight chord across every bend, which lost the concealment "
+            "shape and made clearance worse the first time this ran."
+        ),
+    )
+    density_per_ha: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Stated stand density, stems/ha, replacing the canopy-height inference "
+            "(fields/stem_density.py) on every treed cell. That inference is forestry "
+            "literature, not a measurement, and on the demo AO it says 520-1290 "
+            "stems/ha while the Gazebo forest is 107 — so a mission flown in SITL "
+            "must state the density of the world it flies, or its speed and "
+            "endurance are priced for a different forest. Operationally this is "
+            "the place for a stand-inventory figure."
         ),
     )
 
@@ -326,6 +411,22 @@ class LayerPaths(BaseModel):
     land_cover: Path | None = None
     point_cloud: Path | None = Field(default=None, description="ALS/UAV lidar LAZ/LAS 1.4.")
     roads: Path | None = None
+    stem_map: Path | None = Field(
+        default=None,
+        description=(
+            "Individual stem positions as a `*_trunks.csv` manifest (east_m, "
+            "north_m, base_z_m, radius_m, height_m -- HOME-RELATIVE, as written by "
+            "`droneplanner gz-world --forest-dsm`). Supplying it turns on the "
+            "stem-routing refinement (TEST-PLAN N4): the planner re-lays the line "
+            "between the mapped trunks at 0.5 m resolution instead of leaving them "
+            "to reactive avoidance, which is dead in flight.\n\n"
+            "WARNING: every manifest that exists is SYNTHETIC and is generated in a "
+            "band around the route planned WITHOUT it. No real stem map has ever "
+            "been ingested, and ALS stem positions carry 1-2 m of error against a "
+            "2.4 m clearance budget. This input demonstrates the planner can use a "
+            "stem map; it does not demonstrate that one can be built."
+        ),
+    )
     rail: Path | None = None
     buildings: Path | None = None
     culverts: Path | None = None
@@ -345,6 +446,7 @@ class Mission(BaseModel):
     threat: ThreatModel = ThreatModel()
     weights: Weights = Weights()
     altitude: AltitudePolicy = AltitudePolicy()
+    stem: StemPolicy = StemPolicy()
     layers: LayerPaths = LayerPaths()
     k_routes: int = Field(default=1, ge=1, description="Survivability redundancy (k routes).")
     seed: int = Field(default=0, ge=0, description="Master seed for reproducible runs.")
@@ -373,6 +475,22 @@ class Mission(BaseModel):
     )
     fiber_slack_factor: float = Field(
         default=1.0, ge=1.0, description="Fiber-used / track-length ratio (>=1)."
+    )
+    covered_radius_m: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Concealment is required only within this distance of the start (user, "
+            "2026-09-14: 'realistically only the first part has to be flown under "
+            "cover'). Inside it the drone flies below the canopy where it can and "
+            "drone exposure is costed; beyond it the drone flies over the canopy or "
+            "in the open, with no drone-exposure or cover term, and no stem-clutter "
+            "speed limit because it is above the stems. The cable's survivability "
+            "term applies everywhere — the fiber stays on the ground after the "
+            "aircraft has gone. None = the whole route (the pre-2026-09-23 "
+            "behaviour). Radial from the start rather than along the route so the "
+            "zone is a property of the ground, fixed before any route exists."
+        ),
     )
     corridor_half_width_max_m: float = Field(
         default=50.0,

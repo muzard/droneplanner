@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from droneplanner.model.mission import DroneSpec
 from droneplanner.planner.kinematics import (
     KinematicLimits,
+    amsl_vertical_rates,
     fillet_path,
     smooth_altitudes,
 )
@@ -120,3 +123,35 @@ def test_smooth_altitudes_flags_infeasible_climb() -> None:
     )
     assert viol == 1
     assert alts[1] >= 10.0  # stays in the navigable band despite the violation
+
+
+# --- SHORTFALLS 0b: the climb check runs in AGL and cannot see the terrain -----
+
+
+def test_amsl_rates_see_terrain_following_motion_the_agl_profile_hides() -> None:
+    """A constant-AGL route over rising ground climbs; the AGL profile says 0.00."""
+    ground = [0.0, 30.0, 60.0]
+    agl = [30.0, 30.0, 30.0]
+    seg = [100.0, 100.0]
+    climb, descent = amsl_vertical_rates(ground, agl, seg, cruise_speed_ms=6.0)
+    # 30 m up per 100 m travelled at 6 m/s = 1.8 m/s of real vertical motion.
+    assert climb == pytest.approx(1.8)
+    assert descent == 0.0
+    # The quantity the smoother constrains, on the same route, is exactly zero.
+    assert max(abs(agl[i] - agl[i - 1]) for i in range(1, len(agl))) == 0.0
+
+
+def test_amsl_rates_combine_terrain_and_altitude_change() -> None:
+    """Descending AGL over falling ground compounds; over rising ground cancels."""
+    seg = [100.0]
+    climb, descent = amsl_vertical_rates([50.0, 0.0], [30.0, 20.0], seg, cruise_speed_ms=6.0)
+    assert climb == 0.0
+    assert descent == pytest.approx(3.6)  # 60 m of real drop over 100 m at 6 m/s
+    # Climbing AGL against falling terrain nets out to level flight.
+    climb, desc = amsl_vertical_rates([50.0, 0.0], [30.0, 80.0], seg, cruise_speed_ms=6.0)
+    assert climb == 0.0 and desc == 0.0
+
+
+def test_amsl_rates_ignore_zero_length_segments() -> None:
+    climb, descent = amsl_vertical_rates([0.0, 0.0], [10.0, 20.0], [0.0], cruise_speed_ms=6.0)
+    assert climb == 0.0 and descent == 0.0

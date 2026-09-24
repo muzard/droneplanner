@@ -198,7 +198,9 @@ def test_a_cell_inside_the_sector_scores_above_an_identical_cell_outside_it() ->
         ThreatSector(azimuth_start_deg=45.0, azimuth_end_deg=135.0, observer=observer, label="east")
     ]
     plain = cumulative_exposure(dsm, grid, [observer])
-    sectored = cumulative_exposure(dsm, grid, [observer], sectors=sectors)
+    # vigilance 0.0 is the hard-mask reading this test was written for; the
+    # default is now a partially-attentive adversary, tested separately below.
+    sectored = cumulative_exposure(dsm, grid, [observer], sectors=sectors, off_axis_vigilance=0.0)
 
     assert plain[10, 15] == plain[10, 5]  # twins before the sector
     assert sectored[10, 15] == plain[10, 15]  # inside the arc: untouched
@@ -304,7 +306,7 @@ def test_an_unlisted_sector_observer_reaches_the_field() -> None:
     grid = _flat_grid(size)
     unlisted = grid.pixel_to_world(10, 10)
     sectors = [ThreatSector(azimuth_start_deg=45.0, azimuth_end_deg=135.0, observer=unlisted)]
-    field = cumulative_exposure(dsm, grid, [], sectors=sectors)
+    field = cumulative_exposure(dsm, grid, [], sectors=sectors, off_axis_vigilance=0.0)
     assert field[10, 15] == pytest.approx(1.0)
     assert field[10, 5] == 0.0
 
@@ -482,3 +484,134 @@ def test_a_rear_sector_produces_a_measurably_different_route() -> None:
     # route is free to take a shorter line through ground it was avoiding.
     assert sectored.objective_scores["mean_exposure"] <= all_round.objective_scores["mean_exposure"]
     assert sectored.objective_scores["path_cost"] != all_round.objective_scores["path_cost"]
+
+
+# --- Off-axis vigilance: a sector concentrates attention, it does not blind ------
+#
+# User, 2026-09-14: "realistically observers will be looking around, even by
+# accident." A hard mask is the optimistic direction, and a concealment planner
+# must never err that way — it lets the route hug ground the adversary is merely
+# less likely to be watching and score it as unobservable.
+
+_ARC = (0.0, 90.0)
+
+
+def _element(vigilance: float):
+    obs = Coordinate(x=50.0, y=50.0)
+    sector = ThreatSector(azimuth_start_deg=_ARC[0], azimuth_end_deg=_ARC[1], observer=obs)
+    return resolve_threat_elements([obs], [sector], vigilance)[0][0]
+
+
+def test_zero_vigilance_reproduces_the_hard_mask() -> None:
+    grid = _flat_grid(11)
+    weights = element_mask(grid, _element(0.0))
+    assert weights is not None
+    assert set(np.unique(weights)).issubset({0.0, 1.0})
+
+
+def test_off_axis_cells_get_a_reduced_but_nonzero_weight() -> None:
+    grid = _flat_grid(11)
+    weights = element_mask(grid, _element(0.25))
+    assert weights is not None
+    assert weights.max() == pytest.approx(1.0)
+    assert weights.min() == pytest.approx(0.25)
+    # Every cell is either on-axis or off-axis — nothing in between.
+    assert set(np.unique(np.round(weights, 6))) == {0.25, 1.0}
+
+
+def test_full_vigilance_is_an_all_round_threat_and_builds_no_raster() -> None:
+    """Attention spread evenly over every bearing is not a restriction at all."""
+    element = _element(1.0)
+    assert not element.restricted
+    assert element_mask(_flat_grid(11), element) is None
+
+
+def test_the_point_path_applies_the_same_weight_as_the_raster() -> None:
+    """The flown re-score and the raster must not disagree about attention."""
+    from droneplanner.fields.sectors import element_bearing_weight
+
+    grid = _flat_grid(11)
+    element = _element(0.25)
+    weights = element_mask(grid, element)
+    assert weights is not None
+    for x, y in ((90.0, 90.0), (10.0, 10.0), (90.0, 10.0), (10.0, 90.0)):
+        rc = grid.world_to_pixel(Coordinate(x=x, y=y))
+        assert element_bearing_weight(element, x, y) == pytest.approx(float(weights[rc]))
+
+
+def test_vigilance_is_still_visible_so_a_sector_cannot_erase_a_threat() -> None:
+    element = _element(0.25)
+    # Due south of the observer is well outside the 0-90 arc.
+    assert element_sees_bearing(element, 50.0, 0.0)
+    assert element_sees_bearing(element, 50.0, 0.0) == (
+        element_mask(_flat_grid(11), element) is not None
+    )
+
+
+def test_exposure_sits_between_the_hard_mask_and_an_all_round_threat() -> None:
+    """The whole point: partial attention is partial exposure, not zero."""
+    grid = _flat_grid(21)
+    dsm = np.zeros((grid.rows, grid.cols), dtype=np.float64)
+    obs = [Coordinate(x=105.0, y=105.0)]
+    sector = ThreatSector(azimuth_start_deg=0.0, azimuth_end_deg=90.0, observer=obs[0])
+
+    masked = cumulative_exposure(dsm, grid, obs, sectors=[sector], off_axis_vigilance=0.0)
+    partial = cumulative_exposure(dsm, grid, obs, sectors=[sector], off_axis_vigilance=0.25)
+    all_round = cumulative_exposure(dsm, grid, obs, sectors=[sector], off_axis_vigilance=1.0)
+
+    assert masked.mean() < partial.mean() < all_round.mean()
+    # And it must never promise more cover than the hard mask did.
+    assert np.all(partial >= masked - 1e-6)
+
+
+def test_the_mission_default_is_not_a_hard_mask() -> None:
+    """A model that assumed a blind adversary shipped for a month; pin the fix."""
+    assert ThreatModel().off_axis_vigilance > 0.0
+
+
+def test_vigilance_reaches_the_FLOWN_score_not_just_the_raster() -> None:
+    """The invariant C3 named, and the one adding vigilance broke for an afternoon.
+
+    ``build_cost_surface`` and ``corridor.py``'s flown re-score are two separate
+    call paths into the viewshed. When ``off_axis_vigilance`` was added with a
+    default of 0.0, the raster got the mission's value and the flown re-score
+    silently kept the hard mask — so a route scored ``mean_exposure`` 0.25 and
+    ``mean_exposure_flown`` 0.000 at the same time, which is not a rounding
+    disagreement but two different adversaries.
+    """
+    mission, dtm, dsm, grid = build_demo(size=90)
+    away = grid.pixel_to_world(0, 0)
+    sectors = tuple(
+        ThreatSector(
+            azimuth_start_deg=(bearing_deg(obs.x, obs.y, away.x, away.y) - 30.0) % 360.0,
+            azimuth_end_deg=(bearing_deg(obs.x, obs.y, away.x, away.y) + 30.0) % 360.0,
+            observer=obs,
+        )
+        for obs in mission.threat.observers
+    )
+
+    def scores(vigilance: float) -> tuple[float, float]:
+        m = mission.model_copy(
+            update={
+                "threat": ThreatModel(
+                    observers=mission.threat.observers,
+                    sectors=sectors,
+                    off_axis_vigilance=vigilance,
+                )
+            }
+        )
+        plan, _ = plan_over_terrain(m, dtm, dsm, grid)
+        return (
+            float(plan.objective_scores["mean_exposure"]),
+            float(plan.objective_scores["mean_exposure_flown"]),
+        )
+
+    blind_raster, blind_flown = scores(0.0)
+    watchful_raster, watchful_flown = scores(0.5)
+
+    # Raising vigilance must raise BOTH scores, not just the raster one.
+    assert watchful_raster > blind_raster
+    assert watchful_flown > blind_flown, (
+        "the flown re-score ignored off_axis_vigilance — it is grading the route "
+        "against a blind adversary while the raster grades a watchful one"
+    )

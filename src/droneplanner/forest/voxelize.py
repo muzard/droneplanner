@@ -32,6 +32,19 @@ class VoxelGrid:
         """Height (m above z0) of the *center* of a z-level."""
         return (level + 0.5) * self.voxel_size_z
 
+    def ground_level(self, ground_elev_m: np.ndarray) -> np.ndarray:
+        """Per-column z-level index of the ground surface, from a DTM.
+
+        ``z0`` is an *absolute* elevation (the cloud's minimum), so a level index
+        means the same height everywhere only over flat ground. Downstream code
+        that reports heights **above each column's ground** needs this offset;
+        without it a column standing 30 m higher reads its own canopy 30 m too
+        high, and a column standing above ``z0`` reads the void beneath it as
+        navigable (SHORTFALLS 1b).
+        """
+        levels = np.floor((np.asarray(ground_elev_m) - self.z0) / self.voxel_size_z)
+        return np.clip(levels, 0, max(self.nz - 1, 0)).astype(np.int64)
+
 
 def voxelize(
     points_xyz: np.ndarray,

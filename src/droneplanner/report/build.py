@@ -236,6 +236,68 @@ def build_report(
         )
 
     # --- Kinematic / tether feasibility (Software-Spec §3.6) ---
+    # --- Stem routing (TEST-PLAN N4) -------------------------------------------
+    scores = plan.objective_scores
+    if "stem_min_clearance_m" in scores:
+        breaches = int(scores.get("stem_sub_clearance_samples", 0.0))
+        min_gap = scores["stem_min_clearance_m"]
+        if breaches > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.CRITICAL,
+                    code="stem_clearance_breach",
+                    message=(
+                        f"{breaches} point(s) on the route pass within the airframe's "
+                        f"clearance of a mapped stem (minimum gap {min_gap:.2f} m). The "
+                        "route cannot be flown as drawn: reactive avoidance is measured "
+                        "not to recover this (TEST-PLAN N2)"
+                    ),
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    code="stem_routed",
+                    message=(
+                        f"route threads the mapped stems with {min_gap:.2f} m minimum "
+                        f"clearance for {scores.get('stem_route_length_ratio', 1.0):.3f}x "
+                        f"the unrefined length, "
+                        f"{100 * scores.get('stem_mapped_fraction', 0.0):.0f} % "
+                        "of it inside the mapped area. ⚠️ The stem map is SYNTHETIC and was "
+                        "generated around the route planned without it — this shows the "
+                        "planner can use a stem map, not that the aircraft will miss real trees"
+                    ),
+                )
+            )
+        failed = int(scores.get("stem_windows_failed", 0.0))
+        if failed > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.WARNING,
+                    code="stem_route_blocked",
+                    message=(
+                        f"{failed} stretch(es) of route had no admissible path between the "
+                        "mapped stems and kept their unrefined line. Widen the corridor "
+                        "there or accept that those stretches rely on onboard avoidance"
+                    ),
+                )
+            )
+        snapped = int(scores.get("stem_vertices_snapped", 0.0))
+        if snapped > 0:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    code="stem_vertex_moved",
+                    message=(
+                        f"{snapped} waypoint(s) sat inside the clearance requirement of a "
+                        "mapped stem and were moved. The concealment search placed them "
+                        "without seeing the trunks — the most concealed vertices are the "
+                        "least flyable (TEST-PLAN N4 composition failure)"
+                    ),
+                )
+            )
+
     if plan.kinematics is not None:
         kin = plan.kinematics
         if kin.reversals > 0:
@@ -272,6 +334,50 @@ def build_report(
                     ),
                 )
             )
+        # The altitude smoother works in AGL, so terrain-driven vertical motion is
+        # invisible to `climb_violations`. Measure the true rate and say so when the
+        # commanded profile is steeper than the airframe will fly.
+        #
+        # 🔴 FLOWN 2026-09-14 (`sim-logs/mvp/16_53_04.ulg`): this route predicted
+        # 2.56 m/s of true descent and PX4 flew a maximum of **1.51 m/s**, with
+        # ZERO samples over 2.0 — so the warning does NOT mean a limit is violated.
+        # PX4 clamps descent at `MPC_Z_VEL_MAX_DN` (1.5 in SITL) and spreads a
+        # descent across neighbouring legs, so a per-leg rate is the wrong frame
+        # (the same thing RUNBOOK §4.9 found for B1's wp23). The climb side went the
+        # other way: predicted 2.17, flown **2.82**, because PX4 sawtooths around
+        # each terrain-following step and so exceeds the per-leg average.
+        # The per-leg model is therefore wrong in BOTH directions, exactly like the
+        # tether model before its PX4 prior. What the number really indicates is
+        # **tracking lag** — the vehicle cannot hold a profile this steep and will
+        # fall behind it — and the consequence of that lag is terrain clearance,
+        # which `terrain_profile.py` already guarantees separately (predicted
+        # 6.59 m here, flown 7.05 m, 0 samples under 5 m).
+        # WARNING, not a feasibility break: constraining the AMSL rate changes which
+        # routes are produced, which is an operator decision (SHORTFALLS 0b).
+        over_climb = kin.max_climb_rate_amsl_ms > mission.drone.climb_rate_max_ms
+        over_descent = kin.max_descent_rate_amsl_ms > mission.drone.descent_rate_max_ms
+        if over_climb or over_descent:
+            findings.append(
+                Finding(
+                    severity=Severity.WARNING,
+                    code="vertical_rate_amsl_exceeded",
+                    message=(
+                        f"true vertical motion reaches {kin.max_climb_rate_amsl_ms:.2f} m/s up / "
+                        f"{kin.max_descent_rate_amsl_ms:.2f} m/s down against a "
+                        f"{mission.drone.climb_rate_max_ms:.2f} / "
+                        f"{mission.drone.descent_rate_max_ms:.2f} m/s airframe. The altitude "
+                        f"smoother constrains the AGL profile only, which reports "
+                        f"{kin.max_climb_rate_ms:.2f} / {kin.max_descent_rate_ms:.2f} m/s here — "
+                        "terrain-following motion is invisible to it. This is a TRACKING-LAG "
+                        "indicator, not a violation: PX4 clamps descent at MPC_Z_VEL_MAX_DN "
+                        "and spreads it across legs, so it flies a shallower profile than "
+                        "commanded and falls behind rather than exceeding a limit (measured "
+                        "2026-09-14: 2.56 m/s predicted, 1.51 m/s flown). Terrain clearance "
+                        "under the lagging profile is guaranteed separately"
+                    ),
+                )
+            )
+
         # CFIT: clearance is scored against the front-loaded descent profile PX4
         # actually flies, not linear interpolation. This is the check that would
         # have caught the 2026-07-24 terrain crash — it is NO-GO, not a warning.
@@ -375,13 +481,31 @@ def build_report(
                 severity=Severity.WARNING,
                 code="stem_speed_capped",
                 message=(
-                    f"{end.speed_capped_legs} leg(s) are slowed below cruise by modelled "
-                    f"stem spacing, giving an effective {end.effective_speed_ms:.2f} m/s "
-                    f"against a {plan.vertices[0].speed_hint_ms:.2f} m/s airframe cruise. "
-                    "Stem density is derived from canopy height by a self-thinning "
-                    "relation (fields/stem_density.py), NOT measured — no stem inventory "
-                    "has been ingested. The ordering (taller stands are sparser) is more "
+                    f"{end.speed_capped_legs} leg(s) are slowed below cruise by stem density, "
+                    f"giving an effective {end.effective_speed_ms:.2f} m/s against a "
+                    f"{plan.vertices[0].speed_hint_ms:.2f} m/s airframe cruise, at the speeds "
+                    "the onboard local planner flew clean in the harness. Unless the "
+                    "mission states stem.density_per_ha, density is inferred from canopy "
+                    "height by a self-thinning relation (fields/stem_density.py), NOT "
+                    "measured; the ordering (taller stands are sparser) is more "
                     "trustworthy than the absolute density"
+                ),
+            )
+        )
+
+    beyond_m = float(plan.objective_scores.get("below_canopy_beyond_envelope_m", 0.0))
+    if beyond_m > 0.0:
+        findings.append(
+            Finding(
+                severity=Severity.CRITICAL,
+                code="stem_density_beyond_envelope",
+                message=(
+                    f"{beyond_m:.0f} m of the route is flown below the canopy through stands "
+                    "denser than the onboard planner has been shown to fly (400 stems/ha, "
+                    "fields/stem_density.ONBOARD_PLANNING_ENVELOPE — at 800 it stalls or "
+                    "strikes at every speed tried). The flight time charged there is an "
+                    "extrapolation. Shrink the concealment zone (covered_radius_m), route "
+                    "round the stand, or state a measured density (stem.density_per_ha)"
                 ),
             )
         )

@@ -133,8 +133,30 @@ class KinematicReport(BaseModel):
     tightest_turn_radius_m: float = Field(ge=0)
     turn_violations: int = Field(default=0, ge=0)
     reversals: int = Field(default=0, ge=0)
-    max_climb_rate_ms: float = Field(default=0.0, ge=0)
-    max_descent_rate_ms: float = Field(default=0.0, ge=0)
+    max_climb_rate_ms: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Peak rate of change of the AGL profile. This is what the altitude "
+            "smoother constrains, and it is NOT the airframe's vertical rate — over "
+            "rising ground a constant-AGL route has 0.00 m/s here while climbing "
+            "steadily. See max_climb_rate_amsl_ms (SHORTFALLS 0b)."
+        ),
+    )
+    max_descent_rate_ms: float = Field(default=0.0, ge=0, description="AGL profile; see above.")
+    max_climb_rate_amsl_ms: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Peak TRUE vertical rate (ground elevation + AGL), which is what the "
+            "airframe's climb limit actually applies to. Measured and reported only "
+            "— the smoother still constrains the AGL profile, so a route can be "
+            "emitted with this over the limit (raises vertical_rate_amsl_exceeded)."
+        ),
+    )
+    max_descent_rate_amsl_ms: float = Field(
+        default=0.0, ge=0, description="Peak true vertical descent rate; see above."
+    )
     climb_violations: int = Field(default=0, ge=0)
     min_clearance_agl_m: float = Field(
         default=math.inf,

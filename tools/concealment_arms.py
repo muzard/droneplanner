@@ -94,6 +94,7 @@ def write_mission(
     observer_height_m: float | None = None,
     detection: DetectionModel | None = None,
     sectors: Sequence[tuple[float, float]] = (),
+    off_axis_vigilance: float | None = None,
 ) -> Path:
     m = copy.deepcopy(base)
     m["name"] = arm.name
@@ -125,6 +126,8 @@ def write_mission(
         m.setdefault("threat", {})["observer_height_m"] = observer_height_m
     if detection is not None:
         m.setdefault("threat", {})["detection"] = detection.model_dump(mode="json")
+    if off_axis_vigilance is not None:
+        m.setdefault("threat", {})["off_axis_vigilance"] = off_axis_vigilance
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(yaml.safe_dump(m, sort_keys=False))
     return dest
@@ -175,6 +178,7 @@ def rescore(
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
     sectors: Sequence[tuple[float, float]] = (),
+    vigilance: float = 0.0,
 ) -> dict:
     """What an observer could actually detect along the *flown* trajectory.
 
@@ -227,11 +231,19 @@ def rescore(
             rng = math.hypot(x - o[0], y - o[1])
             if rng > detect_range_m:
                 continue
+            attention = 1.0
             if sectors and not any(
                 arc_contains(bearing_deg(o[0], o[1], x, y), start, end) for start, end in sectors
             ):
-                continue  # this observer is not searching that bearing
-            w = _point_weight(dsm, rc_o, eye, rc, z, grid.cell_size_m, canopy, detection, span_m)
+                # Off-axis the observer is less attentive, not blind. Must match
+                # fields/sectors.element_bearing_weight or the re-score and the
+                # raster describe two different adversaries.
+                attention = vigilance
+            if attention <= 0.0:
+                continue
+            w = attention * _point_weight(
+                dsm, rc_o, eye, rc, z, grid.cell_size_m, canopy, detection, span_m
+            )
             if w > 0.0:
                 miss *= 1.0 - w
                 nearest = rng if nearest is None else min(nearest, rng)
@@ -351,6 +363,15 @@ def main() -> int:
         help="Observer's optic magnification (1 unaided, 7 and 12 are the cases that matter).",
     )
     ap.add_argument(
+        "--off-axis-vigilance",
+        type=float,
+        default=None,
+        help=(
+            "Detection weight OUTSIDE the stated arcs, as a fraction of on-axis "
+            "(default 0.25). 0.0 is the old hard mask - a blind adversary."
+        ),
+    )
+    ap.add_argument(
         "--sector",
         type=float,
         nargs=2,
@@ -404,6 +425,7 @@ def main() -> int:
         f"{args.detect_range:,.0f} m | canopy gap {canopy.sub_canopy_gap_fraction:g} "
         f"above {canopy.sub_canopy_max_elev_deg:g} deg | sectors "
         + (", ".join(f"{s:g}-{e:g}" for s, e in sectors) if sectors else "all-round")
+        + f" | off-axis vigilance {args.off_axis_vigilance}"
         + "\n"
     )
     hdr = (
@@ -423,6 +445,7 @@ def main() -> int:
             args.observer_height,
             detection,
             sectors,
+            args.off_axis_vigilance,
         )
         rep = plan(mp, args.out / arm.name)
         base_obs = base.get("threat", {}).get("observers", [])
@@ -441,6 +464,7 @@ def main() -> int:
             canopy=canopy,
             detection=detection,
             sectors=sectors,
+            vigilance=(0.0 if args.off_axis_vigilance is None else args.off_axis_vigilance),
         )
         o = rep["objective_scores"]
         print(

@@ -27,7 +27,12 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from droneplanner.crossings import ROAD_COST
-from droneplanner.fields.altitude import band_raster, canopy_height, planned_flight_agl
+from droneplanner.fields.altitude import (
+    band_raster,
+    canopy_height,
+    concealment_mask,
+    planned_flight_agl,
+)
 from droneplanner.fields.snag import build_snag
 from droneplanner.fields.stem_density import build_stem_clutter
 from droneplanner.fields.survivability import build_survivability
@@ -90,6 +95,7 @@ def build_cost_surface(
     # Which way each observer is facing (roadmap C3). Empty sectors reproduce the
     # all-round threat exactly, so this is inert until a mission states a posture.
     sectors = mission.threat.sectors
+    vigilance = mission.threat.off_axis_vigilance
 
     # Two viewsheds, two different objects — see SHORTFALLS item 1. The DRONE is
     # scored at the altitude it will fly (terrain + planned AGL: under the canopy
@@ -98,8 +104,15 @@ def build_cost_surface(
     # ground level made the concealment metric — and the route it drives —
     # systematically wrong about the thing being hidden.
     chm = canopy_height(dtm, dsm)
-    flight_agl = planned_flight_agl(chm, mission.cruise_agl_m, mission.altitude, flyability)
-    flight_band = band_raster(chm, mission.cruise_agl_m, mission.altitude, flyability)
+    # Where concealment is required at all (Mission.covered_radius_m). Outside it
+    # the drone flies over the canopy, and its exposure is not costed.
+    covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
+    flight_agl = planned_flight_agl(
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+    )
+    flight_band = band_raster(
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+    )
     eye_m = mission.threat.observer_height_m
     exposure = cumulative_exposure(
         dsm,
@@ -111,6 +124,7 @@ def build_cost_surface(
         detection=mission.threat.detection,
         target_span_m=mission.drone.rotor_span_m,
         sectors=sectors,
+        off_axis_vigilance=vigilance,
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -120,14 +134,27 @@ def build_cost_surface(
     # surface. It therefore stays a **pure line-of-sight openness proxy** — and is
     # named `ground_los`, not `exposure_*`, so it cannot be read as a detection
     # probability now that `exposure` is one (roadmap C2; SHORTFALLS records this).
-    ground_los = cumulative_exposure(dsm, grid, observers, observer_height_m=eye_m, sectors=sectors)
+    ground_los = cumulative_exposure(
+        dsm,
+        grid,
+        observers,
+        observer_height_m=eye_m,
+        sectors=sectors,
+        off_axis_vigilance=vigilance,
+    )
 
     # Sectors reach survivability twice, and deliberately so: the observer-bound
     # ones are already inside `ground_los` (they masked the viewshed), while the
     # bearing-only ones have no sensor to run a viewshed from and become the
     # terrain-masking openness term the formula has named since M0.
     survivability = build_survivability(
-        dtm, dsm, grid, observers, openness=ground_los, sectors=sectors
+        dtm,
+        dsm,
+        grid,
+        observers,
+        openness=ground_los,
+        sectors=sectors,
+        off_axis_vigilance=vigilance,
     )
     snag = build_snag((grid.rows, grid.cols))
     ridge = ridge_penalty(dtm)
@@ -142,15 +169,20 @@ def build_cost_surface(
         chm,
         cruise_speed_ms=mission.drone.cruise_speed_ms,
         min_canopy_m=mission.altitude.min_canopy_m,
+        among_stems=flight_band >= 2,
+        density_override_per_ha=mission.stem.density_per_ha,
     )
 
+    # Drone concealment terms apply only inside the concealment zone; the cable's
+    # survivability applies everywhere, because the fiber stays on the ground.
+    zone = np.ones(chm.shape, np.float32) if covered is None else covered.astype(np.float32)
     raw = (
         BASE_COST
-        + weights.exposure * exposure
+        + weights.exposure * exposure * zone
         + weights.survivability * survivability
         + weights.snag * snag
         + weights.clutter * clutter["clutter_time_penalty"]
-        - weights.cover * drainage * COVER_SCALE
+        - weights.cover * drainage * COVER_SCALE * zone
     )
 
     components = {
@@ -159,6 +191,7 @@ def build_cost_surface(
         "flight_agl": flight_agl,
         "canopy_height": chm,
         "flight_band": flight_band.astype(np.float32),
+        "covered": zone,
         "survivability": survivability,
         "snag": snag,
         "ridge": ridge,

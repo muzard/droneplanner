@@ -137,6 +137,8 @@ class TestBuildStemClutter:
             "stem_density_per_ha",
             "stem_spacing_m",
             "max_reactive_speed_ms",
+            "max_speed_ms",
+            "beyond_envelope",
             "clutter_time_penalty",
         }
         # Open ground: no stems, no penalty, full cruise.
@@ -193,3 +195,42 @@ class TestRoutingBehaviour:
 
         assert lane not in rows_used(0.0)
         assert lane in rows_used(20.0)
+
+
+class TestOnboardPlanningEnvelope:
+    """The speed cap is the local planner's MEASURED envelope, not reactive coherence."""
+
+    def test_anchors_are_reproduced(self) -> None:
+        from droneplanner.fields.stem_density import (
+            ONBOARD_PLANNING_ENVELOPE,
+            max_planned_speed_ms,
+        )
+
+        for density, speed in ONBOARD_PLANNING_ENVELOPE:
+            got = max_planned_speed_ms(np.array([density]), cruise_speed_ms=6.0)[0]
+            assert got == pytest.approx(speed)
+
+    def test_beyond_the_envelope_is_flagged_and_still_monotone(self) -> None:
+        from droneplanner.fields.stem_density import beyond_envelope, max_planned_speed_ms
+
+        d = np.array([400.0, 800.0, 1600.0])
+        v = max_planned_speed_ms(d, cruise_speed_ms=6.0)
+        assert v[0] > v[1] > v[2] > 0.0
+        assert list(beyond_envelope(d)) == [False, True, True]
+
+    def test_cells_flown_over_the_canopy_are_not_slowed(self) -> None:
+        chm = np.array([[22.0, 22.0]], dtype=np.float32)
+        among = np.array([[True, False]])
+        out = build_stem_clutter(chm, cruise_speed_ms=CRUISE, min_canopy_m=12.0, among_stems=among)
+        assert out["max_speed_ms"][0, 0] < CRUISE
+        assert out["max_speed_ms"][0, 1] == pytest.approx(CRUISE)
+        assert out["beyond_envelope"][0, 1] == 0.0
+
+    def test_a_stated_density_overrides_the_canopy_inference(self) -> None:
+        chm = np.array([[0.0, 22.0]], dtype=np.float32)
+        out = build_stem_clutter(
+            chm, cruise_speed_ms=CRUISE, min_canopy_m=12.0, density_override_per_ha=107.0
+        )
+        assert out["stem_density_per_ha"][0, 0] == 0.0  # open ground stays open
+        assert out["stem_density_per_ha"][0, 1] == pytest.approx(107.0)
+        assert out["max_speed_ms"][0, 1] == pytest.approx(min(6.0, CRUISE))

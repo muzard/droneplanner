@@ -15,7 +15,9 @@ from pathlib import Path
 import numpy as np
 
 from droneplanner.crossings.roads import rasterize_roads
+from droneplanner.fields.stems import StemMap, load_stem_manifest
 from droneplanner.forest.navigability import FlyabilityConfig, FlyabilityField, build_flyability
+from droneplanner.forest.stem_detect import detect_stems
 from droneplanner.forest.voxelize import voxelize
 from droneplanner.io.mavlink import write_plan
 from droneplanner.io.mission import load_mission
@@ -78,8 +80,12 @@ def _load_road_mask(mission: Mission, grid: Grid) -> np.ndarray | None:
     return rasterize_roads(read_vector(mission.layers.roads), grid)
 
 
-def _load_flyability(mission: Mission, grid: Grid) -> FlyabilityField | None:
-    """Voxelize the lidar layer and build the forest flyability field, or None."""
+def _load_flyability(mission: Mission, grid: Grid, dtm: np.ndarray) -> FlyabilityField | None:
+    """Voxelize the lidar layer and build the forest flyability field, or None.
+
+    ``dtm`` is the height datum: voxel levels count from the cloud's minimum
+    elevation, and the band this returns is consumed as AGL (SHORTFALLS 1b).
+    """
     if mission.layers.point_cloud is None:
         return None
     pc = read_pointcloud(mission.layers.point_cloud)
@@ -93,7 +99,46 @@ def _load_flyability(mission: Mission, grid: Grid) -> FlyabilityField | None:
         z_max=float(z.max()) + VOXEL_SIZE_Z,
         voxel_size_z=VOXEL_SIZE_Z,
     )
-    return build_flyability(voxels, FlyabilityConfig.from_drone(mission.drone))
+    return build_flyability(
+        voxels,
+        FlyabilityConfig.from_drone(mission.drone),
+        ground_level=voxels.ground_level(dtm),
+    )
+
+
+def _load_stems(mission: Mission, grid: Grid, dtm: np.ndarray) -> StemMap | None:
+    """The stem map: detected from lidar if there is any, else a manifest.
+
+    Two sources, deliberately ordered. ``layers.point_cloud`` is the **real** path
+    — individual stems detected from canopy-penetrating returns, which is what
+    SHORTFALLS M2 says the programme needs. ``layers.stem_map`` is a pre-built
+    manifest, which today means the *synthetic* trunks ``gz-world --forest-dsm``
+    generates for the simulator, and is how the stem-routing capability was first
+    flown (330/330, 0 strikes).
+
+    A supplied manifest wins, because it is an explicit statement of where the
+    stems are and should not be silently overridden by a detector's opinion.
+    """
+    if mission.layers.stem_map is not None:
+        return load_stem_manifest(mission.layers.stem_map, mission.start)
+    if mission.layers.point_cloud is None:
+        return None
+    pc = read_pointcloud(mission.layers.point_cloud)
+    if pc.count == 0:
+        return None
+    stems, stats = detect_stems(pc.xyz, dtm, grid)
+    _log.info(
+        "stem detection: %d points, %d in trunk slice, %d clusters -> %d stems "
+        "(rejected: %d sparse, %d thin, %d wide)",
+        stats.points_in,
+        stats.points_in_slice,
+        stats.clusters,
+        stats.detected,
+        stats.rejected_few_points,
+        stats.rejected_thin,
+        stats.rejected_wide,
+    )
+    return stems if len(stems) > 0 else None
 
 
 def _plan_route(mission: Mission, route_index: int) -> tuple[Plan, bool, bool]:
@@ -108,7 +153,8 @@ def _plan_route(mission: Mission, route_index: int) -> tuple[Plan, bool, bool]:
         return straight_line_plan(mission, route_index=route_index), False, False
     dtm, dsm, grid = terrain
     road_mask = _load_road_mask(mission, grid)
-    flyability = _load_flyability(mission, grid)
+    flyability = _load_flyability(mission, grid, dtm)
+    stems = _load_stems(mission, grid, dtm)
     plan, _surface = plan_over_terrain(
         mission,
         dtm,
@@ -117,6 +163,7 @@ def _plan_route(mission: Mission, route_index: int) -> tuple[Plan, bool, bool]:
         road_mask=road_mask,
         flyability=flyability,
         route_index=route_index,
+        stems=stems,
     )
     return plan, True, flyability is not None
 

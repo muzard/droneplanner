@@ -21,7 +21,7 @@ All geometry is in the projected world CRS (meters).
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from droneplanner.model.mission import DroneSpec
@@ -71,6 +71,34 @@ class KinematicSummary:
         # Reversals are allowed at low payout speed, so they do not break
         # feasibility — only turn-radius and climb-rate violations do.
         return self.turn_violations == 0 and self.climb_violations == 0
+
+
+def amsl_vertical_rates(
+    ground_elev_m: Sequence[float],
+    altitude_agl_m: Sequence[float],
+    seg_dists: Sequence[float],
+    cruise_speed_ms: float,
+) -> tuple[float, float]:
+    """Peak true (climb, descent) vertical rates along a trajectory, m/s.
+
+    ``smooth_altitudes`` constrains the **AGL** profile, but the airframe's
+    climb/descent limit applies to actual vertical motion — ground elevation plus
+    AGL. Over relief the two disagree completely: a constant-AGL route reports
+    0.00 m/s from the AGL profile while genuinely climbing with the terrain
+    (SHORTFALLS 0b). This measures what the airframe is really asked to do.
+    """
+    climb = descent = 0.0
+    for i in range(1, len(altitude_agl_m)):
+        d = seg_dists[i - 1]
+        if d <= 0.0:
+            continue
+        dz = (ground_elev_m[i] + altitude_agl_m[i]) - (ground_elev_m[i - 1] + altitude_agl_m[i - 1])
+        rate = abs(dz) / d * cruise_speed_ms
+        if dz >= 0.0:
+            climb = max(climb, rate)
+        else:
+            descent = max(descent, rate)
+    return climb, descent
 
 
 def _unit(a: Point, b: Point) -> tuple[float, float, float]:

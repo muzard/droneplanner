@@ -56,7 +56,10 @@ import numpy as np
 
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import DetectionModel, ThreatSector
+from droneplanner.model.mission import (
+    DetectionModel,
+    ThreatSector,
+)
 
 # How far away a bearing-only threat is assumed to observe/engage from. Terrain
 # beyond this is not credited with masking the cell, because a threat can stand
@@ -83,11 +86,20 @@ class ThreatElement:
     arcs: tuple[tuple[float, float], ...] = ()
     detection: DetectionModel | None = None
     labels: tuple[str, ...] = ()
+    off_axis_vigilance: float = 0.0
+    """Weight applied off-axis, as a fraction of the on-axis weight. A sector
+    concentrates attention; it does not blind the observer everywhere else
+    (``ThreatModel.off_axis_vigilance``)."""
 
     @property
     def restricted(self) -> bool:
-        """True when this element only searches part of the circle."""
-        return bool(self.arcs)
+        """True when this element's attention is unevenly distributed at all.
+
+        An element whose off-axis weight is 1.0 searches every bearing equally,
+        so it is *not* restricted however many arcs it names — treating it as
+        restricted would build a uniform weight raster for nothing.
+        """
+        return bool(self.arcs) and self.off_axis_vigilance < 1.0
 
 
 def arc_span_deg(start_deg: float, end_deg: float) -> float:
@@ -109,7 +121,11 @@ def bearing_deg(from_x: float, from_y: float, to_x: float, to_y: float) -> float
     return math.degrees(math.atan2(to_x - from_x, to_y - from_y)) % 360.0
 
 
-def _views_of(observer: Coordinate, bound: Sequence[ThreatSector]) -> tuple[ThreatElement, ...]:
+def _views_of(
+    observer: Coordinate,
+    bound: Sequence[ThreatSector],
+    off_axis_vigilance: float = 0.0,
+) -> tuple[ThreatElement, ...]:
     """One observer's elements: the full circle, or one element per distinct optic."""
     if not bound:
         return (ThreatElement(observer=observer),)
@@ -129,13 +145,16 @@ def _views_of(observer: Coordinate, bound: Sequence[ThreatSector]) -> tuple[Thre
             arcs=tuple((s.azimuth_start_deg, s.azimuth_end_deg) for s in members),
             detection=detection,
             labels=tuple(s.label for s in members if s.label is not None),
+            off_axis_vigilance=off_axis_vigilance,
         )
         for detection, members in groups
     )
 
 
 def resolve_threat_elements(
-    observers: Sequence[Coordinate], sectors: Sequence[ThreatSector] = ()
+    observers: Sequence[Coordinate],
+    sectors: Sequence[ThreatSector] = (),
+    off_axis_vigilance: float = 0.0,
 ) -> tuple[tuple[ThreatElement, ...], ...]:
     """Bind sectors to observers: one inner tuple **per observer**, in order.
 
@@ -172,15 +191,22 @@ def resolve_threat_elements(
         bound[key].append(sector)
 
     return tuple(
-        _views_of(observer, bound.get((observer.x, observer.y), []))
+        _views_of(observer, bound.get((observer.x, observer.y), []), off_axis_vigilance)
         for observer in list(observers) + extra
     )
 
 
 def element_mask(grid: Grid, element: ThreatElement) -> np.ndarray | None:
-    """Bool raster of the cells ``element`` is searching, or ``None`` for all of them.
+    """Per-cell attention weight for ``element``, or ``None`` when it is uniform.
 
-    The mask is applied to the *result* of a viewshed, never to its march:
+    **This is a weight in [0, 1], not a boolean mask.** Cells on a searched bearing
+    get 1.0; every other cell gets ``element.off_axis_vigilance`` rather than zero,
+    because a search sector says where an observer is *concentrating*, not where
+    they are blind (user, 2026-09-14: "realistically observers will be looking
+    around, even by accident"). With vigilance 0.0 this reproduces the original
+    hard mask exactly.
+
+    The weight is applied to the *result* of a viewshed, never to its march:
     occlusion is geometry and does not care where the observer is looking, so
     intervening terrain must still raise the running horizon.
     """
@@ -192,31 +218,38 @@ def element_mask(grid: Grid, element: ThreatElement) -> np.ndarray | None:
     ys = d * (cc + 0.5) + e * (rr + 0.5) + f
     azimuth = np.degrees(np.arctan2(xs - element.observer.x, ys - element.observer.y)) % 360.0
 
-    mask = np.zeros((grid.rows, grid.cols), dtype=bool)
+    on_axis = np.zeros((grid.rows, grid.cols), dtype=bool)
     for start, end in element.arcs:
         span = arc_span_deg(start, end)
         if span >= 360.0:
             return None
-        mask |= ((azimuth - start) % 360.0) <= span
-    # The observer's own cell has no bearing from itself; leave it visible so a
-    # sector cannot make an observer invisible to itself.
+        on_axis |= ((azimuth - start) % 360.0) <= span
+    # The observer's own cell has no bearing from itself; leave it fully weighted
+    # so a sector cannot make an observer invisible to itself.
     r0, c0 = grid.world_to_pixel(element.observer)
-    mask[r0, c0] = True
-    return mask
+    on_axis[r0, c0] = True
+    return np.where(on_axis, 1.0, element.off_axis_vigilance).astype(np.float32)
+
+
+def element_bearing_weight(element: ThreatElement, x: float, y: float) -> float:
+    """``element``'s attention weight on the bearing of world point ``(x, y)``.
+
+    The single-point twin of :func:`element_mask` — the flown re-score and the
+    raster must not disagree about which way an observer is facing, *or* about how
+    much they see when facing elsewhere.
+    """
+    if not element.restricted:
+        return 1.0
+    if (x, y) == (element.observer.x, element.observer.y):
+        return 1.0
+    azimuth = bearing_deg(element.observer.x, element.observer.y, x, y)
+    on_axis = any(arc_contains(azimuth, start, end) for start, end in element.arcs)
+    return 1.0 if on_axis else element.off_axis_vigilance
 
 
 def element_sees_bearing(element: ThreatElement, x: float, y: float) -> bool:
-    """Does ``element`` search the bearing of world point ``(x, y)``?
-
-    The single-point twin of :func:`element_mask` — the flown re-score and the
-    raster must not disagree about which way an observer is facing.
-    """
-    if not element.restricted:
-        return True
-    if (x, y) == (element.observer.x, element.observer.y):
-        return True
-    azimuth = bearing_deg(element.observer.x, element.observer.y, x, y)
-    return any(arc_contains(azimuth, start, end) for start, end in element.arcs)
+    """Can ``element`` see that bearing at all? (weight strictly above zero)"""
+    return element_bearing_weight(element, x, y) > 0.0
 
 
 def bearing_only_sectors(sectors: Sequence[ThreatSector]) -> tuple[ThreatSector, ...]:
