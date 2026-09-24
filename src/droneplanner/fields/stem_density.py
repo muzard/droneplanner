@@ -47,7 +47,8 @@ densities and four speeds, so the mean is used here and the caveat is recorded.
 
 WHAT THIS BUYS, MEASURED
 On the demo AO it buys almost nothing, and that is the finding rather than a bug:
-its 12-22 m stands map to ~520-1290 stems/ha, i.e. **1.4-2.2 m spacing**, whereas
+its 12-22 m stands map to ~640-1460 stems/ha (2026-09-24 Askola fit; ~520-1290 on the
+literature anchor this was written with), whereas
 clearing the 4.00 m/s endurance floor needs **5.21 m / 92 stems/ha**. The whole
 available range sits an order of magnitude inside the infeasible region, so no
 amount of routing between stands recovers the mission. Proving the term *works*
@@ -58,18 +59,19 @@ FINNISH MANAGED FOREST ("talousmetsä") — CHECKED 2026-09-24
 Most Finnish forest is managed for wood: Luke's 2025 statistics put **13 %** of
 forest and poorly productive land under protection (6 % in the south, 20 % in the
 north), so the rest is talousmetsä, thinned to published targets. Those targets
-are the best available prior for stems/ha, and they corroborate the anchors above:
+were the best available prior for stems/ha; the anchors above are now FITTED to
+real stand data (Askola), and the Askola medians are in the right-hand column:
 
 ====================================  =========  ==============  =============
-development class (VMI11 share of      height      stems/ha         this module
-production forest land)                                              (N ~ H^-1.5)
+development class (VMI11 share of      height      stems/ha         Askola median
+production forest land)                              (Tapio)         (Metsäkeskus)
 ====================================  =========  ==============  =============
 seedling stand, taimikko (19 %)        < 7 m      2000+ small      open ground (*)
-young thinning stand (36 %)            7-16 m     1500-2500 before, 1291 @ 12 m
+young thinning stand (36 %)            7-16 m     1500-2500 before, 1671 @ 13 m
                                                   700-1200 after
                                                   first thinning
-advanced thinning stand (30 %)         16-22 m    ~500-900         838 @ 16 m
-mature stand, uudistuskypsä (13 %)     20-28 m    ~400-700         429 @ 25 m
+advanced thinning stand (30 %)         16-22 m    ~500-900         706 @ 22 m
+mature stand, uudistuskypsä (13 %)     20-28 m    ~400-700         494 @ 26 m
 ====================================  =========  ==============  =============
 
 (*) below ``AltitudePolicy.min_canopy_m`` the planner flies over, not under.
@@ -99,19 +101,25 @@ import numpy as np
 REFERENCE_HEIGHT_M = 20.0
 """Canopy height the reference density is quoted at."""
 
-REFERENCE_STEMS_PER_HA = 600.0
-"""Stems/ha of a mature managed stand at :data:`REFERENCE_HEIGHT_M`.
+REFERENCE_STEMS_PER_HA = 730.0
+"""Stems/ha of a managed stand at :data:`REFERENCE_HEIGHT_M`.
 
-Mid-range for managed temperate/boreal forest. TEST-PLAN B2 independently calls
-400 stems/ha "the *low* end of real managed forest", which brackets this from
-below.
+MEASURED 2026-09-24 on real Finnish stand data: the Metsäkeskus Metsävarakuviot
+download for Askola (southern Finland, CC BY 4.0), present-day dominant storey,
+4 900+ stands with dominant height 12-32 m, area-weighted log-log fit:
+**N = 43 026 · H^-1.36 → 727 stems/ha at 20 m**. The literature value it replaces
+(600) under-predicted the measured median by 29 % (IQR of the ratio 0.98-1.66).
+Medians by height: 1308 @ 13 m, 1015 @ 16 m, 723 @ 20 m, 637 @ 22 m, 574 @ 26 m.
+⚠️ One municipality, thinned talousmetsä; the ±30 % stem-count uncertainty of the
+source (``io/stand_data.py``) applies. Where stand data exists, use it directly
+(``layers.stand_data``) — this relation is the fallback.
 """
 
-THINNING_EXPONENT = 1.5
-"""``N ~ H^-exponent``. Reineke plus height-diameter allometry gives 1.5-2.1;
-the low end is used because it is the conservative choice *for this planner* —
-it predicts less density variation between stands, so it claims less benefit from
-routing between them."""
+THINNING_EXPONENT = 1.36
+"""``N ~ H^-exponent``, fitted on the same Askola stands (see above). Reineke plus
+height-diameter allometry gives 1.5-2.1 for unmanaged self-thinning; thinned
+managed stands come out flatter, because thinning — not competition — sets their
+density."""
 
 MIN_MODELLED_HEIGHT_M = 2.0
 """Below this a "stand" is scrub, not stems the model describes."""

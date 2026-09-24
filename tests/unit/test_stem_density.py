@@ -35,7 +35,7 @@ class TestDensityFromHeight:
 
     def test_reference_anchor_is_reproduced_exactly(self) -> None:
         chm = np.full((1, 1), 20.0, dtype=np.float32)
-        assert stem_density_per_ha(chm)[0, 0] == pytest.approx(600.0, rel=1e-4)
+        assert stem_density_per_ha(chm)[0, 0] == pytest.approx(730.0, rel=1e-4)
 
     def test_open_ground_has_no_stems(self) -> None:
         chm = np.array([[0.0, 1.0, 11.9, 12.0]], dtype=np.float32)
@@ -44,11 +44,11 @@ class TestDensityFromHeight:
         assert d[0][3] > 0.0
 
     def test_the_demo_ao_band_lands_where_measured(self) -> None:
-        """12-22 m stands -> ~520-1290 stems/ha, which is what the demo reports."""
+        """12-22 m stands -> ~640-1460 stems/ha on the Askola-fitted relation."""
         chm = np.array([[12.0, 22.0]], dtype=np.float32)
         d = stem_density_per_ha(chm, min_canopy_m=12.0)
-        assert d[0, 0] == pytest.approx(1291.0, rel=0.01)
-        assert d[0, 1] == pytest.approx(520.0, rel=0.01)
+        assert d[0, 0] == pytest.approx(1463.0, rel=0.01)
+        assert d[0, 1] == pytest.approx(641.0, rel=0.01)
 
 
 class TestSpacing:
@@ -96,7 +96,7 @@ class TestSpeedCap:
         """N3's headline, and the reason routing between stands cannot rescue N1.
 
         Clearing the 4.00 m/s endurance floor needs <=92 stems/ha. Under the
-        self-thinning relation that takes a **~70 m canopy** — taller than any
+        self-thinning relation that takes a **~90 m canopy** — taller than any
         managed forest — so the sparse-stand lever the TEST-PLAN hoped for does
         not exist at realistic stand heights.
         """
@@ -105,8 +105,8 @@ class TestSpeedCap:
             mean_stem_spacing_m(stem_density_per_ha(realistic)), cruise_speed_ms=CRUISE
         )
         assert np.all(speed < 4.0)
-        # It takes a redwood to get there.
-        tall = np.array([[70.0]], dtype=np.float32)
+        # It takes a redwood to get there (~90 m on the Askola-fitted relation).
+        tall = np.array([[100.0]], dtype=np.float32)
         assert (
             max_reactive_speed_ms(
                 mean_stem_spacing_m(stem_density_per_ha(tall)), cruise_speed_ms=CRUISE

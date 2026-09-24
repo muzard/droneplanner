@@ -96,3 +96,48 @@ def test_a_stated_density_still_wins_over_stand_data() -> None:
     )
     assert out["stem_density_per_ha"].tolist() == [[200.0, 200.0]]
     assert not out["stem_density_measured"].any()
+
+
+def _gpkg_current_model(tmp_path: Path) -> Path:
+    """The data model in the 2026 downloads: treestandclass + storeys."""
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    path = tmp_path / "mvk2.gpkg"
+    gpd.GeoDataFrame(
+        {"standid": [21]}, geometry=[box(X0, Y0, X0 + 100, Y0 + 100)], crs=CRS
+    ).to_file(path, layer="stand", driver="GPKG")
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE treestand (id INTEGER, treestandid INTEGER, standid INTEGER, "
+            "treestandclass TEXT)"
+        )
+        db.execute(
+            "CREATE TABLE treestandsummary (id INTEGER, treestandid INTEGER, "
+            "stemcount INTEGER, storey TEXT)"
+        )
+        db.execute("INSERT INTO treestand VALUES (1, 1, 21, '1')")  # inventory: ignored
+        db.execute("INSERT INTO treestand VALUES (2, 2, 21, '2')")  # present day
+        for sid, tid, count, storey in [
+            (1, 1, 2000, "1"),
+            (2, 2, 600, "1"),  # dominant
+            (3, 2, 1500, "2"),  # understory — below the flight band, left out
+            (4, 2, 40, "3"),  # overstory — trunks, counted
+        ]:
+            db.execute(
+                "INSERT INTO treestandsummary VALUES (?, ?, ?, ?)", (sid, tid, count, storey)
+            )
+    return path
+
+
+def test_the_current_data_model_is_read_and_the_understorey_left_out(tmp_path: Path) -> None:
+    assert read_stand_stemcounts(_gpkg_current_model(tmp_path)) == {21: 640.0}
+
+
+def test_an_unknown_data_model_is_refused_not_guessed(tmp_path: Path) -> None:
+    bad = tmp_path / "bad2.gpkg"
+    with sqlite3.connect(bad) as db:
+        db.execute("CREATE TABLE treestand (id INTEGER, standid INTEGER, treestandid INTEGER)")
+        db.execute("CREATE TABLE treestandsummary (treestandid INTEGER, stemcount INTEGER)")
+    with pytest.raises(StandDataError, match="unknown"):
+        read_stand_stemcounts(bad)

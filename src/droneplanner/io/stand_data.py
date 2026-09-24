@@ -11,13 +11,20 @@ a tree-stand summary with ``stemcount`` (stems/ha), ``meanheight`` and
 ``meandiameter``. Speed and endurance are priced on stems/ha, so this is the most
 valuable number the programme can get, and it covers most of Finland's forest.
 
-SCHEMA (Metsäkeskus, *Metsävarakuvio GeoPackage -ohje*, 30.4.2021)
+SCHEMA — two versions, both read (checked on a real download, Askola, 2026-09-24)
 ``stand`` (polygons, ``standid``) → ``treestand`` (``standid``, ``treestandid``,
-``type``: 1 inventoried, **2 updated to the present**, 3 forecast +10 years) →
-``treestandsummary`` (``treestandid``, ``stemcount``, ...). Only ``type = 2`` is
-read: it is the inventory grown forward to today. ⚠️ Metsäkeskus has announced a
-data-model renewal (*Tietomallin uudistus*); if a newer download lacks these
-tables this reader fails loudly rather than guessing.
+class) → ``treestandsummary`` (``treestandid``, ``stemcount``, ...). The class
+column says which estimate a tree stand is; only **"present-day" (2)** is read —
+the inventory grown forward to today, not the raw inventory (1) or the +10-year
+forecast (3):
+
+* 2021 guide (*Metsävarakuvio GeoPackage -ohje*): ``treestand.type``.
+* Current data model (*Tietomallin uudistus*, in the 2026 downloads):
+  ``treestand.treestandclass`` (text code), and summaries split by ``storey`` —
+  1 dominant, 2 understory, 3 overstory, 4 retention trees, 5 remote sensing.
+  Trunks at flight height are storeys 1, 3 and 4, summed; the understory is
+  left out (it is mostly below the 5-10 m band — a stated simplification), and
+  storey 5 is used only when a stand has nothing else.
 
 HOW MUCH TO TRUST IT
 The published accuracy target is on mean height ±2 m, mean diameter ±3 cm and
@@ -34,18 +41,16 @@ updates.
 from __future__ import annotations
 
 import sqlite3
+import warnings
 from pathlib import Path
 
 import numpy as np
 
 from droneplanner.model.grid import Grid
 
-_QUERY = """
-SELECT treestand.standid, treestandsummary.stemcount
-FROM treestand
-JOIN treestandsummary ON treestand.treestandid = treestandsummary.treestandid
-WHERE treestand.type = 2 AND treestandsummary.stemcount IS NOT NULL
-"""
+_TRUNK_STOREYS = {"1", "3", "4"}
+_UNDERSTOREY = "2"
+_REMOTE_SENSING = "5"
 
 
 class StandDataError(RuntimeError):
@@ -53,16 +58,47 @@ class StandDataError(RuntimeError):
 
 
 def read_stand_stemcounts(path: Path) -> dict[int, float]:
-    """``standid -> stems/ha`` from the present-day tree-stand summaries."""
+    """``standid -> stems/ha`` at flight height, from the present-day summaries."""
     try:
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
-            rows = db.execute(_QUERY).fetchall()
+            stand_cols = {r[1] for r in db.execute("PRAGMA table_info(treestand)")}
+            summary_cols = {r[1] for r in db.execute("PRAGMA table_info(treestandsummary)")}
+            if not stand_cols or not summary_cols:
+                raise StandDataError(
+                    f"{path}: not a Metsävarakuviot GeoPackage (no treestand/"
+                    "treestandsummary tables)"
+                )
+            if "treestandclass" in stand_cols:
+                klass = "treestandclass"
+            elif "type" in stand_cols:
+                klass = "type"
+            else:
+                raise StandDataError(
+                    f"{path}: treestand has neither 'treestandclass' nor 'type' — "
+                    "an unknown Metsävarakuviot data model; not guessing"
+                )
+            storey = "s.storey" if "storey" in summary_cols else "'1'"
+            rows = db.execute(
+                f"SELECT t.standid, s.stemcount, CAST({storey} AS TEXT) "
+                "FROM treestand t JOIN treestandsummary s ON t.treestandid = s.treestandid "
+                f"WHERE CAST(t.{klass} AS TEXT) = '2' AND s.stemcount IS NOT NULL"
+            ).fetchall()
     except sqlite3.Error as exc:
         raise StandDataError(
             f"{path}: not a Metsävarakuviot GeoPackage (stand/treestand/"
             f"treestandsummary tables): {exc}"
         ) from exc
-    return {int(standid): float(count) for standid, count in rows}
+    trunks: dict[int, float] = {}
+    remote: dict[int, float] = {}
+    for standid, count, level in rows:
+        sid = int(standid)
+        if level in _TRUNK_STOREYS:
+            trunks[sid] = trunks.get(sid, 0.0) + float(count)
+        elif level == _REMOTE_SENSING:
+            remote[sid] = remote.get(sid, 0.0) + float(count)
+    for sid, count in remote.items():
+        trunks.setdefault(sid, count)
+    return trunks
 
 
 def stand_density_raster(path: Path, grid: Grid) -> np.ndarray:
@@ -72,7 +108,11 @@ def stand_density_raster(path: Path, grid: Grid) -> np.ndarray:
     from rasterio.transform import Affine
 
     counts = read_stand_stemcounts(path)
-    stands = gpd.read_file(path, layer="stand")
+    with warnings.catch_warnings():
+        # The real files store "Measured 3D Polygon"; pyogrio drops M and Z is
+        # ignored by rasterize — say it once here, not on every read.
+        warnings.filterwarnings("ignore", message="Measured \\(M\\) geometry types")
+        stands = gpd.read_file(path, layer="stand")
     if "standid" not in stands.columns:
         raise StandDataError(f"{path}: 'stand' layer has no standid column")
     if stands.crs is None:

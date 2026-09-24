@@ -320,7 +320,7 @@ class StemPolicy(BaseModel):
         description=(
             "Stated stand density, stems/ha, replacing the canopy-height inference "
             "(fields/stem_density.py) on every treed cell. That inference is forestry "
-            "literature, not a measurement, and on the demo AO it says 520-1290 "
+            "literature fitted to one municipality, and on the demo AO it says 640-1460 "
             "stems/ha while the Gazebo forest is 107 — so a mission flown in SITL "
             "must state the density of the world it flies, or its speed and "
             "endurance are priced for a different forest. Operationally this is "

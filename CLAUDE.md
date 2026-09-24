@@ -466,8 +466,20 @@ a large part of it is talousmetsää."* Detail and sources in the
   diameter (±3 cm) and basal area (±3 m²/ha) on 8 stands in 10 — stem count is
   derived, roughly ±30 %. A planning prior only (user rule: never depended on in
   flight); staleness errs *denser*, since stands are thinned and felled between
-  updates. ⚠️ Metsäkeskus has announced a data-model renewal; the reader fails
-  loudly if the tables change. Not yet run on a real download.
+  updates.
+* ✅ **Run on a real download (Askola, 13 MB zip, `data/metsakeskus/`, gitignored)
+  — and the data model had already changed**: `treestand.type` is now
+  `treestandclass` (present-day = '2') and summaries are split by `storey`. The
+  reader handles both and refuses an unknown one. Trunks at flight height = storeys
+  1+3+4; understory left out. Rasterises 7 959 stands in 1.6 s, reprojects fine.
+* 📊 **Askola, measured** (present-day, dominant storey): advanced thinning
+  **706 stems/ha** (IQR 565-887, 21.8 m), mature **494** (400-580, 25.8 m), young
+  thinning 1671 (13 m). Stands ≥ 16 m dominant height — the ones to fly under —
+  are **56 % of stand area, median 640 (IQR 506-846, p90 1139)** → a **~1.1 km**
+  zone at the median (table above).
+* 🔧 **The canopy-height relation was 29 % low** against those stands. Refitted:
+  **730 stems/ha at 20 m, exponent 1.36** (was 600 / 1.5 from literature) —
+  `fields/stem_density.py`. One municipality; use stand data where it exists.
 
 ## ✅ STEM DETECTION FROM LIDAR (2026-09-14) — `forest/stem_detect.py`
 `layers.point_cloud` → `pipeline._load_stems` → detected `StemMap` → the stem
