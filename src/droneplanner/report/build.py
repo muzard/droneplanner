@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from droneplanner.fields.sectors import describe_threat_sectors
+from droneplanner.fields.stem_density import ONBOARD_PLANNING_ENVELOPE
 from droneplanner.model.mission import Mission
 from droneplanner.model.plan import CrossingMethod, FlightBand, FlyabilityClass, Plan
 from droneplanner.model.report import (
@@ -509,11 +510,13 @@ def build_report(
                 code="stem_density_beyond_envelope",
                 message=(
                     f"{beyond_m:.0f} m of the route is flown below the canopy through stands "
-                    "denser than the onboard planner has been shown to fly (400 stems/ha, "
-                    "fields/stem_density.ONBOARD_PLANNING_ENVELOPE — at 800 it stalls or "
-                    "strikes at every speed tried). The flight time charged there is an "
-                    "extrapolation. Shrink the concealment zone (covered_radius_m), route "
-                    "round the stand, or state a measured density (stem.density_per_ha)"
+                    "denser than the onboard planner has been shown to fly "
+                    f"({ONBOARD_PLANNING_ENVELOPE[-1][0]:.0f} stems/ha at "
+                    f"{ONBOARD_PLANNING_ENVELOPE[-1][1]:.1f} m/s, "
+                    "fields/stem_density.ONBOARD_PLANNING_ENVELOPE). The flight time charged "
+                    "there is an extrapolation. Shrink the concealment zone "
+                    "(covered_radius_m), route round the stand, or state a measured density "
+                    "(stem.density_per_ha, layers.stand_data)"
                 ),
             )
         )

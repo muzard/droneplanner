@@ -81,8 +81,9 @@ targets thin down to, not a table value.
 
 🔑 **What it means for the aircraft.** The stands tall enough to fly *under* —
 advanced thinning and mature, ~43 % of production forest land — sit at roughly
-**400-900 stems/ha**, i.e. right at and beyond the onboard planner's measured
-envelope (:data:`ONBOARD_PLANNING_ENVELOPE`). Young thinning stands are denser
+**400-900 stems/ha**: inside the onboard planner's measured envelope since
+2026-09-24 (:data:`ONBOARD_PLANNING_ENVELOPE`, 4.0-2.0 m/s across that range),
+though flown in SITL only at 200 and 400. Young thinning stands are denser
 still and their live crowns reach down into the 5-10 m band the aircraft would fly
 in; a trunk-only stem count flatters them. Thinned talousmetsä is *easier* than an
 unmanaged stand of the same height (fewer stems, less understory after pre-harvest
@@ -186,33 +187,47 @@ def max_reactive_speed_ms(
 
 ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
     (107.0, 6.0),
-    (200.0, 3.0),
-    (400.0, 2.0),
+    (200.0, 5.0),
+    (400.0, 4.0),
+    (500.0, 3.0),
+    (600.0, 3.0),
+    (800.0, 2.5),
+    (1000.0, 1.5),
+    (1200.0, 0.75),
 )
 """``(stems/ha, fastest clean speed m/s)`` for the onboard local planner.
 
-MEASURED 2026-09-23 in ``droneflight``'s accel/jerk-limited harness
-(`reactive.fly_with_local_planner`), oracle depth sensor, 90 deg FOV, 30 m range:
+MEASURED 2026-09-24 with ``droneflight/tools/envelope_sweep.py``: the harness
+(`reactive.fly_with_local_planner`) flying the measured PX4 offboard response
+(0.3 s dead time + 0.4 s lag, drawn per seed from inside the fit), 10 Hz control,
+oracle depth sensor, 90 deg FOV, 30 m range, truth navigation, 1200 m of Poisson
+forest (trunk radii 0.08-0.25 m), seeds 10-13. An anchor is the fastest speed at
+which **all four seeds reach the goal with 0 strikes and > 0.15 m of air**:
 
-========  ===========================================  ==========================
-stems/ha  result                                       source
-========  ===========================================  ==========================
-107       **0 strikes over 5.2 km at 6.0 m/s** (+0.81 m)  the B2 dense manifest
-200       0 at 3.0 (+0.92 m); 1 per 1.2 km at 6.0      Poisson, r 0.08-0.25 m
-400       0 at 2.0 (+0.55 m); 0 at 3.0 but +0.05 m     Poisson
-800       **stalls or strikes at 2, 3 and 6 m/s**      Poisson — outside envelope
-========  ===========================================  ==========================
+========  =====  ==============  ============================================
+stems/ha  m/s    min air gap     next step up / notes
+========  =====  ==============  ============================================
+107       6.0    +0.55 m         airframe cruise (+0.81 m over the 5.2 km manifest)
+200       5.0    +0.41 m         not tried above 5
+400       4.0    +0.28 m
+500       3.0    +0.27 m
+600       3.0    +0.34 m
+800       2.5    +0.36 m
+1000      1.5    +0.26 m         ⚠️ a seed STALLED at 1.0 (no strike): stalls exist here
+1200      0.75   +0.38 m         not tried faster; 1.0 and 1.5 failed before the fixes
+========  =====  ==============  ============================================
 
-400/ha at 3.0 m/s was clean by five centimetres, so the envelope takes 2.0 there.
-Past the last anchor the onboard planner has not been shown to work at all:
-:func:`max_planned_speed_ms` extrapolates (speed inversely proportional to
-density) so a flight time can still be computed, and :func:`beyond_envelope` marks
-those cells so the report can say the number rests on nothing.
+The previous envelope (2026-09-23: 107 -> 6, 200 -> 3, 400 -> 2, 800 fails) was
+measured before four planner defects were fixed — see ``droneflight/CLAUDE.md``,
+"the loop found four more defects": prediction from the wrong dynamics model,
+a speed-blind pursuit lookahead that deadlocked, and no momentum limit. The
+same fixes took two GPS-denied SITL contacts to a clean flight (fix5).
 
-⚠️ The harness is the one that predicted the wrong *mechanism* for reactive
-avoidance before B2 (see ``droneflight/reactive.py``). It now carries PX4's
-accel/jerk limits and reproduced B2's strike ordering, but this envelope is
-**unflown** until the SITL local-planner flight.
+⚠️ **Harness numbers.** SITL has flown this planner at 200/ha (3.0 m/s, clean
+GPS-denied) and 400/ha (2.0 m/s) only; every faster anchor is unflown. And the
+harness did NOT reproduce the two SITL contacts the fixes came from — it is
+necessary, not sufficient. Past 1200 the extrapolation (speed inversely
+proportional to density) rests on nothing, and :func:`beyond_envelope` says so.
 
 Replaces :func:`max_reactive_speed_ms` as the planner's speed cap: the reactive
 policy it modelled is dead in flight (N2, 34-41 strikes), so capping speed by

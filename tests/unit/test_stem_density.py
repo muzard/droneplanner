@@ -214,7 +214,7 @@ class TestOnboardPlanningEnvelope:
     def test_beyond_the_envelope_is_flagged_and_still_monotone(self) -> None:
         from droneplanner.fields.stem_density import beyond_envelope, max_planned_speed_ms
 
-        d = np.array([400.0, 800.0, 1600.0])
+        d = np.array([800.0, 1600.0, 3200.0])
         v = max_planned_speed_ms(d, cruise_speed_ms=6.0)
         assert v[0] > v[1] > v[2] > 0.0
         assert list(beyond_envelope(d)) == [False, True, True]

@@ -41,8 +41,10 @@ SOLVE_DENSITIES: tuple[float, ...] = (
     600.0,
     700.0,
     800.0,
+    900.0,
     1000.0,
     1200.0,
+    1500.0,
 )
 SOLVE_STEP_M = 100.0
 SOLVE_MAX_M = 5000.0
