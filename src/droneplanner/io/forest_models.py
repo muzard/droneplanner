@@ -119,11 +119,16 @@ def generate_trunks(
     rotor_span_m: float = 0.9,
     seed: int = 0,
     within_m: float | None = None,
+    density_per_ha: np.ndarray | None = None,
 ) -> tuple[list[TrunkModel], ForestStats]:
     """Place trunks where the planner believed there was cover, near the route.
 
     ``within_m`` limits the forest to that distance of ``home`` — the mission's
     concealment zone, outside which the route flies over the canopy.
+
+    ``density_per_ha`` (per cell, e.g. measured stand data) replaces the uniform
+    ``stems_per_ha``: each forested cell gets a Poisson draw of its own expected
+    count, so the world carries the density the plan was priced on.
     """
     if stems_per_ha <= 0.0:
         raise ValueError("stems_per_ha must be positive")
@@ -143,12 +148,23 @@ def generate_trunks(
     if not len(cells):
         return [], ForestStats(0, 0.0, stems_per_ha, 0.0, False, 0.0, 0)
 
-    target = max(1, round(area_ha * stems_per_ha))
-    subsampled = target > max_stems
-    count = min(target, max_stems)
-
     rng = np.random.default_rng(seed)
-    chosen = rng.choice(len(cells), size=count, replace=True)
+    if density_per_ha is not None:
+        expected = np.clip(density_per_ha[cells[:, 0], cells[:, 1]], 0.0, None) * (
+            cell_area / _SQM_PER_HA
+        )
+        stems_per_ha = float(expected.sum() / area_ha)
+        subsampled = expected.sum() > max_stems
+        if subsampled:
+            expected = expected * (max_stems / expected.sum())
+        per_cell = rng.poisson(expected)
+        chosen = np.repeat(np.arange(len(cells)), per_cell)
+        count = len(chosen)
+    else:
+        target = max(1, round(area_ha * stems_per_ha))
+        subsampled = target > max_stems
+        count = min(target, max_stems)
+        chosen = rng.choice(len(cells), size=count, replace=True)
     jitter = rng.uniform(-0.5, 0.5, size=(count, 2))
 
     trunks: list[TrunkModel] = []
