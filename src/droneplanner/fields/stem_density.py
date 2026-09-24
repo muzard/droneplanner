@@ -147,7 +147,9 @@ def max_reactive_speed_ms(
     if reaction_time_s <= 0.0:
         raise ValueError("reaction_time_s must be positive")
     spacing = np.asarray(spacing_m, dtype=np.float32)
-    return np.minimum(spacing / reaction_time_s, cruise_speed_ms).astype(np.float32)
+    # Typed local: numpy 2.4's stubs (CI's Python 3.11 job) call this chain Any.
+    capped: np.ndarray = np.minimum(spacing / reaction_time_s, cruise_speed_ms).astype(np.float32)
+    return capped
 
 
 ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
