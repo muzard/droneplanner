@@ -213,6 +213,7 @@ def build_cost_surface(
         + weights.survivability * survivability
         + weights.snag * snag
         + weights.clutter * clutter["clutter_time_penalty"]
+        + weights.cable_on_crowns * _crown_laydown(chm, flight_band, mission, grid)
         - weights.cover * drainage * COVER_SCALE * zone
     )
 
@@ -322,3 +323,18 @@ def _canopy_openings(mission: Mission, chm: np.ndarray, grid: Grid) -> np.ndarra
     open_ground = chm < OPENING_HEIGHT_M
     out: np.ndarray = binary_dilation(open_ground, structure=np.ones((3, 3), dtype=bool))
     return out.astype(np.float32)
+
+
+def _crown_laydown(
+    chm: np.ndarray, flight_band: np.ndarray, mission: Mission, grid: Grid
+) -> np.ndarray:
+    """1 where the drone flies OVER canopy with no opening — the fiber settles on the
+    crowns there (laydown/settle.py). 0 when ``weights.cable_on_crowns`` is 0."""
+    from droneplanner.laydown.settle import CROWN_SETTLE_M
+
+    if mission.weights.cable_on_crowns <= 0.0:
+        return np.zeros(chm.shape, dtype=np.float32)
+    over = flight_band < 2  # not flown among the stems
+    opening = _canopy_openings(mission, chm, grid) > 0.5
+    out: np.ndarray = (over & (chm >= CROWN_SETTLE_M) & ~opening).astype(np.float32)
+    return out

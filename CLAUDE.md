@@ -493,6 +493,19 @@ routes), fly low through openings for the cable's sake (costs endurance), or acc
 and state it. ⚠️ Bounded model: crown length = what certainly does not reach the
 ground; no wind drift, no crown-closure physics, no hanging spans at descents.
 
+**Decision support — `weights.cable_on_crowns` (opt-in, default 0 = routes unchanged):**
+a per-metre penalty on cells flown over canopy ≥ 3 m with no opening.
+
+| AO | weight | route | fiber on crowns | below canopy | energy |
+|---|---|---|---|---|---|
+| demo MVP | 0 → 0.5 | 5180 → 4879 m | 3024 → **67 m** | 1227 → **0 m** | 0.82 → 0.63 |
+| **Askola 600 m (real gaps)** | 0 → **1** | 5469 → **5606 m** | 1322 → **214 m (−84 %)** | 595 → 555 m | 0.98 → 0.99 |
+
+On the synthetic demo AO the trade is all-or-nothing (its canopy has no openings, and
+exposure is zero, so nothing holds the route under) — the same shape as `clutter`
+there. **On the real AO it is cheap: −84 % fiber on crowns for +2.5 % route and −7 %
+below-canopy flight** — but that sortie was already at the battery's edge (0.99).
+
 ### ⬆️ OVER THE CANOPY WHEN UNDER IS UNPASSABLE — with the operator told first (2026-09-25)
 User: *"Keep [crown-aware] opt-in and do some kind of system for it to rise over the
 canopy if it looks unpassable below. The operator should also be informed of that

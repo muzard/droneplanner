@@ -420,6 +420,18 @@ class Weights(BaseModel):
             "concealment posture the whole program exists for."
         ),
     )
+    cable_on_crowns: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "How hard to route AWAY from flying over closed canopy, where the laid "
+            "fiber settles on the crowns instead of the ground (laydown/settle.py, "
+            "roadmap C7): a per-metre penalty on cells flown over canopy >= 3 m with "
+            "no opening. 0 (default) keeps every route unchanged; the report measures "
+            "the crown length either way (finding cable_on_crowns). Whether the cable's "
+            "survival is worth the route change is the operator's call."
+        ),
+    )
 
 
 class LayerPaths(BaseModel):

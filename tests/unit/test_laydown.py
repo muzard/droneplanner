@@ -44,3 +44,36 @@ def test_without_an_opening_raster_only_open_ground_catches_it() -> None:
     verts = [_v(5.0, FlightBand.CANOPY_TOP), _v(15.0, FlightBand.CANOPY_TOP)]
     got = cable_settle_lengths(verts, chm, grid, None)
     assert got["cable_on_crowns_m"] == 10.0 and got["cable_on_ground_m"] == 0.0
+
+
+def test_the_cable_weight_steers_the_uncovered_route_onto_open_ground() -> None:
+    """Opt-in ``weights.cable_on_crowns``: outside the concealment zone the aircraft
+    flies over the canopy, so the fiber lies on the crowns — unless the route takes
+    the clearing next to the forest."""
+    from droneplanner.fields.composite import build_cost_surface
+    from droneplanner.planner.corridor import plan_corridor
+    from tests.fixtures.synthetic import make_mission
+
+    cell, n = 25.0, 31
+    grid = Grid(transform=(cell, 0.0, 0.0, 0.0, -cell, n * cell), rows=n, cols=n, crs="EPSG:32633")
+    dtm = np.zeros((n, n), dtype=np.float32)
+    dsm = np.full((n, n), 20.0, dtype=np.float32)  # closed forest
+    dsm[n // 2 - 4, :] = 0.0  # a cleared ride 100 m off the straight line
+    start, end = grid.pixel_to_world(n // 2, 1), grid.pixel_to_world(n // 2, n - 2)
+    base = make_mission(
+        name="ride",
+        start={"x": start.x, "y": start.y},
+        end={"x": end.x, "y": end.y},
+        waypoint_spacing_m=cell,
+        covered_radius_m=50.0,
+    )
+
+    def crowns(w: float) -> float:
+        m = base.model_copy(
+            update={"weights": base.weights.model_copy(update={"cable_on_crowns": w})}
+        )
+        plan = plan_corridor(m, build_cost_surface(dtm, dsm, grid, m))
+        return plan.objective_scores["cable_on_crowns_m"]
+
+    assert crowns(0.0) > 400.0
+    assert crowns(2.0) < 0.5 * crowns(0.0)
