@@ -87,13 +87,15 @@ def _plan(
     }
 
 
-def solve_as_is(ao: Path, mission_file: str) -> None:
+def solve_as_is(
+    ao: Path, mission_file: str, workers: int | None = None, max_radius: float = SOLVE_MAX_M
+) -> None:
     """Largest covered radius that closes, with the mission's OWN density sources
     (stand data / canopy inference) — the answer for a real AO."""
     from concurrent.futures import ProcessPoolExecutor
 
-    radii = [SOLVE_STEP_M * k for k in range(1, int(SOLVE_MAX_M / SOLVE_STEP_M) + 1)]
-    with ProcessPoolExecutor() as ex:
+    radii = [SOLVE_STEP_M * k for k in range(1, int(max_radius / SOLVE_STEP_M) + 1)]
+    with ProcessPoolExecutor(max_workers=workers) as ex:
         rows = list(
             ex.map(
                 _plan_as_is,
@@ -102,15 +104,23 @@ def solve_as_is(ao: Path, mission_file: str) -> None:
                 [mission_file] * len(radii),
             )
         )
-    print(f"{'radius':>8}{'energy':>8}{'time':>7}{'below':>7}{'measured':>9}  verdict")
+    print(f"{'radius':>8}{'energy':>8}{'time':>7}{'below':>7}{'measured':>9}{'beyond':>7}  verdict")
     largest = None
     for row in rows:
+        verdict = "closes" if row["closes"] else "NO-GO"
+        if row["beyond"] > 0:
+            verdict += " (beyond envelope)" if row["closes"] else ""
         print(
             f"{row['radius']:>8.0f}{row['energy']:>8.2f}{row['time_min']:>6.1f}m"
-            f"{row['below']:>7.0f}{row['measured']:>9.0f}  {'closes' if row['closes'] else 'NO-GO'}"
+            f"{row['below']:>7.0f}{row['measured']:>9.0f}{row['beyond']:>7.0f}  {verdict}"
         )
     for row in rows:
-        if not row["closes"]:
+        # 🔴 A radius that closes only by flying stands denser than the onboard
+        # planner has been shown to fly is NOT a closing radius: the planner calls
+        # it CRITICAL (stem_density_beyond_envelope), and the flight time charged
+        # there is an extrapolation. The first version checked energy only and
+        # returned 400 m on Askola's measured zone — a NO-GO plan.
+        if not row["closes"] or row["beyond"] > 0:
             break
         largest = row["radius"]
     print(
@@ -140,6 +150,7 @@ def _plan_as_is(ao: Path, radius: float, mission_file: str) -> dict[str, float]:
             )
         ),
         "measured": plan.objective_scores.get("below_canopy_density_measured_m", 0.0),
+        "beyond": plan.objective_scores.get("below_canopy_beyond_envelope_m", 0.0),
     }
 
 
@@ -216,9 +227,11 @@ def main() -> int:
         help="With --solve: sweep the radius only, keeping the mission's own density "
         "(stand data / canopy inference) — for a real AO.",
     )
+    ap.add_argument("--workers", type=int, default=None, help="Processes (default: all cores).")
+    ap.add_argument("--max-radius", type=float, default=SOLVE_MAX_M, help="--as-is sweep ceiling.")
     args = ap.parse_args()
     if args.solve and args.as_is:
-        solve_as_is(args.ao, args.mission)
+        solve_as_is(args.ao, args.mission, args.workers, args.max_radius)
         return 0
     if args.solve:
         solve(args.ao, args.mission)

@@ -13,7 +13,9 @@ So altitude is now **surface-relative, and as low as the constraints allow**:
 * **target** — ``Mission.cruise_agl_m``, a height to be clamped, not held;
 * **floor** — ``AltitudePolicy.min_agl_m``: understory, rotor wash, DTM error;
 * **ceiling** — ``canopy_top - canopy_clearance_m`` wherever the canopy is tall
-  enough to be worth flying under, so the drone stays *inside* the stand.
+  enough to be worth flying under, so the drone stays *inside* the stand — and,
+  with ``AltitudePolicy.crown_ratio``, under the crown base too
+  (:func:`under_canopy_ceiling`).
 
 Three bands come out of it, and they mean different things to the risk report:
 ``BELOW_CANOPY`` (concealed, and betting on onboard obstacle avoidance),
@@ -58,6 +60,25 @@ def concealment_mask(grid: Grid, start: Coordinate, radius_m: float | None) -> n
     return mask
 
 
+def under_canopy_ceiling(chm: np.ndarray, policy: AltitudePolicy) -> np.ndarray:
+    """Highest AGL that stays under the crowns: the canopy top less its clearance,
+    and — with ``policy.crown_ratio`` — under the crown BASE less its clearance.
+
+    🔴 Why (2026-09-25, Askola measured zone): with the canopy-top ceiling alone
+    the route flew 10.5-12 m AGL in a 15 m stand that is 57 % spruce, 24 % pine
+    and 18 % broadleaf by stems (Metsäkeskus strata). Every one of those trees
+    has live crown at that height unless its crown ratio is under ~0.25 — so the
+    "below canopy" leg ran through the crown layer, where the obstacles are
+    branches metres wide, not 0.15 m trunks, and which no simulator here models.
+    ``min_canopy_m`` was always a stand-in for crown base; this states it.
+    """
+    ceil = np.asarray(chm, dtype=np.float64) - policy.canopy_clearance_m
+    if policy.crown_ratio is not None:
+        base = np.asarray(chm, dtype=np.float64) * (1.0 - policy.crown_ratio)
+        ceil = np.minimum(ceil, base - policy.crown_clearance_m)
+    return ceil
+
+
 def _band_from_canopy(
     chm_m: float, target_agl_m: float, policy: AltitudePolicy, *, covered: bool = True
 ) -> tuple[float, float, float, FlightBand]:
@@ -73,7 +94,7 @@ def _band_from_canopy(
     # Outside the concealment zone there is no reason to be among the stems:
     # going over is faster (no clutter speed limit) and needs no avoidance.
     if covered and chm_m >= policy.min_canopy_m:
-        ceil = chm_m - policy.canopy_clearance_m
+        ceil = float(under_canopy_ceiling(np.asarray(chm_m), policy))
         if ceil >= floor:  # room to get under it and still clear the ground
             return min(target, ceil), floor, ceil, FlightBand.BELOW_CANOPY
 
@@ -127,7 +148,7 @@ def planned_flight_agl(
     """
     floor = policy.min_agl_m
     target = max(target_agl_m, floor)
-    ceil = chm - policy.canopy_clearance_m
+    ceil = under_canopy_ceiling(chm, policy)
     enterable = (chm >= policy.min_canopy_m) & (ceil >= floor)
     zone = np.ones(chm.shape, dtype=bool) if covered is None else covered
     enterable = enterable & zone
@@ -159,7 +180,7 @@ def band_raster(
     zone = np.ones(chm.shape, dtype=bool) if covered is None else covered
     enterable = (
         (chm >= policy.min_canopy_m)
-        & ((chm - policy.canopy_clearance_m) >= policy.min_agl_m)
+        & (under_canopy_ceiling(chm, policy) >= policy.min_agl_m)
         & zone
     )
     # "Skim" means the canopy is what sets the altitude, not the target.

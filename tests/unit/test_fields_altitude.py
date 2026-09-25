@@ -169,3 +169,49 @@ class TestConcealmentZone:
         codes = band_raster(chm, 10.0, POLICY, covered=covered)
         assert codes[0, 0] == 2 and codes[0, 1] == 1
         assert agl[0, 0] < 20.0 < agl[0, 1]
+
+
+CROWNED = AltitudePolicy(crown_ratio=0.5, crown_clearance_m=1.0)
+
+
+def test_crown_ratio_holds_the_ceiling_under_the_crown_base() -> None:
+    """🔴 Askola, 2026-09-25: a 15 m, spruce-dominated stand flown at 10.5-12 m —
+    inside the live crowns. With a crown ratio the ceiling is the crown base less
+    its clearance, not the canopy top less 3 m."""
+    chm = np.full((1, 1), 22.0, dtype=np.float32)
+    pref, _floor, ceil, band = altitude_band_at(
+        (0, 0), chm=chm, target_agl_m=TARGET, policy=CROWNED
+    )
+    assert band is FlightBand.BELOW_CANOPY
+    assert ceil == 22.0 * 0.5 - 1.0  # crown base 11 m, not canopy top 22 - 3 = 19 m
+    assert pref == TARGET  # 10 m still fits under 10.0 -- the target equals the ceiling
+    pref, _floor, ceil, band = altitude_band_at(
+        (0, 0), chm=np.full((1, 1), 15.0, dtype=np.float32), target_agl_m=12.0, policy=CROWNED
+    )
+    assert band is FlightBand.BELOW_CANOPY
+    assert pref == ceil == 6.5  # pushed down out of the crowns, still over the 5 m floor
+
+
+def test_a_stand_whose_crowns_reach_the_floor_is_not_entered() -> None:
+    """Crown base 0.5 x 11 m = 5.5 m, less 1 m: no trunk space above a 5 m floor."""
+    chm = np.full((1, 1), 11.0, dtype=np.float32)
+    _pref, _floor, _ceil, band = altitude_band_at(
+        (0, 0),
+        chm=chm,
+        target_agl_m=TARGET,
+        policy=AltitudePolicy(min_canopy_m=8.0, crown_ratio=0.5),
+    )
+    assert band is FlightBand.CANOPY_TOP
+
+
+def test_crowned_raster_matches_the_per_cell_band_everywhere() -> None:
+    chm = _mixed_chm()
+    raster = planned_flight_agl(chm, TARGET, CROWNED)
+    codes = band_raster(chm, TARGET, CROWNED)
+    for r in range(chm.shape[0]):
+        for c in range(chm.shape[1]):
+            pref, _floor, _ceil, band = altitude_band_at(
+                (r, c), chm=chm, target_agl_m=TARGET, policy=CROWNED
+            )
+            assert raster[r, c] == np.float32(pref), f"cell {(r, c)} disagrees"
+            assert (codes[r, c] == 2) == (band is FlightBand.BELOW_CANOPY)

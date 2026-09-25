@@ -365,6 +365,21 @@ class AltitudePolicy(BaseModel):
             "Lidar replaces this guess with a measured free window."
         ),
     )
+    crown_ratio: float | None = Field(
+        default=None,
+        gt=0,
+        lt=1,
+        description=(
+            "Live-crown length / tree height. When set, the below-canopy ceiling is "
+            "also held under the crown BASE (height x (1 - crown_ratio)) by "
+            "crown_clearance_m, not just under the canopy top — so the aircraft flies "
+            "in trunk space, not through the crowns. None = the canopy-top ceiling "
+            "only (every baseline before 2026-09-25)."
+        ),
+    )
+    crown_clearance_m: float = Field(
+        default=1.0, ge=0, description="Vertical gap kept below the crown base."
+    )
 
 
 class Weights(BaseModel):

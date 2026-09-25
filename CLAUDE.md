@@ -469,6 +469,56 @@ of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
 everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
 endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
 
+### 🔴 Askola, MEASURED zone + crowns (2026-09-25, later the same day)
+**1. The 600 m result above was priced on inference, not measurement.** Within
+600 m of the original start, canopy ≥ 14 m covers 92 % of cells and the stand
+layer covers **0 %** (`below_canopy_density_measured_m` = 0.0 in its report) —
+Metsävarakuviot is mainly *private* forest, so state/company blocks are simply
+absent. Over the whole AO only 74 % of tall canopy is covered. So on a real AO,
+"measured density" must be checked per route, not assumed from `layers.stand_data`.
+**2. On measured stands the zone shrinks by half.** `mission_measured.yaml` moves
+the start into the south-centre block (~80 % of tall canopy surveyed; measured
+median **746 stems/ha** where tall; the zone's own stands ~1000-1200). Both
+observers stay west of the new line, 1.8-2.3 km off it.
+
+| `weights.clutter` | largest zone that closes, **in envelope** | below canopy |
+|---|---|---|
+| 0 | **300 m** (0.77) | ~280-300 m |
+| 0.5 | 1500 m (0.74) | plateaus at **~450 m** — routes round the densest stands |
+
+One battery buys **~300-450 m of below-canopy flight on measured stands**, against
+~550-600 m on the inferred ones. `m300` flies its forest legs at **0.5 m/s**
+(1000-1200 stems/ha — the extrapolated end of the envelope). Harness 2/2 clean
+(+0.49 m); SITL queued (`askolam300` world, 1702 trunks).
+🐛 **Solver defect fixed:** `--solve --as-is` checked energy only, and returned
+400 m for a plan the planner itself calls NO-GO (32 m beyond the envelope,
+`stem_density_beyond_envelope` CRITICAL). A radius now closes only if it is
+also in envelope. `--workers` / `--max-radius` keep the Mac quiet.
+
+**3. The "below canopy" band was inside the crowns.** Metsäkeskus strata give
+species per stand: Askola's fly-under stands are **49 % spruce, 26 % broadleaf,
+21 % pine by basal area**; along `m300`'s below-canopy stretch 57 / 18 / 24 % by
+stems, canopy median **15.4 m**, flown at **10.5-12 m AGL**. Every one of those
+trees has live crown at that height unless its crown ratio is below ~0.25
+(managed pine ~0.35-0.5, spruce ~0.55-0.8, birch ~0.4-0.55 — the ranges behind
+this estimate; Hynynen 1995, Can. J. For. Res. 25:57, models it for pine). So the
+aircraft was planned through the **crown layer** — branches metres wide, where
+the Gazebo world has bare 0.15 m cylinders. `min_canopy_m` was always a stand-in
+for crown base (its own docstring said so).
+➡️ **`AltitudePolicy.crown_ratio`** (opt-in; default None keeps every baseline)
+holds the below-canopy ceiling under `height × (1 − crown_ratio) − crown_clearance_m`
+in all three places the band is computed (pinned together by test). At the
+Askola mix (0.55): zone sizes and energy barely move — the stands are tall enough
+to keep *some* trunk space — but the flight drops to **5.1-7.0 m AGL**, onto the
+5 m floor, and the terrain guarantee then breaches it (**4.5-4.9 m, NO-GO**) at
+25, 16 and 10 m waypoint spacing alike.
+🔑 **In spruce-heavy managed forest the trunk space is a ~5-7 m band sitting on the
+planner's floor.** Flying it needs a lower floor (understory, DTM error — a risk
+call) or better terrain data (MML's 2 m DEM instead of the 10 m one); the
+alternative is to accept flight through crowns, which nothing here can simulate.
+❓ Whether `crown_ratio` becomes the default is a baseline-changing call, left
+opt-in and set only in the Askola `*_cr*.yaml` variants.
+
 ## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
 User: *"look up finnish forest data from a reliable source, and keep in mind that
 a large part of it is talousmetsää."* Detail and sources in the
