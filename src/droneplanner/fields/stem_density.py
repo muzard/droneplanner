@@ -236,6 +236,7 @@ stand / speed   clean seed sets (min air)     contact
 600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
 600/ha 2 m/s    4/4 (+0.12 m)                 —
 800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
+800/ha 1.5 m/s  1/4 so far (+0.48 m)          — (pending; a 2nd ran at RTF 0.2, void)
 ~1000/ha 0.5*   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ==============  ============================  =============================
 
