@@ -12,13 +12,19 @@ corridor is future work (see SHORTFALLS.md).
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import pairwise
 
 import numpy as np
 
 from droneplanner.crossings.detect import detect_crossings
-from droneplanner.fields.altitude import altitude_band_at, canopy_height, concealment_mask
+from droneplanner.fields.altitude import (
+    _band_from_canopy,
+    altitude_band_at,
+    canopy_height,
+    concealment_mask,
+    under_canopy_ceiling,
+)
 from droneplanner.fields.composite import CostSurface, build_cost_surface
 from droneplanner.fields.stems import (
     StemMap,
@@ -29,7 +35,7 @@ from droneplanner.fields.viewshed import point_exposure
 from droneplanner.forest.navigability import CLASS_TO_ENUM, FlyabilityField
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import Mission
+from droneplanner.model.mission import AltitudePolicy, Mission
 from droneplanner.model.plan import (
     CanopyClimb,
     Crossing,
@@ -251,6 +257,19 @@ def plan_corridor(
             ceils.append(ceil)
             bands.append(band)
         dists = [a.distance_to(b) for a, b in pairwise(cs)]
+        _debounce_bands(
+            cs,
+            dists,
+            prefs,
+            floors,
+            ceils,
+            bands,
+            chm=chm,
+            grid=grid,
+            zone=zone_for_bands,
+            target_agl_m=mission.cruise_agl_m,
+            policy=mission.altitude,
+        )
         agl, climb_v, up, down = smooth_altitudes(prefs, floors, ceils, dists, limits)
         amsl = [a + _ground_at(p.x, p.y) for p, a in zip(cs, agl, strict=True)]
         return cs, agl, amsl, bands, climb_v, up, down
@@ -768,3 +787,104 @@ def _unopened_transitions(
     if count:
         out["canopy_transition_no_opening_first_m"] = first
     return out
+
+
+MIN_DWELL_M = 50.0
+"""Shortest stretch flown under, or out of, the canopy between two transitions."""
+
+ENTRY_HYSTERESIS_M = 2.0
+"""A stand this much below ``AltitudePolicy.min_canopy_m`` may still be flown under
+to bridge a short excursion — if it physically has room under the crowns."""
+
+
+def _debounce_bands(
+    cs: Sequence[Coordinate],
+    dists: Sequence[float],
+    prefs: list[float],
+    floors: list[float],
+    ceils: list[float],
+    bands: list[FlightBand],
+    *,
+    chm: np.ndarray,
+    grid: Grid,
+    zone: np.ndarray,
+    target_agl_m: float,
+    policy: AltitudePolicy,
+) -> None:
+    """Remove under/over excursions shorter than ``MIN_DWELL_M``, in place.
+
+    🔴 SHORTFALLS M1 / the strict-xfail test: ``min_canopy_m`` is a hard per-cell
+    threshold, so along a canopy gradient drifting across it by centimetres the
+    band flipped every waypoint — 14.21 / 9.05 / 14.19 / 9.03 m AGL, 16.9 m/s of
+    climb on a 2.46 m leg against a 3.0 m/s airframe. Two passes:
+
+    1. a short run OUT of the canopy between two under-canopy runs is flown under
+       too, where every cell is in the enterable zone, within
+       ``ENTRY_HYSTERESIS_M`` of the threshold and has room under its crowns;
+    2. a short run UNDER the canopy between two out-of-canopy runs is flown over.
+
+    Lidar (``UPPER_TRUNK``) vertices are measured windows and are never touched.
+    """
+    n = len(bands)
+    under = (FlightBand.BELOW_CANOPY,)
+
+    def runs(pred: Callable[[int], bool]) -> list[tuple[int, int]]:
+        out, i = [], 0
+        while i < n:
+            if pred(i):
+                j = i
+                while j + 1 < n and pred(j + 1):
+                    j += 1
+                out.append((i, j))
+                i = j + 1
+            else:
+                i += 1
+        return out
+
+    def length(i: int, j: int) -> float:
+        # Include the legs into and out of the run: that is the distance between
+        # the transitions the run creates.
+        lo, hi = max(i - 1, 0), min(j, n - 2)
+        return float(sum(dists[lo : hi + 1]))
+
+    def set_band(k: int, under_it: bool) -> None:
+        h = float(chm[grid.world_to_pixel(cs[k])])
+        pref, floor, ceil, band = _band_from_canopy(
+            max(h, policy.min_canopy_m) if under_it else h,
+            target_agl_m,
+            policy,
+            covered=under_it,
+        )
+        if under_it:
+            ceil = float(under_canopy_ceiling(np.asarray(h), policy))
+            pref = min(max(target_agl_m, floor), ceil)
+        prefs[k], floors[k], ceils[k], bands[k] = pref, floor, ceil, band
+
+    # 1. bridge short excursions out of the canopy
+    for i, j in runs(lambda k: bands[k] not in under and bands[k] is not FlightBand.UPPER_TRUNK):
+        if i == 0 or j == n - 1 or bands[i - 1] not in under or bands[j + 1] not in under:
+            continue
+        if length(i, j) >= MIN_DWELL_M:
+            continue
+        ok = True
+        for k in range(i, j + 1):
+            cell = grid.world_to_pixel(cs[k])
+            h = float(chm[cell])
+            if not bool(zone[cell]) or h < policy.min_canopy_m - ENTRY_HYSTERESIS_M:
+                ok = False
+                break
+            if float(under_canopy_ceiling(np.asarray(h), policy)) < policy.min_agl_m:
+                ok = False
+                break
+        if ok:
+            for k in range(i, j + 1):
+                set_band(k, under_it=True)
+
+    # 2. drop short islands under the canopy
+    for i, j in runs(lambda k: bands[k] in under):
+        if i == 0 or j == n - 1 or bands[i - 1] in under or bands[j + 1] in under:
+            continue
+        if length(i, j) >= MIN_DWELL_M:
+            continue
+        for k in range(i, j + 1):
+            set_band(k, under_it=False)

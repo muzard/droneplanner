@@ -553,6 +553,18 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   an observer — disturbed ground, a corridor through vegetation, a trench line —
   so `ground_los` answers "could someone see this patch of ground", which is a
   proxy for cable survivability and not a measurement of it.
+- ✅ **FIXED 2026-09-25 (`planner/corridor._debounce_bands`) — decided under the
+  "decide and document" rule, reversible with `MIN_DWELL_M = 0`:** along the route,
+  a run OUT of the canopy shorter than 50 m between two under-canopy runs is flown
+  under too (if every cell is within 2 m of `min_canopy_m`, in the enterable zone,
+  and has room under its crowns — this *adds* concealment), and a run UNDER the
+  canopy shorter than 50 m between two out-of-canopy runs is flown over (costs a
+  little concealment; each such island would also need two canopy openings). Demo
+  AO size=120: peak climb 16.9 → **1.41 m/s**; the test is now a real test (no
+  excursion < `MIN_DWELL_M`, climb inside the airframe) and fails with the
+  debounce off. Residual: one over→under transition needs 2.1 m/s of descent on a
+  2.46 m leg against 2.0 — a transition-length issue, still counted in
+  `climb_violations`. Original entry:
 - 🔴 **`min_canopy_m` is a hard band threshold with no hysteresis, and a stand
   sitting at it makes the aircraft porpoise.** Under-canopy and over-canopy
   altitudes are ~5 m apart with **no admissible altitude between them** (the crowns
