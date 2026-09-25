@@ -675,6 +675,10 @@ def _canopy_climbs(
     return tuple(runs)
 
 
+ESCAPE_RADIUS_M = 30.0
+"""Mirror of droneflight ``LocalOffboardConfig.escape_radius_m`` (30 m since
+2026-09-26): trunk tops within it set the escape height."""
+
 ESCAPE_MARGIN_M = 3.0
 """Mirror of droneflight ``LocalOffboardConfig.escape_margin_m``: an in-flight
 escape climbs to the local canopy top plus this."""
@@ -699,7 +703,8 @@ def _escape_envelope(
     ]
     if not under:
         return {}
-    local_top = maximum_filter(chm, size=3)
+    radius = max(1, math.ceil(ESCAPE_RADIUS_M / max(grid.cell_size_m, 1e-6)))
+    local_top = maximum_filter(chm, size=2 * radius + 1)
     along = [0.0]
     for a, b in pairwise(vertices):
         along.append(along[-1] + math.dist((a.x, a.y), (b.x, b.y)))
