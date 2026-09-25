@@ -485,7 +485,11 @@ peak climb**. The demo AO never showed it (smooth synthetic canopy). Three cause
    pass** that climbs early for a stand it can see coming.
 Result: Askola 600 m, measured 300 m and measured 400 m + fallback all **feasible,
 0 climb / 0 clearance violations** (peak climb ≤ 3.0 m/s); MVP unchanged (min AGL
-6.59 m, energy 0.82).
+6.59 m, energy 0.82). **Zones re-solved after it:** the jagged skim had been charging
+climb energy the aircraft need not spend, so the original Askola start goes **400 →
+700 m** (0.99 at 700, ~740 m under the canopy); the measured zone stays **300 m**
+(0.88); measured + `clutter` 0.5 plateaus at ~460 m under the canopy. Latest numbers
+win over the tables above them in this file.
 
 ### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
 `laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
