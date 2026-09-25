@@ -420,8 +420,7 @@ which every step still closes one sortie (30 min airframe, 20 % reserve), on the
 | 300 | 3700 m | 0.88 |
 | **400** | **1800 m** | 0.96 |
 | 500-600 | **1100 m** | 1.11 — NO-GO |
-| 700 | **800 m** (was 1000 m before the 2026-09-25 speed-charging fix) | 1.41 — NO-GO |
-| 800 | **800 m** (was 900 m) | 1.41 — NO-GO |
+| 700-800 | **1100 m** (800/ha SITL-flown at 1.5 m/s 4/4, 2026-09-25; was 0.8-0.9 km) | 1.11 — NO-GO |
 | 900 | **800 m** | 1.41 — NO-GO |
 | ≥ 1000 | 700 m | NO-GO |
 

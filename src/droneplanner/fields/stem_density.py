@@ -214,7 +214,7 @@ ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
     (400.0, 2.0),
     (500.0, 1.5),
     (600.0, 1.5),
-    (800.0, 1.25),
+    (800.0, 1.5),
     (1000.0, 0.75),
     (1200.0, 0.4),
 )
@@ -236,7 +236,7 @@ stand / speed   clean seed sets (min air)     contact
 600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
 600/ha 2 m/s    4/4 (+0.12 m)                 —
 800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
-800/ha 1.5 m/s  1/4 so far (+0.48 m)          — (pending; a 2nd ran at RTF 0.2, void)
+800/ha 1.5 m/s‡ **4/4** (+0.29 m)             — (one earlier run at RTF 0.2 voided)
 ~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ==============  ============================  =============================
 
@@ -253,10 +253,11 @@ onboard stack stalled 3/3 there until it cleared memory the scan sees through
 planned.
 
 (Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
-So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.0 and ~1000/ha →
-0.5 (as commanded) are measured**. 600/ha also flew 2 m/s strike-free, but at 600/ha
-the margin is thin at *both* speeds — a 1.9 m median gap threaded by a 0.9 m
-airframe — so it is not raised on that evidence.
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5 and ~1000/ha →
+0.5 (as commanded) are measured** (800/ha raised 1.25 → 1.5 on 2026-09-25).
+600/ha also flew 2 m/s strike-free, but at 600/ha the margin is thin at *both*
+speeds — a 1.9 m median gap threaded by a 0.9 m airframe — so it is not raised on
+that evidence.
 The remaining anchors are the harness discounted by the SITL/harness ratio at the
 nearest validated density (3/5 = 0.6 at <= 200, 2/4 = 0.5 at >= 400).
 The harness passes 4-5 m/s at 200/ha: it is necessary, not sufficient.
