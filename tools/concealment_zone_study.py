@@ -171,7 +171,7 @@ def _load(ao: Path, mission_file: str) -> tuple[dict[str, object], np.ndarray, n
     return m, dtm, dsm, grid
 
 
-def solve(ao: Path, mission_file: str) -> None:
+def solve(ao: Path, mission_file: str, workers: int | None = None) -> None:
     """Largest covered radius that closes one sortie, per density.
 
     Radii are stepped, not bisected: the route changes with the radius, so energy
@@ -182,7 +182,7 @@ def solve(ao: Path, mission_file: str) -> None:
 
     radii = [SOLVE_STEP_M * k for k in range(1, int(SOLVE_MAX_M / SOLVE_STEP_M) + 1)]
     print(f"{'stems/ha':>9}{'max radius':>12}{'energy':>8}{'time':>7}  at 1500 m  envelope")
-    with ProcessPoolExecutor() as ex:
+    with ProcessPoolExecutor(max_workers=workers) as ex:
         for density in SOLVE_DENSITIES:
             rows = list(
                 ex.map(
@@ -234,7 +234,7 @@ def main() -> int:
         solve_as_is(args.ao, args.mission, args.workers, args.max_radius)
         return 0
     if args.solve:
-        solve(args.ao, args.mission)
+        solve(args.ao, args.mission, args.workers)
         return 0
     base, dtm, dsm, grid = load_ao(args.ao)
 
