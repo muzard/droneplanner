@@ -494,7 +494,13 @@ launch site."*
 * **Onboard (droneflight):** the oracle sensor and contact check ignore trunks whose
   tops the aircraft is above (`perception.OVERFLY_MARGIN_M`), so SITL can fly such a
   plan honestly.
-* ⚠️ **Not modelled: getting up through the canopy.** A real aircraft cannot climb
+* 🔴 **First SITL flight of it (o4e, Askola 400 m, GPS-denied): reached the goal but
+  touched a trunk on the DESCENT back under the canopy**, not on the climb. At 14 m
+  over 9 m trunks the altitude-aware oracle rightly ignored them; the plan then
+  descended and the aircraft came down onto one it had never mapped (−0.44 m).
+  Fixed onboard (droneflight PR #6): `fly-local` senses at min(current, target)
+  height, so a descent maps the trunk layer before entering it. Re-flight queued.
+* ⚠️ **Not modelled: getting up through the canopy — or back down.** A real aircraft cannot climb
   through closed crowns; it needs an opening. The climb happens in the padded
   cell before the stand; whether a gap is there is not checked. Also unhandled: an
   in-flight climb when the aircraft finds a stand impassable that the data said
