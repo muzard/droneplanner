@@ -520,6 +520,13 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   adversary-favouring direction. Fixing it means choosing whether an observer
   stands on the terrain (DTM) or on the surface, per observer — a mission-contract
   question, and it moves every historical exposure figure.
+  ⚠️ **Checked 2026-09-25: it is NOT a simple eye-height toggle.** The viewshed marches
+  over the DSM and treats the canopy as a solid wall, so an eye moved down into a
+  stand would be blind to everything — including a drone flying through the same
+  stand's trunk space 50 m away, which a real dismount could see. A ground-eye
+  switch would trade an adversary-favouring bias for a friendly-favouring one. The
+  fix needs a trunk-space sightline model (stem density x distance transmittance
+  below the crown base), not a different eye elevation. Not built.
 - ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
   at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
   median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the
