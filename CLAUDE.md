@@ -593,9 +593,10 @@ launch site."*
 * ⚠️ **Climb timing onboard vs the opening.** `fly-local` climbs EARLY — as soon as a
   higher vertex is inside its ~22 m look-ahead (`window_altitude`) — so the aircraft
   may start rising up to ~22 m before the vertex the planner put at the opening.
-  Harmless in SITL (bare trunks); in a real stand it would climb into crowns. Fix
-  when it matters: carry the opening position (or a per-vertex "climb here" flag)
-  into the `.plan`/corridor and have `fly-local` hold height until it reaches it. A real aircraft cannot climb
+  Harmless in SITL (bare trunks); in a real stand it would climb into crowns.
+  ✅ **Fixed onboard (droneflight PR #8):** a climb step > 4 m starts only once the
+  aircraft reaches the lower vertex (the opening) and is flown in place; terrain
+  steps keep the early climb. SITL regression pending. A real aircraft cannot climb
   through closed crowns; it needs an opening. The climb happens in the padded
   cell before the stand; whether a gap is there is not checked. Also unhandled: an
   in-flight climb when the aircraft finds a stand impassable that the data said
