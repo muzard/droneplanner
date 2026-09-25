@@ -526,7 +526,18 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   stand's trunk space 50 m away, which a real dismount could see. A ground-eye
   switch would trade an adversary-favouring bias for a friendly-favouring one. The
   fix needs a trunk-space sightline model (stem density x distance transmittance
-  below the crown base), not a different eye elevation. Not built.
+  below the crown base), not a different eye elevation.
+  ✅ **Built (opt-in) 2026-09-25 for observers on OPEN ground:**
+  `CanopyOcclusion.trunk_space_sightlines` — a sightline under the crown base is
+  attenuated by trunks (exp(−n·d·L)), blocked in the crown layer, ≤ 300 m; raster and
+  flown re-score share one builder (`composite.trunk_space_for`) and a test pins them
+  equal. Measured: **zero effect on the demo MVP** (its concealed stretch has no open
+  ground within 300 m) and on Askola at 10.5-12 m AGL (that flight is in the crown
+  layer, which blocks side views); with **crown-aware flight (5-7 m) and an observer
+  on open ground 112 m away: peak exposure 0.21**, route mean 0.003. So it matters
+  exactly when flying in trunk space near an edge — enable it together with
+  `AltitudePolicy.crown_ratio`. Observers standing INSIDE a stand are still not
+  covered (their eye sits on the crowns).
 - ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
   at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
   median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the

@@ -39,7 +39,7 @@ from droneplanner.fields.stem_density import build_stem_clutter
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_penalty
 from droneplanner.fields.util import normalize01
-from droneplanner.fields.viewshed import cumulative_exposure
+from droneplanner.fields.viewshed import TrunkSpace, cumulative_exposure
 from droneplanner.forest.navigability import FlyabilityField
 from droneplanner.io.stand_data import stand_density_raster
 from droneplanner.model.grid import Grid
@@ -172,6 +172,7 @@ def build_cost_surface(
         target_span_m=mission.drone.rotor_span_m,
         sectors=sectors,
         off_axis_vigilance=vigilance,
+        trunk_space=trunk_space_for(mission, dtm, chm, clutter["stem_density_per_ha"]),
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -348,3 +349,23 @@ def _crown_laydown(
     opening = _canopy_openings(mission, chm, grid) > 0.5
     out: np.ndarray = (over & (chm >= CROWN_SETTLE_M) & ~opening).astype(np.float32)
     return out
+
+
+def trunk_space_for(
+    mission: Mission, dtm: np.ndarray, chm: np.ndarray, stems_per_ha: np.ndarray
+) -> TrunkSpace | None:
+    """The under-crown sightline inputs, or None when the mission leaves it off.
+
+    One builder for the raster field and the flown re-score (planner/corridor.py),
+    so the two cannot disagree about what an observer sees through the trunks."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.trunk_space_sightlines:
+        return None
+    ratio = mission.altitude.crown_ratio or occ.trunk_space_crown_ratio
+    return TrunkSpace(
+        dtm=np.asarray(dtm, dtype=np.float32),
+        crown_base_agl_m=(np.asarray(chm, dtype=np.float32) * (1.0 - ratio)),
+        stems_per_m2=np.asarray(stems_per_ha, dtype=np.float32) / 10_000.0,
+        trunk_diameter_m=occ.trunk_diameter_m,
+        max_range_m=occ.trunk_space_max_range_m,
+    )

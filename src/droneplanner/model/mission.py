@@ -117,6 +117,28 @@ class CanopyOcclusion(BaseModel):
             "look-down observers, which are the ones the old model could not see."
         ),
     )
+    trunk_space_sightlines: bool = Field(
+        default=False,
+        description=(
+            "Let a near-horizontal sightline pass UNDER the crowns, attenuated by the "
+            "trunks, instead of treating the canopy as a wall (2026-09-25). An observer "
+            "standing on open ground can see a drone flying through a stand's trunk "
+            "space from its edge; the DSM march cannot. Transmittance exp(-stems/m^2 x "
+            "trunk_diameter_m x distance) under the crown base, blocked in the crown "
+            "layer, only within trunk_space_max_range_m. Off by default: it raises "
+            "below-canopy exposure near forest edges and moves every historical figure. "
+            "Observers standing inside a stand (eye on the crowns in this model) are "
+            "not covered — see SHORTFALLS."
+        ),
+    )
+    trunk_diameter_m: float = Field(default=0.25, gt=0.0, le=2.0)
+    trunk_space_max_range_m: float = Field(default=300.0, gt=0.0)
+    trunk_space_crown_ratio: float = Field(
+        default=0.5,
+        gt=0.0,
+        lt=1.0,
+        description="Crown base = canopy x (1 - this) when AltitudePolicy.crown_ratio is unset.",
+    )
 
 
 class DetectionModel(BaseModel):

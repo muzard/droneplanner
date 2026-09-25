@@ -95,6 +95,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -212,6 +213,7 @@ def single_viewshed(
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
     sector_mask: np.ndarray | None = None,
+    trunk_space: TrunkSpace | None = None,
 ) -> np.ndarray:
     """Per-cell visibility **weight** in [0, 1] for one observer (float32).
 
@@ -273,6 +275,24 @@ def single_viewshed(
                 )
             if terrain_angle > max_angle:
                 max_angle = terrain_angle
+    if trunk_space is not None:
+        # Under-crown sightlines the horizon march cannot represent: per target,
+        # within range, only where that beats what the march already found.
+        reach = math.ceil(min(trunk_space.max_range_m, zero_m) / cell_size_m)
+        for r in range(max(r0 - reach, 0), min(r0 + reach + 1, rows)):
+            for c in range(max(c0 - reach, 0), min(c0 + reach + 1, cols)):
+                if visible[r, c] >= 1.0:
+                    continue
+                t = _trunk_space_weight(
+                    trunk_space, dsm, (r0, c0), eye, (r, c), float(target[r, c]), cell_size_m
+                )
+                if t > 0.0:
+                    slant = math.hypot(
+                        math.hypot(r - r0, c - c0) * cell_size_m, float(target[r, c]) - eye
+                    )
+                    w = t * _range_weight(slant, full_m, zero_m)
+                    if w > visible[r, c]:
+                        visible[r, c] = w
     if sector_mask is not None:
         if sector_mask.shape != dsm.shape:
             raise ValueError("sector_mask must have the same shape as the DSM")
@@ -300,6 +320,65 @@ def single_viewshed_bool(
     return weights > 0.0
 
 
+@dataclass(frozen=True)
+class TrunkSpace:
+    """What a sightline under the crowns needs (``CanopyOcclusion.trunk_space_sightlines``)."""
+
+    dtm: np.ndarray
+    crown_base_agl_m: np.ndarray
+    stems_per_m2: np.ndarray
+    trunk_diameter_m: float = 0.25
+    max_range_m: float = 300.0
+    open_observer_m: float = 2.0
+    """An observer counts as standing on open ground if the canopy at its cell is lower."""
+
+
+def _trunk_space_weight(
+    ts: TrunkSpace,
+    dsm: np.ndarray,
+    observer_rc: tuple[int, int],
+    eye_elev_m: float,
+    target_rc: tuple[int, int],
+    target_elev_m: float,
+    cell_size_m: float,
+) -> float:
+    """Transmittance of a sightline that passes under the crowns, or 0.
+
+    Walk the line cell by cell: above the canopy is clear; under the crown base the
+    trunks attenuate it (Poisson stems: exp(-n d L)); in the crown layer, or below
+    the terrain, it is blocked. Only for observers on open ground, targets below
+    their own canopy, within ``max_range_m``.
+    """
+    r0, c0 = observer_rc
+    rt, ct = target_rc
+    if float(dsm[r0, c0]) - float(ts.dtm[r0, c0]) >= ts.open_observer_m:
+        return 0.0
+    if target_elev_m >= float(dsm[rt, ct]):
+        return 0.0  # above its canopy: the ordinary march already scores it
+    total = math.hypot(rt - r0, ct - c0) * cell_size_m
+    if total <= 0.0 or total > ts.max_range_m:
+        return 0.0
+    transmit = 1.0
+    prev_dist = 0.0
+    for r, c in bresenham(r0, c0, rt, ct):
+        if r == r0 and c == c0:
+            continue
+        dist = math.hypot(r - r0, c - c0) * cell_size_m
+        h = eye_elev_m + (target_elev_m - eye_elev_m) * (dist / total)
+        ground = float(ts.dtm[r, c])
+        if h < ground:
+            return 0.0
+        top = float(dsm[r, c])
+        if h < top:
+            if h > ground + float(ts.crown_base_agl_m[r, c]):
+                return 0.0  # through the crown layer
+            transmit *= math.exp(
+                -float(ts.stems_per_m2[r, c]) * ts.trunk_diameter_m * (dist - prev_dist)
+            )
+        prev_dist = dist
+    return transmit
+
+
 def cumulative_exposure(
     dsm: np.ndarray,
     grid: Grid,
@@ -312,6 +391,7 @@ def cumulative_exposure(
     target_span_m: float = 0.0,
     sectors: Sequence[ThreatSector] = (),
     off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
+    trunk_space: TrunkSpace | None = None,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each cell, in [0, 1] (float32).
 
@@ -352,6 +432,7 @@ def cumulative_exposure(
                     detection if element.detection is None else element.detection,
                     target_span_m,
                     element_mask(grid, element),
+                    trunk_space,
                 ),
                 out=seen,
             )
@@ -369,6 +450,7 @@ def _point_weight(
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
+    trunk_space: TrunkSpace | None = None,
 ) -> float:
     """Visibility weight in [0, 1] from one observer to one 3D point.
 
@@ -377,6 +459,46 @@ def _point_weight(
     disagree about whether a crown is in the way or whether the target is
     resolvable at that range.
     """
+    base = _march_point_weight(
+        dsm,
+        observer_rc,
+        eye_elev_m,
+        target_rc,
+        target_elev_m,
+        cell_size_m,
+        canopy,
+        detection,
+        target_span_m,
+    )
+    if trunk_space is None or base >= 1.0:
+        return base
+    full_m, zero_m = _range_terms(detection, target_span_m)
+    r0, c0 = observer_rc
+    rt, ct = target_rc
+    total = math.hypot(rt - r0, ct - c0) * cell_size_m
+    if total > min(trunk_space.max_range_m, zero_m):
+        return base
+    t = _trunk_space_weight(
+        trunk_space, dsm, observer_rc, eye_elev_m, target_rc, target_elev_m, cell_size_m
+    )
+    if t <= 0.0:
+        return base
+    slant = math.hypot(total, target_elev_m - eye_elev_m)
+    return max(base, t * _range_weight(slant, full_m, zero_m))
+
+
+def _march_point_weight(
+    dsm: np.ndarray,
+    observer_rc: tuple[int, int],
+    eye_elev_m: float,
+    target_rc: tuple[int, int],
+    target_elev_m: float,
+    cell_size_m: float,
+    canopy: CanopyOcclusion | None = None,
+    detection: DetectionModel | None = None,
+    target_span_m: float = 0.0,
+) -> float:
+    """The DSM-march half of :func:`_point_weight`."""
     r0, c0 = observer_rc
     rt, ct = target_rc
     gap, steep_tan = _canopy_terms(canopy)
@@ -413,6 +535,7 @@ def point_exposure(
     target_span_m: float = 0.0,
     sectors: Sequence[ThreatSector] = (),
     off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
+    trunk_space: TrunkSpace | None = None,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each ``(x, y, z_amsl)`` point.
 
@@ -457,6 +580,7 @@ def point_exposure(
                         canopy,
                         detection if element.detection is None else element.detection,
                         target_span_m,
+                        trunk_space,
                     ),
                 )
             accum[i] += seen
