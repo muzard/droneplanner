@@ -579,7 +579,13 @@ launch site."*
   the padded forced-over mask Askola's 400 m plan read 0 m under the canopy with 19
   vertices under it. MVP: 1166 → 1187 m (same route).
 * ⚠️ **Not modelled: getting up through the canopy — or back down** — beyond the
-  opening test above (no check of the crowns' actual 3D shape). A real aircraft cannot climb
+  opening test above (no check of the crowns' actual 3D shape).
+* ⚠️ **Climb timing onboard vs the opening.** `fly-local` climbs EARLY — as soon as a
+  higher vertex is inside its ~22 m look-ahead (`window_altitude`) — so the aircraft
+  may start rising up to ~22 m before the vertex the planner put at the opening.
+  Harmless in SITL (bare trunks); in a real stand it would climb into crowns. Fix
+  when it matters: carry the opening position (or a per-vertex "climb here" flag)
+  into the `.plan`/corridor and have `fly-local` hold height until it reaches it. A real aircraft cannot climb
   through closed crowns; it needs an opening. The climb happens in the padded
   cell before the stand; whether a gap is there is not checked. Also unhandled: an
   in-flight climb when the aircraft finds a stand impassable that the data said
