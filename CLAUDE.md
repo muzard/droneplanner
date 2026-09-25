@@ -529,9 +529,9 @@ One battery buys **~300-450 m of below-canopy flight on measured stands**, again
 (+0.49 m). **SITL (`askolam300`, 1702 trunks, GPS-denied): the old onboard stack
 stalled 3/3 at waypoint 4** (0 contacts — memory smear from slow drift, see
 `droneflight/CLAUDE.md`); **with memory clearing (droneflight PR #5) 2/2 reach the
-goal CLEAN, +1.01 / +0.78 m, 21.2-21.4 min** against 17.5 planned (forest stretch
-on pace at 0.49 m/s; the overrun is unexplained). So **~1000 stems/ha at 0.5 m/s is
-now SITL-flown** — two seed sets, not yet four.
+goal CLEAN — 4/4 seed sets, +0.78 to +1.01 m, 21.2-21.5 min** (the 17.5 min
+originally planned was the endurance-charging defect, now 20.9). So **~1000
+stems/ha at 0.5 m/s is SITL-flown over four seed sets**.
 🐛 **Solver defect fixed:** `--solve --as-is` checked energy only, and returned
 400 m for a plan the planner itself calls NO-GO (32 m beyond the envelope,
 `stem_density_beyond_envelope` CRITICAL). A radius now closes only if it is
