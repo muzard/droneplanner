@@ -92,3 +92,13 @@ def test_forced_mask_closes_small_gaps_and_pads_so_the_aircraft_does_not_porpois
     out = _regularise_forced(np.repeat(m, 5, axis=0))[2]
     assert out[2:9].all()  # gap closed, padded one cell each side
     assert not out[0] and not out[10:].any()
+
+
+def test_the_report_states_how_high_an_in_flight_escape_could_go() -> None:
+    """The escape climb is decided in flight, but its worst case is known before
+    launch: the tallest canopy near any below-canopy vertex, plus the margin."""
+    mission, plan, _ = _plan(slice(20, 23), fallback=True)
+    assert plan.objective_scores["escape_max_agl_m"] >= 25.0 + 3.0 - 1e-3
+    report = build_report(mission, plan, generated_at=None)
+    [finding] = [f for f in report.findings if f.code == "escape_climb_policy"]
+    assert "STRAIGHT UP" in finding.message

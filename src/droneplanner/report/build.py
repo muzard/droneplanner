@@ -43,6 +43,11 @@ def _decide(findings: list[Finding]) -> Recommendation:
     return Recommendation.GO
 
 
+ESCAPE_AFTER_S = 20.0
+ESCAPE_HOLD_M = 50.0
+"""Mirrors of droneflight ``LocalOffboardConfig.escape_after_s`` / ``escape_hold_m``
+— the report describes the onboard policy the plan will be flown under."""
+
 LAUNCH_CLIMB_M = 200.0
 """A canopy climb starting this close to launch is called out first in the report:
 the aircraft would rise to canopy height right after take-off, over its own
@@ -562,6 +567,27 @@ def build_report(
                     "through (AltitudePolicy.over_canopy_when_unpassable); exposure there is "
                     "costed at the over-canopy altitude. To avoid a climb, move the launch "
                     "site, shrink covered_radius_m, or route round the stand."
+                ),
+            )
+        )
+
+    esc = plan.objective_scores.get("escape_max_agl_m")
+    if esc is not None:
+        esc_from = plan.objective_scores.get("escape_first_m", 0.0)
+        span = plan.objective_scores.get("escape_exposed_length_m", 0.0)
+        findings.append(
+            Finding(
+                severity=Severity.INFO,
+                code="escape_climb_policy",
+                message=(
+                    f"In flight, if the aircraft is blocked under the canopy for "
+                    f"{ESCAPE_AFTER_S:.0f} s it climbs STRAIGHT UP over the trees "
+                    f"(droneflight fly-local --escape-after), holds that height for "
+                    f"{ESCAPE_HOLD_M:.0f} m of route, then descends. On this route that can "
+                    f"happen anywhere along the {span:.0f} m flown under the canopy, from "
+                    f"{esc_from:.0f} m after launch, and would take it up to {esc:.0f} m AGL "
+                    "(tallest nearby canopy + 3 m) — visible above the crowns. Turn it off "
+                    "with --escape-after 0 to stop and report instead."
                 ),
             )
         )

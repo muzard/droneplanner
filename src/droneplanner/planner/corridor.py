@@ -463,6 +463,7 @@ def plan_corridor(
         "below_canopy_beyond_envelope_m": beyond_m,
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
+        **_escape_envelope(vertices, chm, grid),
     }
     if stems is not None and len(stems) > 0:
         sc = assess_stem_clearance(
@@ -615,3 +616,44 @@ def _canopy_climbs(
         along += seg
     _close()
     return tuple(runs)
+
+
+ESCAPE_MARGIN_M = 3.0
+"""Mirror of droneflight ``LocalOffboardConfig.escape_margin_m``: an in-flight
+escape climbs to the local canopy top plus this."""
+
+
+def _escape_envelope(
+    vertices: Sequence[TrajectoryVertex], chm: np.ndarray, grid: Grid
+) -> dict[str, float]:
+    """How high an in-flight ESCAPE CLIMB could take the aircraft on this route.
+
+    The onboard stack climbs straight up over the trunks when it is blocked under
+    the canopy (droneflight ``fly-local --escape-after``, default 20 s). That is a
+    decision made in flight, but its worst case is knowable before launch: the
+    tallest canopy within a cell of any below-canopy vertex, plus the margin. The
+    report states it, so an escape is never a surprise (user, 2026-09-25)."""
+    from scipy.ndimage import maximum_filter
+
+    under = [
+        i
+        for i, v in enumerate(vertices)
+        if v.flight_band in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+    ]
+    if not under:
+        return {}
+    local_top = maximum_filter(chm, size=3)
+    along = [0.0]
+    for a, b in pairwise(vertices):
+        along.append(along[-1] + math.dist((a.x, a.y), (b.x, b.y)))
+    worst = max(
+        float(local_top[grid.world_to_pixel(Coordinate(x=vertices[i].x, y=vertices[i].y))])
+        for i in under
+    )
+    return {
+        "escape_max_agl_m": worst + ESCAPE_MARGIN_M,
+        "escape_first_m": along[under[0]],
+        "escape_exposed_length_m": sum(
+            along[i + 1] - along[i] for i in under if i + 1 < len(along)
+        ),
+    }
