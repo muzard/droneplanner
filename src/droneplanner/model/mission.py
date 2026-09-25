@@ -380,6 +380,17 @@ class AltitudePolicy(BaseModel):
     crown_clearance_m: float = Field(
         default=1.0, ge=0, description="Vertical gap kept below the crown base."
     )
+    over_canopy_when_unpassable: bool = Field(
+        default=True,
+        description=(
+            "Inside the concealment zone, fly OVER a stand that cannot be flown under "
+            "(denser than the onboard planner has been shown to fly) instead of "
+            "planning a NO-GO leg through it. Every such climb is listed in the report "
+            "(canopy_climbs, finding canopy_climb_in_zone) so the operator knows before "
+            "launch. False = the old behaviour: plan under it and raise "
+            "stem_density_beyond_envelope."
+        ),
+    )
 
 
 class Weights(BaseModel):

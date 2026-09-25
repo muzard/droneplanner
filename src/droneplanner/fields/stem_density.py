@@ -237,7 +237,7 @@ stand / speed   clean seed sets (min air)     contact
 600/ha 2 m/s    4/4 (+0.12 m)                 —
 800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
 800/ha 1.5 m/s  1/4 so far (+0.48 m)          — (pending; a 2nd ran at RTF 0.2, void)
-~1000/ha 0.5*   **4/4** (+0.33 m)             — (0/3 before memory clearing)
+~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ==============  ============================  =============================
 
 ‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
@@ -245,7 +245,7 @@ band so the VM holds real time), memory clearing on: +1.11 to +1.35 m surface.
 The 800/ha anchor (1.25) is commanded as 1.0, so this is what the planner sends.
 † 2026-09-25, with memory clearing (droneflight PR #5): still not clean — the anchor
 stays 2.0.
-\* 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
+§ 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
 1.5 m median spacing, real MML terrain): the 1000/ha anchor below (0.75) is
 commanded as 0.5 (``model.plan.commanded_speed_ms``), which is what flew. The
 onboard stack stalled 3/3 there until it cleared memory the scan sees through

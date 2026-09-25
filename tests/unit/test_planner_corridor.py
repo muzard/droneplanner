@@ -95,6 +95,20 @@ def test_flown_exposure_is_weighted_by_track_length_not_by_sample_count() -> Non
     assert _track_weighted_mean([(0.0, 0.0, 0.0)] * 2, np.array([0.2, 0.4])) == pytest.approx(0.3)
 
 
+def _under_policy_only(mission):  # type: ignore[no-untyped-def]
+    """The altitude-policy tests below predate the over-canopy fallback
+    (``AltitudePolicy.over_canopy_when_unpassable``, 2026-09-25). On the demo AO the
+    stands along these routes are 12-14 m — beyond the onboard envelope by the
+    Askola-refitted density relation — so with the fallback on they are flown over
+    and there is nothing left to test the under/over POLICY on. Switch it off here;
+    the fallback has its own tests."""
+    return mission.model_copy(
+        update={
+            "altitude": mission.altitude.model_copy(update={"over_canopy_when_unpassable": False})
+        }
+    )
+
+
 def test_corridor_flies_under_the_canopy_where_there_is_canopy() -> None:
     """The route hides *inside* the stands, not above them (SHORTFALLS item 1c).
 
@@ -102,6 +116,7 @@ def test_corridor_flies_under_the_canopy_where_there_is_canopy() -> None:
     tall stands are entered, clearings are crossed at the open target altitude.
     """
     mission, dtm, dsm, grid = build_demo(size=80)
+    mission = _under_policy_only(mission)
     plan = plan_corridor(mission, plan_over_terrain(mission, dtm, dsm, grid)[1])
     bands = {v.flight_band for v in plan.vertices}
     assert FlightBand.BELOW_CANOPY in bands
@@ -228,6 +243,10 @@ def test_canopy_band_does_not_oscillate_across_the_entry_threshold() -> None:
     like this is worse in the air than on paper.
     """
     mission, dtm, dsm, grid = build_demo(size=120)
+    # With the over-canopy fallback on, the threshold stands on this route are
+    # flown over as one smoothed block and the sawtooth disappears — but that hides
+    # the min_canopy_m hysteresis defect rather than fixing it. Pin the defect.
+    mission = _under_policy_only(mission)
     plan, _surface = plan_over_terrain(mission, dtm, dsm, grid)
 
     kin = plan.kinematics

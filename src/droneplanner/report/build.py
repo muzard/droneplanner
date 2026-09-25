@@ -43,6 +43,12 @@ def _decide(findings: list[Finding]) -> Recommendation:
     return Recommendation.GO
 
 
+LAUNCH_CLIMB_M = 200.0
+"""A canopy climb starting this close to launch is called out first in the report:
+the aircraft would rise to canopy height right after take-off, over its own
+launch site (user, 2026-09-25: "so no surprises happen")."""
+
+
 def build_report(
     mission: Mission,
     plan: Plan,
@@ -521,6 +527,45 @@ def build_report(
             )
         )
 
+    climbs = plan.canopy_climbs
+    if climbs:
+        why = {
+            "dense_stand": "stand denser than the onboard envelope",
+            "crowns_too_low": "crowns reach the floor, no trunk space",
+            "stand_too_short": "stand too short to fly under",
+        }
+        first = climbs[0]
+        lead = ""
+        if first.start_m <= LAUNCH_CLIMB_M:
+            lead = (
+                f"FIRST CLIMB {first.start_m:.0f} m FROM LAUNCH: the aircraft rises to "
+                f"{first.max_agl_m:.0f} m AGL over {first.max_canopy_m:.0f} m canopy almost "
+                "immediately after take-off, which exposes the launch site. "
+            )
+        listed = "; ".join(
+            f"{c.start_m:.0f} m from launch, {c.length_m:.0f} m long, up to "
+            f"{c.max_agl_m:.0f} m AGL ({why.get(c.reason, c.reason)})"
+            for c in climbs[:6]
+        )
+        more = (
+            f"; and {len(climbs) - 6} more (report.json canopy_climbs)" if len(climbs) > 6 else ""
+        )
+        total = sum(c.length_m for c in climbs)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="canopy_climb_in_zone",
+                message=(
+                    f"{lead}Inside the concealment zone the route leaves cover and flies over "
+                    f"the canopy {len(climbs)} time(s), {total:.0f} m in all: {listed}{more}. "
+                    "Where flying under is unpassable the planner goes over rather than "
+                    "through (AltitudePolicy.over_canopy_when_unpassable); exposure there is "
+                    "costed at the over-canopy altitude. To avoid a climb, move the launch "
+                    "site, shrink covered_radius_m, or route round the stand."
+                ),
+            )
+        )
+
     if end is not None and end.sharp_corners > 0:
         findings.append(
             Finding(
@@ -573,6 +618,7 @@ def build_report(
         below_canopy_length_m=below_canopy_length,
         corridor_half_width_min_m=corridor_min,
         corridor_half_width_median_m=corridor_median,
+        canopy_climbs=plan.canopy_climbs,
         threat_sectors=threat_sectors,
         non_navigable_count=len(non_navigable),
         marginal_count=len(marginal),

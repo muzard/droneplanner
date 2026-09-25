@@ -469,6 +469,38 @@ of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
 everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
 endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
 
+### ⬆️ OVER THE CANOPY WHEN UNDER IS UNPASSABLE — with the operator told first (2026-09-25)
+User: *"Keep [crown-aware] opt-in and do some kind of system for it to rise over the
+canopy if it looks unpassable below. The operator should also be informed of that
+beforehand, so no surprises happen and the drone jumps up to height right from the
+launch site."*
+* **`AltitudePolicy.over_canopy_when_unpassable` (default ON).** A stand inside the
+  concealment zone denser than the onboard envelope (> 1200 stems/ha) is flown
+  **over**, instead of planned through as a CRITICAL NO-GO leg. The mask is closed
+  (gaps ≤ 2 cells) and padded one cell, so the aircraft does not porpoise under/over
+  along a canopy gradient; a lidar voxel window (measured free space) always wins.
+  Exposure is costed at the over-canopy altitude, so where a threat can see it the
+  router still prefers going round. `crown_ratio` stays opt-in; with it on, stands
+  whose crowns reach the floor are flown over too and reported as such.
+* **The operator sees every climb before launch:** `Plan.canopy_climbs` /
+  `report.json canopy_climbs` (distance from launch, length, max AGL, canopy,
+  reason: `dense_stand` / `crowns_too_low` / `stand_too_short`) and the WARNING
+  **`canopy_climb_in_zone`**, which **leads with "FIRST CLIMB N m FROM LAUNCH"** when
+  one starts within 200 m (`report.build.LAUNCH_CLIMB_M`). Short stands were
+  skimmed silently before; they are listed now too.
+* Askola measured zone at 400 m: **NO-GO → REVIEW**, "FIRST CLIMB 124 m FROM LAUNCH:
+  rises to 28 m AGL over 25 m canopy", plus a 15 m skim at 303 m. (Below-canopy
+  length fell 373 → 97 m there: exposure is 0 on that AO, so nothing pays the router
+  to stay under.)
+* **Onboard (droneflight):** the oracle sensor and contact check ignore trunks whose
+  tops the aircraft is above (`perception.OVERFLY_MARGIN_M`), so SITL can fly such a
+  plan honestly.
+* ⚠️ **Not modelled: getting up through the canopy.** A real aircraft cannot climb
+  through closed crowns; it needs an opening. The climb happens in the padded
+  cell before the stand; whether a gap is there is not checked. Also unhandled: an
+  in-flight climb when the aircraft finds a stand impassable that the data said
+  was fine — today it stalls and reports, it does not climb.
+
 ### 🔴 Endurance charged a speed the .plan never commanded — fixed (2026-09-25)
 The `.plan` writer floors leg speeds to 0.5 m/s steps; the endurance budget charged
 the raw cap. A 0.76 m/s leg was **flown at 0.5 and charged at 0.76** — SITL on the

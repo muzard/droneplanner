@@ -108,11 +108,48 @@ def build_cost_surface(
     # Where concealment is required at all (Mission.covered_radius_m). Outside it
     # the drone flies over the canopy, and its exposure is not costed.
     covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
-    flight_agl = planned_flight_agl(
-        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+    # Stem clutter needs the band (only stems the drone flies AMONG limit it), and
+    # the band may now need the clutter: a stand denser than the onboard envelope
+    # is flown OVER, not planned through (AltitudePolicy.over_canopy_when_unpassable).
+    measured = (
+        stand_density_raster(mission.layers.stand_data, grid)
+        if mission.layers.stand_data is not None
+        else None
     )
+
+    def _clutter(band: np.ndarray) -> dict[str, np.ndarray]:
+        return build_stem_clutter(
+            chm,
+            cruise_speed_ms=mission.drone.cruise_speed_ms,
+            min_canopy_m=mission.altitude.min_canopy_m,
+            among_stems=band >= 2,
+            density_override_per_ha=mission.stem.density_per_ha,
+            measured_per_ha=measured,
+        )
+
     flight_band = band_raster(
         chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+    )
+    clutter = _clutter(flight_band)
+    forced_over = np.zeros(chm.shape, dtype=bool)
+    enterable_zone = covered
+    if mission.altitude.over_canopy_when_unpassable:
+        forced_over = _regularise_forced(clutter["beyond_envelope"] > 0.5)
+        if flyability is not None:
+            # A lidar window is MEASURED free space; an inferred density must not
+            # overrule it.
+            forced_over &= ~(flyability.nav_ceil_m > 0.0)
+        if covered is not None:
+            forced_over &= covered
+        if forced_over.any():
+            zone_now = np.ones(chm.shape, dtype=bool) if covered is None else covered
+            enterable_zone = zone_now & ~forced_over
+            flight_band = band_raster(
+                chm, mission.cruise_agl_m, mission.altitude, flyability, covered=enterable_zone
+            )
+            clutter = _clutter(flight_band)
+    flight_agl = planned_flight_agl(
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=enterable_zone
     )
     eye_m = mission.threat.observer_height_m
     exposure = cumulative_exposure(
@@ -166,19 +203,6 @@ def build_cost_surface(
     # flight stack may go here (TEST-PLAN N3). Priced as extra *seconds per metre*
     # rather than as an abstract risk, because seconds are what the endurance
     # budget spends — so this term and the N1 check argue in the same currency.
-    measured = (
-        stand_density_raster(mission.layers.stand_data, grid)
-        if mission.layers.stand_data is not None
-        else None
-    )
-    clutter = build_stem_clutter(
-        chm,
-        cruise_speed_ms=mission.drone.cruise_speed_ms,
-        min_canopy_m=mission.altitude.min_canopy_m,
-        among_stems=flight_band >= 2,
-        density_override_per_ha=mission.stem.density_per_ha,
-        measured_per_ha=measured,
-    )
 
     # Drone concealment terms apply only inside the concealment zone; the cable's
     # survivability applies everywhere, because the fiber stays on the ground.
@@ -199,6 +223,15 @@ def build_cost_surface(
         "canopy_height": chm,
         "flight_band": flight_band.astype(np.float32),
         "covered": zone,
+        # Cells inside the zone flown OVER because they cannot be flown under, and
+        # the zone the altitude policy may enter — the corridor must use this one,
+        # or it would plan under a stand the cost surface priced as flown over.
+        "forced_over_canopy": forced_over.astype(np.float32),
+        "enterable_zone": (
+            np.ones(chm.shape, np.float32)
+            if enterable_zone is None
+            else enterable_zone.astype(np.float32)
+        ),
         "survivability": survivability,
         "snag": snag,
         "ridge": ridge,
@@ -236,3 +269,27 @@ def build_cost_surface(
         road_mask=road_mask,
         flyability=flyability,
     )
+
+
+FORCED_CLOSE_CELLS = 2
+"""Gaps of up to this many cells between flown-over stands are flown over too."""
+
+
+def _regularise_forced(mask: np.ndarray) -> np.ndarray:
+    """Close small gaps and pad by one cell, so over/under does not porpoise.
+
+    🔴 Why: along a canopy gradient the envelope edge (1200 stems/ha ≈ a 12.7 m
+    canopy by inference) is crossed cell by cell, and a route that alternates
+    under (~10 m AGL) and over (~16 m) on consecutive 25 m legs demands more
+    climb than the airframe has and breaks the terrain guarantee. One decision
+    per stand, with room to climb before it, is what an operator can read and a
+    flight controller can fly.
+    """
+    from scipy.ndimage import binary_closing, binary_dilation
+
+    if not mask.any():
+        return mask
+    square = np.ones((3, 3), dtype=bool)
+    closed = binary_closing(mask, structure=square, iterations=FORCED_CLOSE_CELLS)
+    out: np.ndarray = binary_dilation(closed | mask, structure=square)
+    return out

@@ -12,6 +12,7 @@ corridor is future work (see SHORTFALLS.md).
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from itertools import pairwise
 
 import numpy as np
@@ -30,6 +31,7 @@ from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import Mission
 from droneplanner.model.plan import (
+    CanopyClimb,
     Crossing,
     FlightBand,
     FlyabilityClass,
@@ -216,6 +218,11 @@ def plan_corridor(
 
     chm = canopy_height(surface.dtm, surface.dsm)
     covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
+    # Where the altitude policy may go UNDER the canopy: the concealment zone minus
+    # the stands the cost surface decided to fly over (over_canopy_when_unpassable).
+    # Using the raw zone here would plan under a stand priced as flown over.
+    enterable = surface.components.get("enterable_zone")
+    zone_for_bands = covered if enterable is None else enterable > 0.5
 
     def _band_at(p: Coordinate) -> tuple[float, float, float, FlightBand]:
         return altitude_band_at(
@@ -224,7 +231,7 @@ def plan_corridor(
             target_agl_m=mission.cruise_agl_m,
             policy=mission.altitude,
             flyability=flyability,
-            covered=covered,
+            covered=zone_for_bands,
         )
 
     def _solve_altitudes(
@@ -451,9 +458,11 @@ def plan_corridor(
         if measured is not None and band is not None and measured[cell] > 0.0 and band[cell] >= 2:
             measured_m += a.distance_to(b)
 
+    climbs = _canopy_climbs(vertices, chm, grid, covered, surface, mission)
     stem_scores: dict[str, float] = {
         "below_canopy_beyond_envelope_m": beyond_m,
         "below_canopy_density_measured_m": measured_m,
+        "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
     }
     if stems is not None and len(stems) > 0:
         sc = assess_stem_clearance(
@@ -475,6 +484,7 @@ def plan_corridor(
         }
 
     return Plan(
+        canopy_climbs=climbs,
         mission_name=mission.name,
         crs=mission.crs,
         route_index=route_index,
@@ -535,3 +545,73 @@ def plan_over_terrain(
 def straight_line_ground_truth(mission: Mission) -> list[Coordinate]:
     """The naive straight start->end line, for the viz to contrast against."""
     return [mission.start, mission.end]
+
+
+def _canopy_climbs(
+    vertices: Sequence[TrajectoryVertex],
+    chm: np.ndarray,
+    grid: Grid,
+    covered: np.ndarray | None,
+    surface: CostSurface,
+    mission: Mission,
+) -> tuple[CanopyClimb, ...]:
+    """Contiguous stretches inside the concealment zone flown OVER the canopy.
+
+    The operator is told about each before launch (report finding
+    ``canopy_climb_in_zone``): the aircraft leaves cover there, and a climb in the
+    first few hundred metres gives the launch site away. Before 2026-09-25 a
+    stand too short to enter was skimmed silently, and a stand too dense to fly was
+    a NO-GO; the second is now flown over (``over_canopy_when_unpassable``), and
+    both are listed.
+    """
+    forced = surface.components.get("forced_over_canopy")
+    policy = mission.altitude
+    runs: list[CanopyClimb] = []
+    along = 0.0
+    start: float | None = None
+    length = max_agl = max_chm = 0.0
+    reasons: set[str] = set()
+
+    def _close() -> None:
+        nonlocal start
+        if start is not None and length > 0.0:
+            order = ("dense_stand", "crowns_too_low", "stand_too_short")
+            reason = next(r for r in order if r in reasons)
+            runs.append(
+                CanopyClimb(
+                    start_m=start,
+                    length_m=length,
+                    max_agl_m=max_agl,
+                    max_canopy_m=max_chm,
+                    reason=reason,
+                )
+            )
+        start = None
+
+    for i, v in enumerate(vertices):
+        seg = 0.0 if i == 0 else math.dist((vertices[i - 1].x, vertices[i - 1].y), (v.x, v.y))
+        cell = grid.world_to_pixel(Coordinate(x=v.x, y=v.y))
+        in_zone = covered is None or bool(covered[cell])
+        over = in_zone and v.flight_band is FlightBand.CANOPY_TOP
+        if over:
+            if start is None:
+                start, length, max_agl, max_chm, reasons = along, 0.0, 0.0, 0.0, set()
+            length += seg
+            max_agl = max(max_agl, v.altitude_agl_m)
+            h = float(chm[cell])
+            max_chm = max(max_chm, h)
+            if forced is not None and forced[cell] > 0.5:
+                reasons.add("dense_stand")
+            elif (
+                policy.crown_ratio is not None
+                and h >= policy.min_canopy_m
+                and h - policy.canopy_clearance_m >= policy.min_agl_m
+            ):
+                reasons.add("crowns_too_low")
+            else:
+                reasons.add("stand_too_short")
+        else:
+            _close()
+        along += seg
+    _close()
+    return tuple(runs)
