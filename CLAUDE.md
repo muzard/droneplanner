@@ -499,7 +499,9 @@ launch site."*
   over 9 m trunks the altitude-aware oracle rightly ignored them; the plan then
   descended and the aircraft came down onto one it had never mapped (−0.44 m).
   Fixed onboard (droneflight PR #6): `fly-local` senses at min(current, target)
-  height, so a descent maps the trunk layer before entering it. Re-flight queued.
+  height, so a descent maps the trunk layer before entering it. **Re-flown with the
+  fix: 2/2 CLEAN** (o5e +1.10 m, o5a +1.07 m, 0 samples inside a trunk) — including
+  seed set 4/5, the one that touched.
 * ⚠️ **Not modelled: getting up through the canopy — or back down.** A real aircraft cannot climb
   through closed crowns; it needs an opening. The climb happens in the padded
   cell before the stand; whether a gap is there is not checked. Also unhandled: an
