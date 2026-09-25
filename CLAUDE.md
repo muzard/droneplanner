@@ -519,6 +519,11 @@ alternative is to accept flight through crowns, which nothing here can simulate.
 Measured: **`min_agl_m` 4.0 makes it REVIEW** (0 violations, min 4.02 m, flown at
 5.1-6.9 m, energy 0.77 — unchanged). Crowns are not flyable at these densities
 anyway: ~1000 stems/ha with ~1.5 m crown radii is ~70 % cover at the crown base.
+⚠️ **Understory is unmeasured, not absent.** Storey 2 (*alikasvos*) appears in 92
+present-day strata against ~8800 dominant ones; most tall stands are inventoried
+by remote sensing (storey 5), which cannot see under the crowns. Where it *is*
+recorded it averages **9.4 m and 323 stems/ha** — exactly the 5-7 m trunk-space
+band. So the 4 m floor rests on an understory the data is silent about.
 ❓ Whether `crown_ratio` becomes the default is a baseline-changing call, left
 opt-in and set only in the Askola `*_cr*.yaml` variants.
 
