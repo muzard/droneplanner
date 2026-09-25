@@ -33,6 +33,7 @@ from droneplanner.fields.stems import (
 )
 from droneplanner.fields.viewshed import point_exposure
 from droneplanner.forest.navigability import CLASS_TO_ENUM, FlyabilityField
+from droneplanner.laydown.settle import cable_settle_lengths
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import AltitudePolicy, Mission
@@ -500,6 +501,9 @@ def plan_corridor(
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
         **_escape_envelope(vertices, chm, grid),
         **_unopened_transitions(vertices, surface.components.get("canopy_opening"), grid),
+        **cable_settle_lengths(
+            vertices, chm, grid, surface.components.get("canopy_opening"), covered
+        ),
     }
     if stems is not None and len(stems) > 0:
         sc = assess_stem_clearance(

@@ -603,6 +603,29 @@ def build_report(
             )
         )
 
+    crowns = plan.objective_scores.get("cable_on_crowns_m", 0.0)
+    if crowns > 0.0:
+        zone_crowns = plan.objective_scores.get("cable_on_crowns_in_zone_m", 0.0)
+        trunk = plan.objective_scores.get("cable_in_trunk_space_m", 0.0)
+        ground = plan.objective_scores.get("cable_on_ground_m", 0.0)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="cable_on_crowns",
+                message=(
+                    f"{crowns:.0f} m of fiber is laid OVER treed canopy with no opening to "
+                    f"fall through ({zone_crowns:.0f} m of it inside the concealment zone): "
+                    "it settles on the crowns, not the ground — wind-exposed, abrading on "
+                    "branches as payout continues (snag is the tether's real break "
+                    "mechanism) and easy to cut. The rest: "
+                    f"{trunk:.0f} m dropped through trunk space, {ground:.0f} m on open "
+                    "ground. Bounded model (laydown/settle.py, roadmap C7): the crown "
+                    "length is what certainly does not reach the ground, not a calibrated "
+                    "prediction."
+                ),
+            )
+        )
+
     esc = plan.objective_scores.get("escape_max_agl_m")
     if esc is not None:
         esc_from = plan.objective_scores.get("escape_first_m", 0.0)

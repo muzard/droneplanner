@@ -468,6 +468,31 @@ of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
 everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
 endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
 
+### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
+`laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
+**through trunk space** (released under the canopy), **on the crowns** (released over
+canopy ≥ 3 m with no opening in the cell), or **on open ground**. Report: scores
+`cable_in_trunk_space_m` / `cable_on_crowns_m` / `cable_on_ground_m` /
+`cable_on_crowns_in_zone_m` and WARNING **`cable_on_crowns`**.
+
+| mission | route | fiber on crowns | of which in the zone |
+|---|---|---|---|
+| demo MVP (`mission_mvp.yaml`) | 5180 m | **3024 m (58 %)** | 240 m |
+| Askola 600 m (`mission_z600.yaml`, with gaps) | 5469 m | 1322 m | 0 m |
+| Askola measured 300 m (no gaps layer) | 3777 m | 1725 m | 17 m |
+| Askola measured 400 m + fallback (gaps) | 3809 m | 1054 m | 106 m |
+
+🔴 **This is a concept-level finding, not a planner defect.** "Only the first part
+needs cover" means the aircraft flies over the forest for the rest of the route —
+and **the fiber then lies on the crowns for most of its length**, where the tether
+model says it is most likely to break (snag), where wind works it, and where it is
+easiest to find and cut. The roadmap predicted exactly this ("it is entirely possible
+low flight is required for the cable's sake and not the drone's"). Options, all the
+user's call: route the uncovered part over open ground/roads (a cost term — changes
+routes), fly low through openings for the cable's sake (costs endurance), or accept
+and state it. ⚠️ Bounded model: crown length = what certainly does not reach the
+ground; no wind drift, no crown-closure physics, no hanging spans at descents.
+
 ### ⬆️ OVER THE CANOPY WHEN UNDER IS UNPASSABLE — with the operator told first (2026-09-25)
 User: *"Keep [crown-aware] opt-in and do some kind of system for it to rise over the
 canopy if it looks unpassable below. The operator should also be informed of that
