@@ -293,3 +293,29 @@ class Plan(BaseModel):
     @property
     def end(self) -> Coordinate:
         return self.vertices[-1].coordinate
+
+
+SPEED_STEP_MS = 0.5
+"""Commanded leg speeds are floored to this step, so a speed that wobbles by
+centimetres per second along a stand does not emit a change item at every vertex."""
+
+SLOW_SPEED_STEP_MS = 0.1
+"""Below one ``SPEED_STEP_MS`` the step is this instead."""
+
+
+def commanded_speed_ms(cap_ms: float) -> float:
+    """The speed the ``.plan`` commands for a leg whose cap is ``cap_ms`` — never
+    above the cap.
+
+    🔴 Two defects this closes (2026-09-25, Askola measured zone). The emitter
+    floored to 0.5 m/s while the endurance model charged the raw cap, so a
+    0.76 m/s leg was flown at 0.5 and charged at 0.76 (SITL: 21.3 min flown vs
+    17.5 planned). And ``max(0.5, ...)`` turned a 0.4 m/s cap (1200 stems/ha)
+    into 0.5 — faster than the planner's own limit. Both the emitter and the
+    endurance budget now call this.
+    """
+    if cap_ms >= SPEED_STEP_MS:
+        return math.floor(cap_ms / SPEED_STEP_MS + 1e-9) * SPEED_STEP_MS
+    return max(
+        SLOW_SPEED_STEP_MS, math.floor(cap_ms / SLOW_SPEED_STEP_MS + 1e-9) * SLOW_SPEED_STEP_MS
+    )

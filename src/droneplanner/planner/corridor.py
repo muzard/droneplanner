@@ -37,6 +37,7 @@ from droneplanner.model.plan import (
     Plan,
     RouteSegment,
     TrajectoryVertex,
+    commanded_speed_ms,
 )
 from droneplanner.planner.corridor_width import assess_corridor
 from droneplanner.planner.endurance import route_budget
@@ -293,7 +294,12 @@ def plan_corridor(
     # that will not fly. `max_reactive_speed_ms` stays in the components for
     # comparison only.
     speed_cap = surface.components["max_speed_ms"]
-    vertex_speeds = [float(min(speed, speed_cap[grid.world_to_pixel(p)])) for p in fpts]
+    # Charged at the speed the .plan will COMMAND (commanded_speed_ms), not the raw
+    # cap: the emitter floors to a step, and a budget on the unfloored cap ran 22 %
+    # short in SITL (Askola measured zone, 2026-09-25).
+    vertex_speeds = [
+        commanded_speed_ms(float(min(speed, speed_cap[grid.world_to_pixel(p)]))) for p in fpts
+    ]
     endurance = route_budget(
         [(p.x, p.y) for p in fpts], amsl, mission, speed_limits_ms=vertex_speeds
     )

@@ -469,6 +469,26 @@ of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
 everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
 endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
 
+### 🔴 Endurance charged a speed the .plan never commanded — fixed (2026-09-25)
+The `.plan` writer floors leg speeds to 0.5 m/s steps; the endurance budget charged
+the raw cap. A 0.76 m/s leg was **flown at 0.5 and charged at 0.76** — SITL on the
+measured zone took 21.3 min against 17.5 planned. Worse, `max(0.5, …)` emitted a
+0.4 m/s cap (1200 stems/ha) as **0.5, faster than the planner's own limit**. Both
+now go through `model.plan.commanded_speed_ms` (0.5 steps; 0.1 steps below 0.5;
+never above the cap). **Emitted `.plan`s are byte-identical**; only verdicts move:
+
+| mission | planned before → after | flown (SITL) |
+|---|---|---|
+| Askola measured `m300` | 17.5 → **20.9 min** | 21.2-21.4 |
+| Askola `askola600` | 22.4 → **24.3 min** (energy 1.06, NO-GO) | 23.2-23.4 |
+
+Both now within ±4 % of flight (fly-local pays no mission-mode waypoint overhead,
+so the model is slightly conservative there). **Re-solved zones:** original Askola
+start **600 → 400 m**; measured zone 300 m (energy 0.91); measured + `clutter` 0.5
+plateaus at ~450 m below canopy. **One battery buys ~300-450 m of below-canopy
+flight on Askola.** The 600 m sortie that flew 4/4 clean below used 23.3 of 24
+usable minutes — it was at the battery's edge, not inside it.
+
 ### ✅ Askola 600 m zone FLOWN in SITL — GPS-denied, **4/4 CLEAN** (2026-09-25)
 `askola600` world (real MML terrain, 442 trunks at the AO's density — *inferred*
 in the zone, see below), `out/askola600/mission.plan` (314 wp, forest legs
