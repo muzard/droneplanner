@@ -517,10 +517,10 @@ launch site."*
   The report states the policy and its worst case before launch (INFO
   **`escape_climb_policy`**: "…up to 26 m AGL…" on Askola). SITL test world with
   an unmapped trunk wall: `tools/add_trunk_wall.py` → `askolam230w`.
-* ⚠️ Segment bands in the report take each segment's *least* concealed cell, so
-  with the padded forced-over mask a segment touching it counts as over —
-  `below_canopy_length_m` can read 0 m while vertices are under (Askola 400 m:
-  19 vertices under). Conservative, but the two disagree.
+* 🐛 **Fixed: `below_canopy_length_m` now comes from the vertices** (where the aircraft
+  flies). It summed segment bands, which take a segment's *least* concealed cell — with
+  the padded forced-over mask Askola's 400 m plan read 0 m under the canopy with 19
+  vertices under it. MVP: 1166 → 1187 m (same route).
 * ⚠️ **Not modelled: getting up through the canopy — or back down** — beyond the
   opening test above (no check of the crowns' actual 3D shape). A real aircraft cannot climb
   through closed crowns; it needs an opening. The climb happens in the padded

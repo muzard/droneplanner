@@ -18,6 +18,8 @@ reach GO. This keeps the human in the loop.
 
 from __future__ import annotations
 
+import itertools
+import math
 from datetime import datetime
 
 from droneplanner.fields.sectors import describe_threat_sectors
@@ -131,9 +133,20 @@ def build_report(
         for s in plan.segments
         if s.flight_band in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
     ]
-    below_canopy_length = sum(s.length_m for s in below_canopy)
-    if below_canopy:
-        lidar_verified = all(s.flight_band is FlightBand.UPPER_TRUNK for s in below_canopy)
+    # Length from the VERTICES — where the aircraft actually flies. Segment bands
+    # take a segment's least concealed cell, so once stands are flown over
+    # (over_canopy_when_unpassable, padded by a cell) a segment merely touching one
+    # read as "over" and Askola's 400 m plan reported 0 m under the canopy with 19
+    # vertices under it (2026-09-25).
+    under_bands = (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+    below_canopy_length = sum(
+        math.dist((a.x, a.y), (b.x, b.y))
+        for a, b in itertools.pairwise(plan.vertices)
+        if a.flight_band in under_bands and b.flight_band in under_bands
+    )
+    under_vertices = [v for v in plan.vertices if v.flight_band in under_bands]
+    if below_canopy_length > 0.0 or below_canopy:
+        lidar_verified = all(v.flight_band is FlightBand.UPPER_TRUNK for v in under_vertices)
         findings.append(
             Finding(
                 severity=Severity.WARNING,
