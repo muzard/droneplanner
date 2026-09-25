@@ -235,9 +235,13 @@ stand / speed   clean seed sets (min air)     contact
 400/ha 3 m/s†   3/4 (+0.03 m on 4/5)          **0/1 (graze -0.04 m)**
 600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
 600/ha 2 m/s    4/4 (+0.12 m)                 —
+800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
 ~1000/ha 0.5*   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ==============  ============================  =============================
 
+‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
+band so the VM holds real time), memory clearing on: +1.11 to +1.35 m surface.
+The 800/ha anchor (1.25) is commanded as 1.0, so this is what the planner sends.
 † 2026-09-25, with memory clearing (droneflight PR #5): still not clean — the anchor
 stays 2.0.
 \* 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
@@ -248,8 +252,8 @@ onboard stack stalled 3/3 there until it cleared memory the scan sees through
 planned.
 
 (Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
-So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5 and ~1000/ha → 0.5 (as
-commanded) are measured**. 600/ha also flew 2 m/s strike-free, but at 600/ha
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.0 and ~1000/ha →
+0.5 (as commanded) are measured**. 600/ha also flew 2 m/s strike-free, but at 600/ha
 the margin is thin at *both* speeds — a 1.9 m median gap threaded by a 0.9 m
 airframe — so it is not raised on that evidence.
 The remaining anchors are the harness discounted by the SITL/harness ratio at the
