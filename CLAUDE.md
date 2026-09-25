@@ -469,6 +469,23 @@ of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
 everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
 endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
 
+### ✅ Askola 600 m zone FLOWN in SITL — GPS-denied, **4/4 CLEAN** (2026-09-25)
+`askola600` world (real MML terrain, 442 trunks at the AO's density — *inferred*
+in the zone, see below), `out/askola600/mission.plan` (314 wp, forest legs
+1.0-1.5 m/s), `fly-local` + EV bridge, four noise-seed sets (`sim-logs/askola/`):
+
+| seeds | `b2-score` | min trunk-surface clearance | time | max nav error |
+|---|---|---|---|---|
+| 4/5 | 0 strikes, 0 ground | +0.728 m | 23.4 min | 11.2 m |
+| 0/1 | 0 / 0 | +0.732 m | 23.3 min | 14.1 m |
+| 2/3 | 0 / 0 | +0.763 m | 23.2 min | 14.0 m |
+| 6/7 | 0 / 0 | +0.765 m | 23.3 min | 17.1 m |
+
+Planned 22.4 min, harness 23.1 min — the endurance model holds on real relief to
+~4 %. **The first real-terrain Finnish sortie: one battery, GPS-denied, no lidar,
+0 strikes.** It tests terrain + trunks at 1.0-1.5 m/s; it does not test measured
+density or crowns (next section).
+
 ### 🔴 Askola, MEASURED zone + crowns (2026-09-25, later the same day)
 **1. The 600 m result above was priced on inference, not measurement.** Within
 600 m of the original start, canopy ≥ 14 m covers 92 % of cells and the stand
