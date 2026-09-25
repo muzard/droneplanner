@@ -34,6 +34,8 @@ def report_to_markdown(report: RiskReport) -> str:
         lines.append(f"_Generated {report.generated_at.isoformat()}_")
     lines.append("")
 
+    lines.extend(_operator_briefing(report))
+
     lines.append("## Summary")
     lines.append("")
     lines.append("| Metric | Value |")
@@ -159,3 +161,41 @@ def write_report(json_path: str | Path, md_path: str | Path, report: RiskReport)
     """Write both ``report.json`` and ``report.md``."""
     Path(json_path).write_text(report_to_json(report), encoding="utf-8")
     Path(md_path).write_text(report_to_markdown(report), encoding="utf-8")
+
+
+_BRIEFING = (
+    ("canopy_climb_in_zone", "Planned climbs out of cover"),
+    ("canopy_transition_no_opening", "Climbs/descents with no canopy opening"),
+    ("escape_climb_policy", "If it gets stuck"),
+    ("cable_on_crowns", "Where the fiber lands"),
+    ("stem_density_beyond_envelope", "Stands beyond the demonstrated envelope"),
+)
+
+
+def _operator_briefing(report: RiskReport) -> list[str]:
+    """What the aircraft will VISIBLY do, before launch — first thing in the report.
+
+    User, 2026-09-25: the operator must know beforehand "so no surprises happen and
+    the drone jumps up to height right from the launch site". The same findings are
+    in the full list below; this pulls the ones about visible behaviour and cable
+    placement to the top, in plain order."""
+    by_code = {f.code: f for f in report.findings}
+    items = [(title, by_code[code]) for code, title in _BRIEFING if code in by_code]
+    out = ["## Operator briefing", ""]
+    if report.canopy_climbs:
+        out.append("| Climb | From launch | Length | Up to | Why |")
+        out.append("| ---: | ---: | ---: | ---: | --- |")
+        for i, c in enumerate(report.canopy_climbs, 1):
+            out.append(
+                f"| {i} | {c.start_m:.0f} m | {c.length_m:.0f} m | {c.max_agl_m:.0f} m AGL "
+                f"| {c.reason.replace('_', ' ')} |"
+            )
+        out.append("")
+    if not items:
+        out.append("_No climbs out of cover, escape policy or cable-placement warnings._")
+        out.append("")
+        return out
+    for title, f in items:
+        out.append(f"- **{title}** ({f.severity.value}): {f.message}")
+    out.append("")
+    return out

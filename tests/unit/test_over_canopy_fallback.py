@@ -133,3 +133,14 @@ def test_a_climb_moves_back_to_a_canopy_opening_and_an_unopened_one_is_reported(
     assert opened.canopy_climbs[0].start_m < closed.canopy_climbs[0].start_m  # moved back
     report = build_report(m, opened, generated_at=None)
     assert any(f.code == "canopy_transition_no_opening" for f in report.findings)
+
+
+def test_the_markdown_report_opens_with_an_operator_briefing() -> None:
+    from droneplanner.io.report import report_to_markdown
+
+    mission, plan, _ = _plan(slice(3, 6), fallback=True)
+    md = report_to_markdown(build_report(mission, plan, generated_at=None))
+    briefing = md.split("## Summary")[0]
+    assert "## Operator briefing" in briefing
+    assert "| 1 |" in briefing  # the climb table
+    assert "FIRST CLIMB" in briefing
