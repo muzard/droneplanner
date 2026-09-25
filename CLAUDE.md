@@ -516,6 +516,9 @@ to keep *some* trunk space — but the flight drops to **5.1-7.0 m AGL**, onto t
 planner's floor.** Flying it needs a lower floor (understory, DTM error — a risk
 call) or better terrain data (MML's 2 m DEM instead of the 10 m one); the
 alternative is to accept flight through crowns, which nothing here can simulate.
+Measured: **`min_agl_m` 4.0 makes it REVIEW** (0 violations, min 4.02 m, flown at
+5.1-6.9 m, energy 0.77 — unchanged). Crowns are not flyable at these densities
+anyway: ~1000 stems/ha with ~1.5 m crown radii is ~70 % cover at the crown base.
 ❓ Whether `crown_ratio` becomes the default is a baseline-changing call, left
 opt-in and set only in the Askola `*_cr*.yaml` variants.
 
