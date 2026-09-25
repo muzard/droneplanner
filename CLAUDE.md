@@ -695,7 +695,12 @@ by remote sensing (storey 5), which cannot see under the crowns. Where it *is*
 recorded it averages **9.4 m and 323 stems/ha** — exactly the 5-7 m trunk-space
 band. So the 4 m floor rests on an understory the data is silent about.
 ❓ Whether `crown_ratio` becomes the default is a baseline-changing call, left
-opt-in and set only in the Askola `*_cr*.yaml` variants.
+opt-in and set only in the Askola `*_cr*.yaml` variants (user, 2026-09-25: keep it
+opt-in). **Per-stand values** (`io/stand_data.read_stand_crown_ratios`, stem-weighted
+species mix: pine 0.42 / spruce 0.65 / broadleaf 0.47): Askola's 6894 stands give
+**0.45-0.62 (p5-p95), median 0.53** — so the scalar 0.55 is representative, and the
+per-stand spread moves a 15 m stand's crown base by only ~±1.2 m. Not wired as a
+per-cell raster for that reason; the reader is there when it is worth it.
 
 ## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
 User: *"look up finnish forest data from a reliable source, and keep in mind that

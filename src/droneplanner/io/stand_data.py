@@ -134,3 +134,76 @@ def stand_density_raster(path: Path, grid: Grid) -> np.ndarray:
         dtype="float32",
     )
     return burned.astype(np.float32)
+
+
+# --- Crown ratio from the species strata (2026-09-25) ---------------------------
+
+SPECIES_CROWN_RATIO = {"pine": 0.42, "spruce": 0.65, "broadleaf": 0.47}
+"""Live-crown length / height in managed Finnish stands, mid-range per group: Scots
+pine ~0.35-0.5, Norway spruce ~0.55-0.8, birch ~0.4-0.55 (Hynynen 1995, Can. J. For.
+Res. 25:57, models pine). Mid-values; the spread is the uncertainty."""
+
+_PINE = {1, 8, 12, 22}
+_SPRUCE = {2, 10, 14, 16, 19, 23, 30}
+
+
+def _group(species: int) -> str:
+    if species in _PINE:
+        return "pine"
+    if species in _SPRUCE:
+        return "spruce"
+    return "broadleaf"
+
+
+def read_stand_crown_ratios(path: Path, min_height_m: float = 5.0) -> dict[int, float]:
+    """``standid -> stem-weighted crown ratio`` from present-day strata taller than
+    ``min_height_m`` (seedlings do not set a flight ceiling)."""
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+            stand_cols = {r[1] for r in db.execute("PRAGMA table_info(treestand)")}
+            klass = "treestandclass" if "treestandclass" in stand_cols else "type"
+            rows = db.execute(
+                "SELECT t.standid, r.treespecies, r.stemcount, r.meanheight "
+                "FROM treestand t JOIN treestratum r ON t.treestandid = r.treestandid "
+                f"WHERE CAST(t.{klass} AS TEXT) = '2' AND r.stemcount IS NOT NULL"
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise StandDataError(f"{path}: cannot read tree strata: {exc}") from exc
+    weight: dict[int, float] = {}
+    total: dict[int, float] = {}
+    for standid, species, count, height in rows:
+        if height is None or float(height) < min_height_m or species is None:
+            continue
+        sid, n = int(standid), float(count)
+        weight[sid] = weight.get(sid, 0.0) + n * SPECIES_CROWN_RATIO[_group(int(species))]
+        total[sid] = total.get(sid, 0.0) + n
+    return {sid: weight[sid] / total[sid] for sid in weight if total[sid] > 0.0}
+
+
+def stand_crown_ratio_raster(path: Path, grid: Grid) -> np.ndarray:
+    """Per-cell crown ratio from the stand polygons; NaN where no stand covers it."""
+    import geopandas as gpd
+    from rasterio.features import rasterize
+    from rasterio.transform import Affine
+
+    ratios = read_stand_crown_ratios(path)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Measured \\(M\\) geometry types")
+        stands = gpd.read_file(path, layer="stand")
+    stands = stands.to_crs(grid.crs)
+    shapes = [
+        (geom, ratios[int(sid)])
+        for geom, sid in zip(stands.geometry, stands["standid"], strict=True)
+        if geom is not None and int(sid) in ratios
+    ]
+    out = np.full((grid.rows, grid.cols), np.nan, dtype=np.float32)
+    if not shapes:
+        return out
+    burned: np.ndarray = rasterize(
+        shapes,
+        out_shape=(grid.rows, grid.cols),
+        transform=Affine(*grid.transform),
+        fill=np.nan,
+        dtype="float32",
+    )
+    return burned.astype(np.float32)
