@@ -32,6 +32,7 @@ from droneplanner.model.report import (
     SegmentReport,
     Severity,
 )
+from droneplanner.planner.corridor import OPENING_SEARCH_M
 
 
 def _decide(findings: list[Finding]) -> Recommendation:
@@ -567,6 +568,24 @@ def build_report(
                     "through (AltitudePolicy.over_canopy_when_unpassable); exposure there is "
                     "costed at the over-canopy altitude. To avoid a climb, move the launch "
                     "site, shrink covered_radius_m, or route round the stand."
+                ),
+            )
+        )
+
+    unopened = int(plan.objective_scores.get("canopy_transitions_without_opening", 0.0))
+    if unopened:
+        at = plan.objective_scores.get("canopy_transition_no_opening_first_m", 0.0)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="canopy_transition_no_opening",
+                message=(
+                    f"{unopened} climb(s) out of or descent(s) into the canopy have no "
+                    f"canopy opening within {OPENING_SEARCH_M:.0f} m of route (first at "
+                    f"{at:.0f} m from launch): the aircraft would have to push through "
+                    "closed crowns there. Openings come from layers.canopy_gaps (the 1 m "
+                    "canopy model's open columns) or open ground. Re-route, move the "
+                    "concealment zone, or accept the risk."
                 ),
             )
         )

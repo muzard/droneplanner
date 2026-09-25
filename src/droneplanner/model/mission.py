@@ -446,6 +446,15 @@ class LayerPaths(BaseModel):
         ),
     )
     roads: Path | None = None
+    canopy_gaps: Path | None = Field(
+        default=None,
+        description=(
+            "Raster on the DTM grid, 1 where a cell holds a canopy OPENING a climb out "
+            "of (or descent back into) the trunk layer can use — tools/build_finnish_ao.py "
+            "derives it from the 1 m canopy model. Without it, open ground next to a "
+            "transition is the only opening assumed."
+        ),
+    )
     stem_map: Path | None = Field(
         default=None,
         description=(

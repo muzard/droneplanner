@@ -102,3 +102,34 @@ def test_the_report_states_how_high_an_in_flight_escape_could_go() -> None:
     report = build_report(mission, plan, generated_at=None)
     [finding] = [f for f in report.findings if f.code == "escape_climb_policy"]
     assert "STRAIGHT UP" in finding.message
+
+
+def test_a_climb_moves_back_to_a_canopy_opening_and_an_unopened_one_is_reported() -> None:
+    """The aircraft cannot climb through closed crowns (2026-09-25): an under->over
+    transition is moved back along the route to the nearest opening, and one with
+    none in reach is counted for the report."""
+    from droneplanner.fields.composite import build_cost_surface
+
+    def climbs(opening_col: int | None):  # type: ignore[no-untyped-def]
+        dtm, dsm, grid = _ao(slice(20, 23))
+        if opening_col is not None:
+            dsm[:, opening_col] = 0.0  # a cleared strip across the AO (a strip road)
+        start = grid.pixel_to_world(N // 2, 1)
+        end = grid.pixel_to_world(N // 2, N - 2)
+        m = make_mission(
+            name="t",
+            start={"x": start.x, "y": start.y},
+            end={"x": end.x, "y": end.y},
+            waypoint_spacing_m=CELL,
+            cruise_agl_m=8.0,
+        )
+        plan = plan_corridor(m, build_cost_surface(dtm, dsm, grid, m))
+        return m, plan
+
+    _, closed = climbs(None)
+    assert closed.objective_scores["canopy_transitions_without_opening"] == 2.0  # in and out
+    m, opened = climbs(15)
+    assert opened.objective_scores["canopy_transitions_without_opening"] == 1.0  # out only
+    assert opened.canopy_climbs[0].start_m < closed.canopy_climbs[0].start_m  # moved back
+    report = build_report(m, opened, generated_at=None)
+    assert any(f.code == "canopy_transition_no_opening" for f in report.findings)

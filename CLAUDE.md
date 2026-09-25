@@ -502,7 +502,27 @@ launch site."*
   height, so a descent maps the trunk layer before entering it. **Re-flown with the
   fix: 2/2 CLEAN** (o5e +1.10 m, o5a +1.07 m, 0 samples inside a trunk) — including
   seed set 4/5, the one that touched.
-* ⚠️ **Not modelled: getting up through the canopy — or back down.** A real aircraft cannot climb
+* ✅ **Canopy OPENINGS (2026-09-25, later).** Every under↔over transition must sit
+  within a cell of an opening; if not, the over-canopy stretch is extended along
+  the route (≤ `OPENING_SEARCH_M` 200 m) to the nearest one, and a transition with
+  none in reach raises WARNING **`canopy_transition_no_opening`**. Openings come
+  from **`layers.canopy_gaps`**: `tools/build_finnish_ao.py` now writes `gaps.tif` —
+  cells holding a ≥ 3×3 m column of the 1 m canopy model open below 5 m (strip
+  roads, crown gaps). **Askola: 49 % of tall-canopy cells have one**; with it the
+  measured-zone plan needs no extension and has no unopened transition, without
+  it (open ground only) 5 are flagged.
+* ✅ **In-flight escape (droneflight `fly-local --escape-after`, default 20 s):**
+  blocked among trunks, the aircraft climbs straight up to the local canopy top
+  + 3 m, holds it 50 m along the route, then descends (sensing its target height).
+  The report states the policy and its worst case before launch (INFO
+  **`escape_climb_policy`**: "…up to 26 m AGL…" on Askola). SITL test world with
+  an unmapped trunk wall: `tools/add_trunk_wall.py` → `askolam230w`.
+* ⚠️ Segment bands in the report take each segment's *least* concealed cell, so
+  with the padded forced-over mask a segment touching it counts as over —
+  `below_canopy_length_m` can read 0 m while vertices are under (Askola 400 m:
+  19 vertices under). Conservative, but the two disagree.
+* ⚠️ **Not modelled: getting up through the canopy — or back down** — beyond the
+  opening test above (no check of the crowns' actual 3D shape). A real aircraft cannot climb
   through closed crowns; it needs an opening. The climb happens in the padded
   cell before the stand; whether a gap is there is not checked. Also unhandled: an
   in-flight climb when the aircraft finds a stand impassable that the data said

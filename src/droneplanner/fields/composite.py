@@ -227,6 +227,9 @@ def build_cost_surface(
         # the zone the altitude policy may enter — the corridor must use this one,
         # or it would plan under a stand the cost surface priced as flown over.
         "forced_over_canopy": forced_over.astype(np.float32),
+        # Where the aircraft can get up through the canopy, or back down into the
+        # trunk layer (planner/corridor.py places every under/over transition at one).
+        "canopy_opening": _canopy_openings(mission, chm, grid),
         "enterable_zone": (
             np.ones(chm.shape, np.float32)
             if enterable_zone is None
@@ -293,3 +296,29 @@ def _regularise_forced(mask: np.ndarray) -> np.ndarray:
     closed = binary_closing(mask, structure=square, iterations=FORCED_CLOSE_CELLS)
     out: np.ndarray = binary_dilation(closed | mask, structure=square)
     return out
+
+
+OPENING_HEIGHT_M = 5.0
+"""Canopy lower than this is an opening (matches tools/build_finnish_ao.py)."""
+
+
+def _canopy_openings(mission: Mission, chm: np.ndarray, grid: Grid) -> np.ndarray:
+    """1 where a climb out of / descent into the canopy has room, else 0.
+
+    From ``layers.canopy_gaps`` (the 1 m canopy model's open columns) when given;
+    otherwise only open ground, and the cells beside it (a stand edge), count —
+    a DSM grid cannot see the strip roads and crown gaps a 1 m model can.
+    """
+    from scipy.ndimage import binary_dilation
+
+    path = mission.layers.canopy_gaps
+    if path is not None:
+        from droneplanner.io.raster import read_raster
+
+        r = read_raster(path)
+        if r.shape != (grid.rows, grid.cols) or tuple(r.transform) != tuple(grid.transform):
+            raise ValueError(f"{path}: canopy_gaps must be on the DTM grid (shape + transform)")
+        return (r.data > 0.5).astype(np.float32)
+    open_ground = chm < OPENING_HEIGHT_M
+    out: np.ndarray = binary_dilation(open_ground, structure=np.ones((3, 3), dtype=bool))
+    return out.astype(np.float32)

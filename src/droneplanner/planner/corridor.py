@@ -222,7 +222,11 @@ def plan_corridor(
     # the stands the cost surface decided to fly over (over_canopy_when_unpassable).
     # Using the raw zone here would plan under a stand priced as flown over.
     enterable = surface.components.get("enterable_zone")
-    zone_for_bands = covered if enterable is None else enterable > 0.5
+    zone_for_bands = (
+        (np.ones(chm.shape, dtype=bool) if covered is None else covered.copy())
+        if enterable is None
+        else enterable > 0.5
+    )
 
     def _band_at(p: Coordinate) -> tuple[float, float, float, FlightBand]:
         return altitude_band_at(
@@ -250,6 +254,18 @@ def plan_corridor(
         agl, climb_v, up, down = smooth_altitudes(prefs, floors, ceils, dists, limits)
         amsl = [a + _ground_at(p.x, p.y) for p, a in zip(cs, agl, strict=True)]
         return cs, agl, amsl, bands, climb_v, up, down
+
+    # --- Every under/over transition at a canopy OPENING (2026-09-25) ---
+    # The aircraft cannot climb up through closed crowns, nor drop back into the
+    # trunk layer through them. Where a transition has no opening beside it, the
+    # over-canopy stretch is extended back (or forward) under the canopy to the
+    # nearest one; the cells passed over are then flown over too.
+    opening = surface.components.get("canopy_opening")
+    if opening is not None:
+        _, _, _, bands0, _, _, _ = _solve_altitudes(spaced)
+        zone_for_bands &= ~_extend_to_openings(
+            spaced, bands0, opening, grid, covered, max_search_m=OPENING_SEARCH_M
+        )
 
     _, _, amsl0, _, _, _, _ = _solve_altitudes(spaced)
 
@@ -464,6 +480,7 @@ def plan_corridor(
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
         **_escape_envelope(vertices, chm, grid),
+        **_unopened_transitions(vertices, surface.components.get("canopy_opening"), grid),
     }
     if stems is not None and len(stems) > 0:
         sc = assess_stem_clearance(
@@ -657,3 +674,97 @@ def _escape_envelope(
             along[i + 1] - along[i] for i in under if i + 1 < len(along)
         ),
     }
+
+
+OPENING_SEARCH_M = 200.0
+"""How far along the route an under/over transition may move to reach an opening."""
+
+_UNDER = (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+
+
+def _near_opening(opening: np.ndarray, cell: tuple[int, int]) -> bool:
+    r, c = cell
+    win = opening[max(r - 1, 0) : r + 2, max(c - 1, 0) : c + 2]
+    return bool((win > 0.5).any())
+
+
+def _extend_to_openings(
+    pts: list[tuple[float, float]],
+    bands: list[FlightBand],
+    opening: np.ndarray,
+    grid: Grid,
+    covered: np.ndarray | None,
+    *,
+    max_search_m: float,
+) -> np.ndarray:
+    """Cells to fly OVER so every under<->over-canopy transition sits at an opening.
+
+    A transition is a pair of consecutive vertices, one under the canopy and one
+    not. It needs an opening within a cell of either vertex (open ground counts).
+    If there is none, walk away from the transition through the UNDER side
+    until a vertex near an opening is found (within ``max_search_m``) and return
+    the cells in between, to be flown over as well; if none is found the
+    transition is left where it is and the report says it has no opening.
+    """
+    cells = [grid.world_to_pixel(Coordinate(x=x, y=y)) for x, y in pts]
+    force = np.zeros(opening.shape, dtype=bool)
+    n = len(pts)
+
+    def seg(i: int, j: int) -> float:
+        return math.dist(pts[i], pts[j])
+
+    for i in range(n - 1):
+        a, b = bands[i], bands[i + 1]
+        # Leaving the trunk layer (to skim a stand, or over a young stand flown at the
+        # open target) crosses the crown layer at the edge; open ground is its own
+        # opening, which the opening test sees.
+        climb = a in _UNDER and b not in _UNDER
+        descend = a not in _UNDER and b in _UNDER
+        if not (climb or descend):
+            continue
+        if _near_opening(opening, cells[i]) or _near_opening(opening, cells[i + 1]):
+            continue
+        # Walk into the under side, away from the transition.
+        k, step, walked = (i, -1, 0.0) if climb else (i + 1, 1, 0.0)
+        path: list[int] = []
+        while 0 <= k < n and bands[k] in _UNDER and walked <= max_search_m:
+            if _near_opening(opening, cells[k]):
+                for m in path:
+                    force[cells[m]] = True
+                break
+            path.append(k)
+            nxt = k + step
+            if 0 <= nxt < n:
+                walked += seg(k, nxt)
+            k = nxt
+    if covered is not None:
+        force &= covered
+    return force
+
+
+def _unopened_transitions(
+    vertices: Sequence[TrajectoryVertex], opening: np.ndarray | None, grid: Grid
+) -> dict[str, float]:
+    """Under/over-canopy transitions left WITHOUT an opening (none within reach).
+
+    Scores: how many, and where the first one is along the route (for the
+    report's ``canopy_transition_no_opening`` finding)."""
+    if opening is None:
+        return {}
+    along = 0.0
+    count = 0
+    first = -1.0
+    for a, b in pairwise(vertices):
+        seg = math.dist((a.x, a.y), (b.x, b.y))
+        if (a.flight_band in _UNDER) != (b.flight_band in _UNDER):
+            ca = grid.world_to_pixel(Coordinate(x=a.x, y=a.y))
+            cb = grid.world_to_pixel(Coordinate(x=b.x, y=b.y))
+            if not (_near_opening(opening, ca) or _near_opening(opening, cb)):
+                count += 1
+                if first < 0:
+                    first = along
+        along += seg
+    out = {"canopy_transitions_without_opening": float(count)}
+    if count:
+        out["canopy_transition_no_opening_first_m"] = first
+    return out
