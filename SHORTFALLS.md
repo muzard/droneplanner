@@ -856,9 +856,13 @@ concealment-then-stems has no admissible path in dense forest).
   corner-speed prior** (measurable directly from `sim-logs/4.7/23_40_58.ulg`),
   then re-derive whether a planner-side trigger buys anything at all. Full result:
   droneflight CLAUDE.md → tether plugin §3, and RUNBOOK §4.7.
-- 🔴 **No real-AO validation.** Everything is exercised on synthetic fixtures and
-  the procedural demo. The spec's small real lidar tile + DEM (§6.1) is not yet
-  wired in, so field correctness on real data is unverified.
+- 🟠 **Real-AO validation — PARTLY DONE 2026-09-25 (Askola, open Finnish data).**
+  `tools/build_finnish_ao.py`: MML 10 m terrain, Metsäkeskus 1 m canopy model (p95
+  per 16 m cell, plus canopy openings) and stand polygons (measured stems/ha,
+  species strata). Planned, flown GPS-denied in SITL (4/4 on the 600 m zone, 4/4 on
+  the measured-density zone, 2/2 crown-aware, 2/2 over-canopy) — see CLAUDE.md →
+  Askola. Still missing: a real lidar tile (§6.1) and any field ground truth — the
+  forest in SITL is still generated from the data, not surveyed.
 - 🟠 **Reference-data fidelity is assumed, not modeled — the corridor and the
   flight-time fixes share one shaky input.** The whole corridor is built from
   geospatial reference (DTM/DSM, lidar, land cover). That reference is **uneven in
@@ -874,9 +878,12 @@ concealment-then-stems has no admissible path in dense forest).
   concealment against staying in reach of trustworthy optical fixes — otherwise a
   maximally-concealed route is a maximally-blind one. Ties into the M2 "lidar
   currency / DSM-vs-canopy coupling" 🟡 and land-cover (currently unwired) items.
-- 🟠 **Cable-laydown prediction (M3) is absent** — where the fiber settles, and
-  its per-segment survivability, are not modeled; the report's survivability is a
-  placement heuristic, not a laydown result.
+- 🟠 **Cable laydown — MINIMAL MODEL BUILT 2026-09-25** (`laydown/settle.py`,
+  roadmap C7): each metre is classed trunk space / crowns / open ground and the
+  report gives the lengths (`cable_on_crowns` WARNING; the demo MVP lays 58 % on
+  crowns). Still absent: settle physics (wind drift, crown closure), hanging spans
+  at climbs/descents, and feeding the class into `snag.py`/`survivability.py` — the
+  report's survivability is still a placement heuristic.
 - 🟢 Determinism, CRS discipline, license hygiene, kinematic feasibility, and the
   human-in-the-loop REVIEW-cap all hold.
 
