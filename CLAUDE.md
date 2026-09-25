@@ -490,6 +490,12 @@ climb energy the aircraft need not spend, so the original Askola start goes **40
 700 m** (0.99 at 700, ~740 m under the canopy); the measured zone stays **300 m**
 (0.88); measured + `clutter` 0.5 plateaus at ~460 m under the canopy. Latest numbers
 win over the tables above them in this file.
+**~1000 stems/ha raised 0.75 → 1.0 m/s (SITL 4/4 on `askolam230`, +0.27 m air, 0
+escapes):** the measured zone's energy at 300 m falls 0.88 → **0.68**, but the zone
+still stops at 300 m — at 400 m the route meets 32 m of stands **> 1200 stems/ha**,
+beyond anything flown. The binding constraint on measured Finnish stands is now the
+envelope's dense end, not the battery (with the over-canopy fallback on, those
+stands are flown over instead).
 
 ### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
 `laydown/settle.py` classes every metre of laid fiber by where it settles: dropped

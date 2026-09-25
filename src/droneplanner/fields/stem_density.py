@@ -215,7 +215,7 @@ ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
     (500.0, 1.5),
     (600.0, 1.5),
     (800.0, 1.5),
-    (1000.0, 0.75),
+    (1000.0, 1.0),
     (1200.0, 0.4),
 )
 """``(stems/ha, speed m/s)`` the planner prices below-canopy flight at: the
@@ -238,6 +238,7 @@ stand / speed   clean seed sets (min air)     contact
 800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
 800/ha 1.5 m/s‡ **4/4** (+0.29 m)             — (one earlier run at RTF 0.2 voided)
 ~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
+~1000/ha 1.0§   **4/4** (+0.27 m)             — (`askolam230`, RTF 1.0, 0 escapes)
 ==============  ============================  =============================
 
 ‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
@@ -253,8 +254,8 @@ onboard stack stalled 3/3 there until it cleared memory the scan sees through
 planned.
 
 (Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
-So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5 and ~1000/ha →
-0.5 (as commanded) are measured** (800/ha raised 1.25 → 1.5 on 2026-09-25).
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5 and ~1000/ha → 1.0
+are measured** (2026-09-25: 800/ha raised 1.25 → 1.5, ~1000/ha 0.75 → 1.0).
 600/ha also flew 2 m/s strike-free, but at 600/ha the margin is thin at *both*
 speeds — a 1.9 m median gap threaded by a 0.9 m airframe — so it is not raised on
 that evidence.
