@@ -33,6 +33,8 @@ a measured free window (and see SHORTFALLS 1b — that band's datum is wrong tod
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from droneplanner.forest.navigability import FlyabilityField
@@ -79,8 +81,30 @@ def under_canopy_ceiling(chm: np.ndarray, policy: AltitudePolicy) -> np.ndarray:
     return ceil
 
 
+OVER_HEADROOM_M = 40.0
+"""How far above its preferred height an over-canopy / open-ground leg may be held
+(to bridge a short gap without diving into it)."""
+
+
+def skim_canopy(chm: np.ndarray, policy: AltitudePolicy, cell_size_m: float) -> np.ndarray:
+    """Tallest canopy within ``policy.skim_lookahead_m`` of each cell — the surface an
+    over-canopy leg clears (``AltitudePolicy.skim_lookahead_m``)."""
+    from scipy.ndimage import maximum_filter
+
+    if policy.skim_lookahead_m <= 0.0:
+        return np.asarray(chm)
+    radius = max(1, math.ceil(policy.skim_lookahead_m / max(cell_size_m, 1e-6)))
+    out: np.ndarray = maximum_filter(np.asarray(chm, dtype=np.float32), size=2 * radius + 1)
+    return out
+
+
 def _band_from_canopy(
-    chm_m: float, target_agl_m: float, policy: AltitudePolicy, *, covered: bool = True
+    chm_m: float,
+    target_agl_m: float,
+    policy: AltitudePolicy,
+    *,
+    covered: bool = True,
+    skim_m: float | None = None,
 ) -> tuple[float, float, float, FlightBand]:
     """``(preferred, floor, ceil, band)`` AGL for one cell, from its canopy height.
 
@@ -102,10 +126,14 @@ def _band_from_canopy(
     # The vegetation raises the *floor* here — leaving it at ``min_agl_m`` let the
     # altitude smoother pick a height inside the crowns of a stand it had already
     # decided not to enter.
-    over_floor = max(floor, chm_m + policy.canopy_clearance_m)
+    over_floor = max(floor, (chm_m if skim_m is None else skim_m) + policy.canopy_clearance_m)
     pref = max(target, over_floor)
     band = FlightBand.CANOPY_TOP if pref > target else FlightBand.OPEN
-    return pref, over_floor, pref, band
+    # No crowns above: the ceiling is headroom, not physics. 🔴 It was ``pref``, so a
+    # 24 m clearing between two skimmed 25 m stands pinned the aircraft to 12 m and
+    # demanded a dive-and-climb of ~15 m each way on 24 m legs at cruise (Askola,
+    # 2026-09-25: 8 climb violations). The smoother still pulls toward ``pref``.
+    return pref, over_floor, pref + OVER_HEADROOM_M, band
 
 
 def altitude_band_at(
@@ -116,6 +144,7 @@ def altitude_band_at(
     policy: AltitudePolicy,
     flyability: FlyabilityField | None = None,
     covered: np.ndarray | None = None,
+    skim: np.ndarray | None = None,
 ) -> tuple[float, float, float, FlightBand]:
     """Return ``(preferred, floor, ceil, band)`` altitude AGL for one cell.
 
@@ -130,7 +159,13 @@ def altitude_band_at(
             floor = float(flyability.nav_floor_m[rc])
             pref = float(flyability.max_flyable_altitude_m[rc])
             return min(max(pref, floor), ceil), floor, ceil, FlightBand.UPPER_TRUNK
-    return _band_from_canopy(float(chm[rc]), target_agl_m, policy, covered=in_zone)
+    return _band_from_canopy(
+        float(chm[rc]),
+        target_agl_m,
+        policy,
+        covered=in_zone,
+        skim_m=None if skim is None else float(skim[rc]),
+    )
 
 
 def planned_flight_agl(
@@ -139,6 +174,7 @@ def planned_flight_agl(
     policy: AltitudePolicy,
     flyability: FlyabilityField | None = None,
     covered: np.ndarray | None = None,
+    skim: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-cell height AGL the planner would fly — :func:`altitude_band_at`, rastered.
 
@@ -154,7 +190,7 @@ def planned_flight_agl(
     enterable = enterable & zone
 
     under_alt = np.minimum(target, ceil)
-    over_alt = np.maximum(target, chm + policy.canopy_clearance_m)
+    over_alt = np.maximum(target, (chm if skim is None else skim) + policy.canopy_clearance_m)
     agl = np.where(enterable, under_alt, over_alt)
     if flyability is not None:
         banded = np.minimum(
@@ -171,6 +207,7 @@ def band_raster(
     policy: AltitudePolicy,
     flyability: FlyabilityField | None = None,
     covered: np.ndarray | None = None,
+    skim: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-cell :class:`FlightBand` as an int code, for reporting and viz.
 
@@ -184,7 +221,7 @@ def band_raster(
         & zone
     )
     # "Skim" means the canopy is what sets the altitude, not the target.
-    skimming = ~enterable & ((chm + policy.canopy_clearance_m) > target)
+    skimming = ~enterable & (((chm if skim is None else skim) + policy.canopy_clearance_m) > target)
     codes = np.where(enterable, 2, np.where(skimming, 1, 0)).astype(np.int32)
     if flyability is not None:
         codes = np.where((flyability.nav_ceil_m > 0.0) & zone, 3, codes).astype(np.int32)

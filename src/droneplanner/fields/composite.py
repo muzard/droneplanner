@@ -32,6 +32,7 @@ from droneplanner.fields.altitude import (
     canopy_height,
     concealment_mask,
     planned_flight_agl,
+    skim_canopy,
 )
 from droneplanner.fields.snag import build_snag
 from droneplanner.fields.stem_density import build_stem_clutter
@@ -127,8 +128,11 @@ def build_cost_surface(
             measured_per_ha=measured,
         )
 
+    # Over-canopy legs clear the tallest canopy within the skim lookahead, not each
+    # cell's own top (AltitudePolicy.skim_lookahead_m).
+    skim = skim_canopy(chm, mission.altitude, grid.cell_size_m)
     flight_band = band_raster(
-        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered, skim=skim
     )
     clutter = _clutter(flight_band)
     forced_over = np.zeros(chm.shape, dtype=bool)
@@ -145,11 +149,16 @@ def build_cost_surface(
             zone_now = np.ones(chm.shape, dtype=bool) if covered is None else covered
             enterable_zone = zone_now & ~forced_over
             flight_band = band_raster(
-                chm, mission.cruise_agl_m, mission.altitude, flyability, covered=enterable_zone
+                chm,
+                mission.cruise_agl_m,
+                mission.altitude,
+                flyability,
+                covered=enterable_zone,
+                skim=skim,
             )
             clutter = _clutter(flight_band)
     flight_agl = planned_flight_agl(
-        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=enterable_zone
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=enterable_zone, skim=skim
     )
     eye_m = mission.threat.observer_height_m
     exposure = cumulative_exposure(
@@ -222,6 +231,7 @@ def build_cost_surface(
         "ground_los": ground_los,  # the cable: line of sight only, no detection model
         "flight_agl": flight_agl,
         "canopy_height": chm,
+        "skim_canopy": skim.astype(np.float32),
         "flight_band": flight_band.astype(np.float32),
         "covered": zone,
         # Cells inside the zone flown OVER because they cannot be flown under, and

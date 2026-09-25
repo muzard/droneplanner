@@ -380,6 +380,17 @@ class AltitudePolicy(BaseModel):
     crown_clearance_m: float = Field(
         default=1.0, ge=0, description="Vertical gap kept below the crown base."
     )
+    skim_lookahead_m: float = Field(
+        default=40.0,
+        ge=0,
+        description=(
+            "Over the canopy, fly at the TALLEST canopy within this distance plus the "
+            "clearance — not each cell's own top. Real canopy is jagged at 16 m cells "
+            "(10-20 m steps); skimming it cell by cell demanded 4-5 m/s of climb at "
+            "cruise and could reach a taller stand below its crowns. ~40 m is the ground "
+            "a 20 m climb takes at 3 m/s and 6 m/s. 0 = the old per-cell skim."
+        ),
+    )
     over_canopy_when_unpassable: bool = Field(
         default=True,
         description=(

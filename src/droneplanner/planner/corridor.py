@@ -243,7 +243,11 @@ def plan_corridor(
             policy=mission.altitude,
             flyability=flyability,
             covered=zone_for_bands,
+            skim=skim,
         )
+
+    speed_cap_raster = surface.components["max_speed_ms"]
+    skim = surface.components.get("skim_canopy")
 
     def _solve_altitudes(
         pts: list[tuple[float, float]],
@@ -270,8 +274,18 @@ def plan_corridor(
             zone=zone_for_bands,
             target_agl_m=mission.cruise_agl_m,
             policy=mission.altitude,
+            skim=skim,
         )
-        agl, climb_v, up, down = smooth_altitudes(prefs, floors, ceils, dists, limits)
+        # The speed each leg will be COMMANDED (the .plan's speeds): the slower end's
+        # stem-density cap, as the emitter and the endurance budget use.
+        caps = [
+            commanded_speed_ms(
+                float(min(mission.drone.cruise_speed_ms, speed_cap_raster[grid.world_to_pixel(p)]))
+            )
+            for p in cs
+        ]
+        legs = [min(a, b) for a, b in pairwise(caps)]
+        agl, climb_v, up, down = smooth_altitudes(prefs, floors, ceils, dists, limits, legs)
         amsl = [a + _ground_at(p.x, p.y) for p, a in zip(cs, agl, strict=True)]
         return cs, agl, amsl, bands, climb_v, up, down
 
@@ -814,6 +828,7 @@ def _debounce_bands(
     zone: np.ndarray,
     target_agl_m: float,
     policy: AltitudePolicy,
+    skim: np.ndarray | None = None,
 ) -> None:
     """Remove under/over excursions shorter than ``MIN_DWELL_M``, in place.
 
@@ -858,6 +873,7 @@ def _debounce_bands(
             target_agl_m,
             policy,
             covered=under_it,
+            skim_m=None if skim is None else float(skim[grid.world_to_pixel(cs[k])]),
         )
         if under_it:
             ceil = float(under_canopy_ceiling(np.asarray(h), policy))

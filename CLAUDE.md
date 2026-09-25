@@ -468,6 +468,25 @@ of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
 everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
 endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
 
+### 🐛 Real canopy broke the altitude profile — three fixes (2026-09-25)
+Askola's plans reported **"Trajectory INFEASIBLE", 8-11 climb violations, 4.2-4.5 m/s
+peak climb**. The demo AO never showed it (smooth synthetic canopy). Three causes:
+1. **The climb check assumed cruise on every leg** — a 20 m climb approached at
+   0.5 m/s was priced as needing 40 m of ground, not ~3 m. `smooth_altitudes` now
+   takes the COMMANDED speed per leg.
+2. **Skimming followed each 16 m cell's own canopy top** — real canopy steps 10-20 m
+   cell to cell, and a leg that cannot climb fast enough meets a taller stand below
+   its crowns (a collision the terrain guarantee does not check). Over the canopy
+   the plan now clears the **tallest canopy within `AltitudePolicy.skim_lookahead_m`
+   (40 m)** — `fields/altitude.skim_canopy`, in all three band functions.
+3. **Over-canopy / open cells had their ceiling pinned to the target**, so a 24 m
+   clearing between two 25 m stands forced a 15 m dive-and-climb at cruise. They now
+   have 40 m of headroom (`OVER_HEADROOM_M`), and the smoother gained a **backward
+   pass** that climbs early for a stand it can see coming.
+Result: Askola 600 m, measured 300 m and measured 400 m + fallback all **feasible,
+0 climb / 0 clearance violations** (peak climb ≤ 3.0 m/s); MVP unchanged (min AGL
+6.59 m, energy 0.82).
+
 ### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
 `laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
 **through trunk space** (released under the canopy), **on the crowns** (released over
