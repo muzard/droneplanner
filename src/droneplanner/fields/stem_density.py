@@ -232,11 +232,14 @@ stand / speed   clean seed sets (min air)     contact
 200/ha 4 m/s    4/5                           **0/1**
 400/ha 2 m/s    **4/4** (+0.28 m)             —
 400/ha 3 m/s    —                             **4/5 (2 contacts)**
+400/ha 3 m/s†   3/4 (+0.03 m on 4/5)          **0/1 (graze -0.04 m)**
 600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
 600/ha 2 m/s    4/4 (+0.12 m)                 —
 ~1000/ha 0.5*   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ==============  ============================  =============================
 
+† 2026-09-25, with memory clearing (droneflight PR #5): still not clean — the anchor
+stays 2.0.
 \* 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
 1.5 m median spacing, real MML terrain): the 1000/ha anchor below (0.75) is
 commanded as 0.5 (``model.plan.commanded_speed_ms``), which is what flew. The
