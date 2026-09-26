@@ -173,6 +173,7 @@ def build_cost_surface(
         sectors=sectors,
         off_axis_vigilance=vigilance,
         trunk_space=trunk_space_for(mission, dtm, chm, clutter["stem_density_per_ha"]),
+        gap_map=gap_map_for(mission, grid),
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -369,3 +370,19 @@ def trunk_space_for(
         trunk_diameter_m=occ.trunk_diameter_m,
         max_range_m=occ.trunk_space_max_range_m,
     )
+
+
+def gap_map_for(mission: Mission, grid: Grid) -> np.ndarray | None:
+    """Measured per-cell crown-gap probability (``layers.canopy_gap_fraction``), or
+    None to use the scalar ``sub_canopy_gap_fraction``. Shared by the raster field and
+    the flown re-score so they cannot disagree."""
+    path = mission.layers.canopy_gap_fraction
+    if path is None:
+        return None
+    from droneplanner.io.raster import read_raster
+
+    r = read_raster(path)
+    if r.shape != (grid.rows, grid.cols) or tuple(r.transform) != tuple(grid.transform):
+        raise ValueError(f"{path}: canopy_gap_fraction must be on the DTM grid")
+    out: np.ndarray = np.clip(r.data, 0.0, 1.0).astype(np.float32)
+    return out

@@ -491,6 +491,17 @@ class LayerPaths(BaseModel):
         ),
     )
     roads: Path | None = None
+    canopy_gap_fraction: Path | None = Field(
+        default=None,
+        description=(
+            "Raster on the DTM grid: per-cell probability a look-down sightline finds a "
+            "gap in the crowns (fraction of the 1 m canopy model open below the flight "
+            "band; tools/build_finnish_ao.py writes gapfrac.tif). Replaces "
+            "threat.canopy_occlusion.sub_canopy_gap_fraction cell by cell. Askola "
+            "(2026-09-26): median 0.04-0.16 by stand height — the literature 0.10 is the "
+            "median, but a quarter of tall cells exceed ~0.20-0.25."
+        ),
+    )
     canopy_gaps: Path | None = Field(
         default=None,
         description=(

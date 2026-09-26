@@ -53,3 +53,20 @@ def test_an_observer_inside_the_stand_is_not_covered_and_the_raster_agrees() -> 
     for c in range(1, dsm.shape[1]):
         point = _point_weight(dsm, (0, 0), 2.0, (0, c), 6.0, CELL, trunk_space=ts)
         assert math.isclose(float(raster[0, c]), point, rel_tol=1e-5, abs_tol=1e-6), c
+
+
+def test_a_measured_gap_map_replaces_the_scalar_gap_fraction_per_cell() -> None:
+    """layers.canopy_gap_fraction (2026-09-26): the look-down gap probability is the
+    measured value of the cell the target is under, not the literature 0.10."""
+    from droneplanner.model.mission import CanopyOcclusion
+
+    n = 6
+    dsm = np.full((1, n), 20.0, dtype=np.float32)
+    canopy = CanopyOcclusion(sub_canopy_gap_fraction=0.10)
+    gaps = np.full((1, n), 0.10, dtype=np.float32)
+    gaps[0, 5] = 0.40
+    # A 300 m sensor looking steeply down at a drone 6 m up under the crown at col 5.
+    scalar = _point_weight(dsm, (0, 0), 320.0, (0, 5), 6.0, CELL, canopy=canopy)
+    measured = _point_weight(dsm, (0, 0), 320.0, (0, 5), 6.0, CELL, canopy=canopy, gap_map=gaps)
+    assert math.isclose(scalar, 0.10, rel_tol=1e-6)
+    assert math.isclose(measured, 0.40, rel_tol=1e-6)

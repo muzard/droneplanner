@@ -16,6 +16,7 @@ import numpy as np
 import rasterio
 import yaml
 
+from droneplanner.fields.composite import gap_map_for
 from droneplanner.fields.viewshed import point_exposure
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
@@ -64,6 +65,7 @@ for tname, (h, obs) in threats.items():
             detection=mission.threat.detection,
             target_span_m=mission.drone.rotor_span_m,
             off_axis_vigilance=mission.threat.off_axis_vigilance,
+            gap_map=gap_map_for(mission, grid),
         )
         agl = np.median([p.altitude_agl_m for p in v])
         energy = plan.endurance.energy_fraction if plan.endurance else float("nan")

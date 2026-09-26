@@ -36,6 +36,10 @@ from rasterio.warp import reproject
 OPENING_M = 3
 """Side of the open column (1 m pixels) a climb out of the canopy needs."""
 
+GAP_FRACTION_BELOW_M = 8.0
+"""Canopy lower than this counts as a gap for the look-down probability — the top of
+the trunk-space flight band."""
+
 OPENING_HEIGHT_M = 5.0
 """A pixel is open below this canopy height — under the trunk-space flight band."""
 
@@ -113,11 +117,21 @@ def build(
     tallest = maximum_filter(fine_full, size=OPENING_M)
     open_px = (tallest < OPENING_HEIGHT_M)[: rows * k, : cols * k]
     gaps = open_px.reshape(rows, k, cols, k).any(axis=(1, 3)).astype(np.float32)
+    # Crown-gap FRACTION: share of 1 m pixels open below the flight band — the per-cell
+    # probability a look-down sightline reaches the aircraft (layers.canopy_gap_fraction).
+    below = (fine_full < GAP_FRACTION_BELOW_M)[: rows * k, : cols * k]
+    gapfrac = below.reshape(rows, k, cols, k).mean(axis=(1, 3)).astype(np.float32)
 
     if not np.isfinite(dtm).all():
         raise SystemExit("terrain has holes over the AO — choose bounds inside Finland's DEM")
     dsm = (dtm + chm).astype(np.float32)
-    for name, arr in (("dtm", dtm), ("chm", chm), ("dsm", dsm), ("gaps", gaps)):
+    for name, arr in (
+        ("dtm", dtm),
+        ("chm", chm),
+        ("dsm", dsm),
+        ("gaps", gaps),
+        ("gapfrac", gapfrac),
+    ):
         with rasterio.open(out / f"{name}.tif", "w", **profile) as dst:
             dst.write(arr, 1)
     import pyogrio

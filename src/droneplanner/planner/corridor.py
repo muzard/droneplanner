@@ -25,7 +25,12 @@ from droneplanner.fields.altitude import (
     concealment_mask,
     under_canopy_ceiling,
 )
-from droneplanner.fields.composite import CostSurface, build_cost_surface, trunk_space_for
+from droneplanner.fields.composite import (
+    CostSurface,
+    build_cost_surface,
+    gap_map_for,
+    trunk_space_for,
+)
 from droneplanner.fields.stems import (
     StemMap,
     assess_stem_clearance,
@@ -493,6 +498,7 @@ def plan_corridor(
         trunk_space=trunk_space_for(
             mission, surface.dtm, chm, surface.components["stem_density_per_ha"]
         ),
+        gap_map=gap_map_for(mission, grid),
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0

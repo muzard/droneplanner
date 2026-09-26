@@ -214,6 +214,7 @@ def single_viewshed(
     target_span_m: float = 0.0,
     sector_mask: np.ndarray | None = None,
     trunk_space: TrunkSpace | None = None,
+    gap_map: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-cell visibility **weight** in [0, 1] for one observer (float32).
 
@@ -270,8 +271,9 @@ def single_viewshed(
             view_angle = (target_elev - eye) / dist
             if view_angle >= max_angle:
                 slant = math.hypot(dist, target_elev - eye)
+                cell_gap = gap if gap_map is None else float(gap_map[r, c])
                 visible[r, c] = _range_weight(slant, full_m, zero_m) * _sub_canopy_weight(
-                    view_angle, target_elev, surface, eye, gap, steep_tan
+                    view_angle, target_elev, surface, eye, cell_gap, steep_tan
                 )
             if terrain_angle > max_angle:
                 max_angle = terrain_angle
@@ -392,8 +394,12 @@ def cumulative_exposure(
     sectors: Sequence[ThreatSector] = (),
     off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
     trunk_space: TrunkSpace | None = None,
+    gap_map: np.ndarray | None = None,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each cell, in [0, 1] (float32).
+
+    ``gap_map`` replaces ``canopy.sub_canopy_gap_fraction`` per cell with a measured
+    value (``layers.canopy_gap_fraction``).
 
     With no observers, returns an all-zero field (nothing is exposed). See
     :func:`single_viewshed` for ``target_elev_m`` — pass it to score the drone at
@@ -433,6 +439,7 @@ def cumulative_exposure(
                     target_span_m,
                     element_mask(grid, element),
                     trunk_space,
+                    gap_map,
                 ),
                 out=seen,
             )
@@ -451,6 +458,7 @@ def _point_weight(
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
     trunk_space: TrunkSpace | None = None,
+    gap_map: np.ndarray | None = None,
 ) -> float:
     """Visibility weight in [0, 1] from one observer to one 3D point.
 
@@ -469,7 +477,9 @@ def _point_weight(
         canopy,
         detection,
         target_span_m,
+        gap_map,
     )
+
     if trunk_space is None or base >= 1.0:
         return base
     full_m, zero_m = _range_terms(detection, target_span_m)
@@ -497,6 +507,7 @@ def _march_point_weight(
     canopy: CanopyOcclusion | None = None,
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
+    gap_map: np.ndarray | None = None,
 ) -> float:
     """The DSM-march half of :func:`_point_weight`."""
     r0, c0 = observer_rc
@@ -515,8 +526,9 @@ def _march_point_weight(
             if view_angle < max_angle:
                 return 0.0
             slant = math.hypot(dist, target_elev_m - eye_elev_m)
+            cell_gap = gap if gap_map is None else float(gap_map[r, c])
             return _range_weight(slant, full_m, zero_m) * _sub_canopy_weight(
-                view_angle, target_elev_m, float(dsm[r, c]), eye_elev_m, gap, steep_tan
+                view_angle, target_elev_m, float(dsm[r, c]), eye_elev_m, cell_gap, steep_tan
             )
         angle = (float(dsm[r, c]) - eye_elev_m) / dist
         if angle > max_angle:
@@ -536,6 +548,7 @@ def point_exposure(
     sectors: Sequence[ThreatSector] = (),
     off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
     trunk_space: TrunkSpace | None = None,
+    gap_map: np.ndarray | None = None,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each ``(x, y, z_amsl)`` point.
 
@@ -581,6 +594,7 @@ def point_exposure(
                         detection if element.detection is None else element.detection,
                         target_span_m,
                         trunk_space,
+                        gap_map,
                     ),
                 )
             accum[i] += seen
