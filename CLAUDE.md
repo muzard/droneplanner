@@ -519,8 +519,14 @@ steepness rule and `trunk_space_sightlines`. Askola measured zone, 300 m / 12×:
 crown-aware **0.000 → 0.026**, below 0.096 → 0.076, canopy-top 1.000 — the binary
 wall's 0.000 was the artifact §6g flagged; the gate holds (13-38×). Off by default:
 it moves every historical figure. ⚠️ Turbid-medium scaling off nadir errs toward
-exposure for clumped conifers (safe direction). The observer's eye still sits on the
-DSM (SHORTFALLS).
+exposure for clumped conifers (safe direction). Under it the observer stands on the
+terrain (`dtm + h`), not on the crowns — a dismount inside a stand is nearly blind.
+**Bearing sweeps** (`tools/bearing_sweep_real_ao.py`, 300 m sensor, 12×, 12 bearings,
+the user's 0.15 cap): at 600 m out below-canopy passes everywhere; **at 300 m out, 12 m
+AGL fails 2/12 under transmission** (inside the crown layer of ~16 m spruce), crown-aware
+passes all 12. **WARNING `flight_in_crown_layer`** (score
+`below_canopy_in_crown_layer_m`) now tells the operator when below-canopy flight is above
+the estimated crown base while `crown_ratio` is off: demo MVP 1252 m, Askola 304 m.
 
 ### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
 `laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
