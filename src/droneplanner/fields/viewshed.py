@@ -254,7 +254,7 @@ def single_viewshed(
     target = _target_surface(dsm, target_height_m, target_elev_m)
     visible = np.zeros((rows, cols), dtype=np.float32)
     visible[r0, c0] = 1.0
-    eye = float(dsm[r0, c0]) + observer_height_m
+    eye = _eye_elev(dsm, medium, observer_rc, observer_height_m)
     gap, steep_tan = _canopy_terms(canopy)
     full_m, zero_m = _range_terms(detection, target_span_m)
     if medium is not None:
@@ -313,6 +313,24 @@ def single_viewshed(
                     if w > visible[r, c]:
                         visible[r, c] = w
     return _apply_sector(visible, sector_mask, dsm.shape)
+
+
+def _eye_elev(
+    dsm: np.ndarray,
+    medium: CrownMedium | None,
+    observer_rc: tuple[int, int],
+    observer_height_m: float,
+) -> float:
+    """Where the observer's eye is.
+
+    With the DSM as a wall the eye has to sit on the surface (``dsm + h``): moved
+    down into a stand it would be blind to everything, including a drone in the same
+    stand's trunk space. Under crown transmission the canopy is a medium the eye can
+    look through, so the observer stands on the TERRAIN (``dtm + h``) — a 2 m
+    dismount in a 22 m stand is at 2 m, not in the treetops (SHORTFALLS).
+    """
+    ground = dsm if medium is None else medium.dtm
+    return float(ground[observer_rc]) + observer_height_m
 
 
 def _apply_sector(
@@ -794,7 +812,7 @@ def point_exposure(
     cell = grid.cell_size_m
     for group in views:
         obs_rc = grid.world_to_pixel(group[0].observer)
-        eye = float(dsm[obs_rc]) + observer_height_m
+        eye = _eye_elev(dsm, medium, obs_rc, observer_height_m)
         through = None
         if medium is not None:
             # One vectorised pass per observer; the per-element loop then only

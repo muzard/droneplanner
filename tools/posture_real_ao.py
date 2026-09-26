@@ -41,6 +41,7 @@ postures = {
 }
 threats = {
     "ground 2 m, 12x, 600 m W": (2.0, [(sx - 600.0, sy + 100.0)]),
+    "ground 2 m, 12x, 200 m W": (2.0, [(sx - 200.0, sy + 50.0)]),
     "airborne 300 m, 12x, 600 m W": (300.0, [(sx - 600.0, sy + 100.0)]),
 }
 for tname, (h, obs) in threats.items():

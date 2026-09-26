@@ -145,3 +145,26 @@ def test_point_and_raster_agree() -> None:
     )
     for (r, c), v in zip(cells, pe, strict=True):
         assert math.isclose(float(raster[r, c]), float(v), rel_tol=1e-5, abs_tol=1e-6), (r, c)
+
+
+def test_an_observer_inside_a_stand_stands_on_the_ground_and_sees_through_the_trunks() -> None:
+    """SHORTFALLS 'the observer's eye sits on the DSM': a 2 m dismount in a 20 m stand
+    was modelled at 22 m, in the treetops, where the binary wall blinds it to a drone
+    in the same stand's trunk space. Under crown transmission it stands on the DTM."""
+    n = 30
+    dtm = np.zeros((1, n))
+    dsm = dtm + 20.0
+    medium = CrownMedium.build(
+        dtm, dsm, crown_base_agl_m=np.full((1, n), 10.0), gap=0.1, stems_per_m2=600.0 / 1e4
+    )
+    target = np.full((1, n), 5.0)
+    binary = single_viewshed(dsm, (0, 0), CELL, 2.0, target_elev_m=target)
+    seen = single_viewshed(dsm, (0, 0), CELL, 2.0, target_elev_m=target, medium=medium)
+    assert binary[0, 5] == 0.0  # eye on the crowns, the neighbours' crowns are a wall
+    # 50 m of trunk space at 0.06 stems/m2 x 0.25 m -> exp(-0.75) ~ 0.47
+    assert math.isclose(float(seen[0, 5]), math.exp(-0.75), rel_tol=0.05)
+    assert seen[0, 20] < seen[0, 10] < seen[0, 5]  # the trunks add up with distance
+    over = single_viewshed(
+        dsm, (0, 0), CELL, 2.0, target_elev_m=np.full((1, n), 23.0), medium=medium
+    )
+    assert over[0, 5] < seen[0, 5]  # a canopy-top drone is seen up through the crowns

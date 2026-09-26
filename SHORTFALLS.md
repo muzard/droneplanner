@@ -538,6 +538,14 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   exactly when flying in trunk space near an edge — enable it together with
   `AltitudePolicy.crown_ratio`. Observers standing INSIDE a stand are still not
   covered (their eye sits on the crowns).
+  ✅ **Closed under crown transmission (2026-09-26, opt-in, PR #4):** with
+  `CanopyOcclusion.crown_transmission` the canopy is a medium, not a wall, so the
+  eye can go where the observer stands — **`dtm + observer_height_m`**
+  (`viewshed._eye_elev`). A dismount inside a stand now sees a drone in the same
+  trunk space through the stems (exp(−n·d·L)) and a canopy-top drone up through the
+  crowns. Without crown transmission the eye stays on the DSM, for the reason above.
+  Note it moves elevated sensors too: a "300 m" sensor is now 300 m above the
+  terrain, not above the canopy (≤ ~25 m difference).
 - ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
   at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
   median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the

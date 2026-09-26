@@ -150,7 +150,8 @@ class CanopyOcclusion(BaseModel):
             "the trunks do (exp(-stems/m^2 x trunk_diameter_m x path)). Fixes the binary "
             "wall that scored a drone at 5-7 m under a neighbouring crown as exactly 0. "
             "Replaces the sub-canopy steepness rule and trunk_space_sightlines (both "
-            "become special cases). Off by default: it moves every historical figure."
+            "become special cases), and the observer stands on the TERRAIN (dtm + observer "
+            "height), not on the crowns. Off by default: it moves every historical figure."
         ),
     )
     crown_open_below_m: float = Field(
