@@ -507,6 +507,21 @@ the Askola 600 m route **crosses 6 roads**, the measured-zone route **8** (0 bef
 there were no roads), for +25-33 m of route; each is an `open_crossings` point where
 the fiber lies across a road, now in the operator briefing.
 
+### 🌫️ Crown transmission — the canopy as a medium (2026-09-26, opt-in, PR #4)
+`threat.canopy_occlusion.crown_transmission` scores each sightline by transmittance
+instead of the binary DSM horizon: DTM blocks; each crossed cell's crown layer
+attenuates as gap^(path/crown depth) (calibrated so a vertical pass transmits exactly
+the cell's gap — measured `canopy_gap_fraction` or the scalar); trunks attenuate below
+the crown base. `fields/viewshed.CrownMedium` + `crown_transmittance` (vectorised,
+exact per-piece layer integration, so raster and flown re-score agree to float
+precision); one builder, `composite.crown_medium_for`. It supersedes the sub-canopy
+steepness rule and `trunk_space_sightlines`. Askola measured zone, 300 m / 12×:
+crown-aware **0.000 → 0.026**, below 0.096 → 0.076, canopy-top 1.000 — the binary
+wall's 0.000 was the artifact §6g flagged; the gate holds (13-38×). Off by default:
+it moves every historical figure. ⚠️ Turbid-medium scaling off nadir errs toward
+exposure for clumped conifers (safe direction). The observer's eye still sits on the
+DSM (SHORTFALLS).
+
 ### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
 `laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
 **through trunk space** (released under the canopy), **on the crowns** (released over
