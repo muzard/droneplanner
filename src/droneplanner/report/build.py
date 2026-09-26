@@ -619,7 +619,9 @@ def build_report(
                     "branches as payout continues (snag is the tether's real break "
                     "mechanism) and easy to cut. The rest: "
                     f"{trunk:.0f} m dropped through trunk space, {ground:.0f} m on open "
-                    "ground. Bounded model (laydown/settle.py, roadmap C7): the crown "
+                    f"ground; it hangs off a crown edge into a stand at "
+                    f"{plan.objective_scores.get('cable_crown_hangs', 0.0):.0f} place(s) "
+                    "(snag points). Bounded model (laydown/settle.py, roadmap C7): the crown "
                     "length is what certainly does not reach the ground, not a calibrated "
                     "prediction."
                 ),

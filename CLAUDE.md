@@ -520,7 +520,10 @@ low flight is required for the cable's sake and not the drone's"). Options, all 
 user's call: route the uncovered part over open ground/roads (a cost term — changes
 routes), fly low through openings for the cable's sake (costs endurance), or accept
 and state it. ⚠️ Bounded model: crown length = what certainly does not reach the
-ground; no wind drift, no crown-closure physics, no hanging spans at descents.
+ground; no wind drift, no crown-closure physics. **Crown-edge hangs are counted**
+(`cable_crown_hangs`: where the cable passes between lying on crowns and dropping
+through trunk space — a span dragged over a crown edge as payout continues, i.e. a
+snag point): MVP **2**, Askola 600 m **0**.
 
 **Decision support — `weights.cable_on_crowns` (opt-in, default 0 = routes unchanged):**
 a per-metre penalty on cells flown over canopy ≥ 3 m with no opening.

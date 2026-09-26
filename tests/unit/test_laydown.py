@@ -77,3 +77,18 @@ def test_the_cable_weight_steers_the_uncovered_route_onto_open_ground() -> None:
 
     assert crowns(0.0) > 400.0
     assert crowns(2.0) < 0.5 * crowns(0.0)
+
+
+def test_a_span_hanging_off_a_crown_edge_into_the_stand_is_counted() -> None:
+    grid = Grid(transform=(10.0, 0.0, 0.0, 0.0, -10.0, 10.0), rows=1, cols=6, crs="EPSG:32633")
+    chm = np.full((1, 6), 20.0, dtype=np.float32)
+    verts = [
+        _v(5.0, FlightBand.BELOW_CANOPY),
+        _v(15.0, FlightBand.BELOW_CANOPY),  # trunk space
+        _v(25.0, FlightBand.CANOPY_TOP),  # climbs: the cable leaves trunk space for crowns
+        _v(35.0, FlightBand.CANOPY_TOP),
+        _v(45.0, FlightBand.BELOW_CANOPY),  # and hangs back down into the next stand
+        _v(55.0, FlightBand.BELOW_CANOPY),
+    ]
+    got = cable_settle_lengths(verts, chm, grid, None)
+    assert got["cable_crown_hangs"] == 2.0
