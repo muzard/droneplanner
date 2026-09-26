@@ -497,6 +497,16 @@ beyond anything flown. The binding constraint on measured Finnish stands is now 
 envelope's dense end, not the battery (with the over-canopy fallback on, those
 stands are flown over instead).
 
+### 🛣️ Real roads on the Askola AO (2026-09-26)
+`tools/build_finnish_ao.py` now also writes `roads.gpkg`: MML topographic database
+roads (MTK-tie 2025, CC BY 4.0, the approved MML/Funet source) read for the AO window
+only over `/vsicurl/` + bbox (the national file is 5 GB; the window was 260 segments
+in 2.4 s), vehicle roads only (`kohdeluokka` < 12300: 195 segments, 45 km — tracks
+and footpaths left out). Wired into every Askola mission as `layers.roads`. Effect:
+the Askola 600 m route **crosses 6 roads**, the measured-zone route **8** (0 before —
+there were no roads), for +25-33 m of route; each is an `open_crossings` point where
+the fiber lies across a road, now in the operator briefing.
+
 ### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
 `laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
 **through trunk space** (released under the canopy), **on the crowns** (released over

@@ -15,8 +15,9 @@ Sources (all open, fetched 2026-09-25; the user approved the downloads):
 * **Stands** — Metsäkeskus *Metsävarakuviot* (``io/stand_data.py``), passed to the
   mission as ``layers.stand_data`` so speed is priced on measured stems/ha.
 
-Outputs ``dtm.tif``, ``chm.tif``, ``dsm.tif`` (= dtm + chm) and ``gaps.tif`` (1 where
-a cell holds a canopy opening a climb can use — ``layers.canopy_gaps``) in EPSG:3067 on a
+Outputs ``dtm.tif``, ``chm.tif``, ``dsm.tif`` (= dtm + chm), ``gaps.tif`` (1 where
+a cell holds a canopy opening a climb can use — ``layers.canopy_gaps``) and
+``roads.gpkg`` (MML vehicle roads for the window — ``layers.roads``) in EPSG:3067 on a
 16 m grid — the Metsäkeskus *Hila* cell size, and close to the demo AO's 25 m.
 """
 
@@ -37,6 +38,17 @@ OPENING_M = 3
 
 OPENING_HEIGHT_M = 5.0
 """A pixel is open below this canopy height — under the trunk-space flight band."""
+
+ROADS_GPKG = (
+    "/vsicurl/https://www.nic.funet.fi/index/geodata/mml/maastotietokanta/2025/gpkg/"
+    "MTK-tie_25-04-03.gpkg"
+)
+"""MML topographic database roads (CC BY 4.0), read for the AO window only — the file
+is 5 GB nationally; its spatial index makes the window a few hundred kB."""
+
+VEHICLE_ROAD_MAX_CLASS = 12300
+"""MTK ``kohdeluokka`` below this is a road a vehicle drives on (motorway ... private
+road); 123xx are tracks and footpaths, left out of crossing detection."""
 
 DEM_VRT = "/vsicurl/https://www.nic.funet.fi/index/geodata/mml/dem10m/dem10m_direct.vrt"
 CRS = "EPSG:3067"
@@ -108,6 +120,15 @@ def build(
     for name, arr in (("dtm", dtm), ("chm", chm), ("dsm", dsm), ("gaps", gaps)):
         with rasterio.open(out / f"{name}.tif", "w", **profile) as dst:
             dst.write(arr, 1)
+    import pyogrio
+
+    roads = pyogrio.read_dataframe(ROADS_GPKG, layer="tieviiva", bbox=(x0, y0, x1, y1))
+    vehicle = roads[roads["kohdeluokka"] < VEHICLE_ROAD_MAX_CLASS]
+    vehicle.to_file(out / "roads.gpkg", driver="GPKG")
+    print(
+        f"{out}: {len(vehicle)} vehicle road segments ({vehicle.length.sum() / 1000:.1f} km) "
+        "-> roads.gpkg (layers.roads)"
+    )
     print(
         f"{out}: {cols}x{rows} cells of {cell:.0f} m | terrain {dtm.min():.0f}-{dtm.max():.0f} m | "
         f"canopy >= 12 m on {100 * (chm >= 12).mean():.0f} % of cells, max {chm.max():.0f} m | "

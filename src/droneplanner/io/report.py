@@ -168,6 +168,7 @@ _BRIEFING = (
     ("canopy_transition_no_opening", "Climbs/descents with no canopy opening"),
     ("escape_climb_policy", "If it gets stuck"),
     ("cable_on_crowns", "Where the fiber lands"),
+    ("open_crossings", "Road crossings (fiber across a road)"),
     ("stem_density_beyond_envelope", "Stands beyond the demonstrated envelope"),
 )
 
