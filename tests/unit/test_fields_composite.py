@@ -142,3 +142,27 @@ def test_cable_survivability_is_unaffected_by_the_drone_altitude() -> None:
     assert np.array_equal(low.components["survivability"], high.components["survivability"])
     assert np.array_equal(low.components["ground_los"], high.components["ground_los"])
     assert high.components["exposure"].mean() > low.components["exposure"].mean()
+
+
+def test_crown_transmission_reaches_the_cost_surface_and_is_off_by_default() -> None:
+    """CanopyOcclusion.crown_transmission (2026-09-26): with it on, a look-down sensor
+    sees the drone under the neighbouring crowns (the binary wall scored those 0); off,
+    the field is bit-identical to what it was."""
+    size = 24
+    grid = _grid_for(size)
+    dtm = np.zeros((size, size), dtype=np.float32)
+    dsm = np.full((size, size), 20.0, dtype=np.float32)
+    dsm[0:4, 0:4] = 0.0
+
+    def field(**occ: object) -> np.ndarray:
+        mission = _canopy_mission(grid, observer_height_m=300.0, canopy_occlusion=occ)
+        surface = build_cost_surface(dtm, dsm, grid, mission)  # type: ignore[arg-type]
+        out: np.ndarray = surface.components["exposure"]
+        return out
+
+    default = field(sub_canopy_gap_fraction=0.10)
+    explicit_off = field(sub_canopy_gap_fraction=0.10, crown_transmission=False)
+    on = field(sub_canopy_gap_fraction=0.10, crown_transmission=True)
+    assert np.array_equal(default, explicit_off)
+    assert not np.array_equal(default, on)
+    assert float(on.max()) <= 1.0

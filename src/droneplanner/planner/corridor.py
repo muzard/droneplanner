@@ -28,6 +28,7 @@ from droneplanner.fields.altitude import (
 from droneplanner.fields.composite import (
     CostSurface,
     build_cost_surface,
+    crown_medium_for,
     gap_map_for,
     trunk_space_for,
 )
@@ -499,6 +500,9 @@ def plan_corridor(
             mission, surface.dtm, chm, surface.components["stem_density_per_ha"]
         ),
         gap_map=gap_map_for(mission, grid),
+        medium=crown_medium_for(
+            mission, surface.dtm, surface.dsm, surface.components["stem_density_per_ha"], grid
+        ),
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0

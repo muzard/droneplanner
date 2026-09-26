@@ -16,7 +16,7 @@ import numpy as np
 import rasterio
 import yaml
 
-from droneplanner.fields.composite import gap_map_for
+from droneplanner.fields.composite import crown_medium_for, gap_map_for
 from droneplanner.fields.viewshed import point_exposure
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
@@ -52,25 +52,45 @@ for tname, (h, obs) in threats.items():
         for k, v in over.items():
             m[k].update(v)
         mission = Mission.model_validate(m)
-        plan, _ = plan_over_terrain(mission, dtm, dsm, grid, route_index=0)
+        plan, surface = plan_over_terrain(mission, dtm, dsm, grid, route_index=0)
         v = [p for p in plan.vertices if math.hypot(p.x - sx, p.y - sy) <= 300.0]
         pts = [(p.x, p.y, p.ground_elev_m + p.altitude_agl_m) for p in v]
-        exp = point_exposure(
-            dsm,
-            grid,
-            [Coordinate(x=x, y=y) for x, y in obs],
-            pts,
-            observer_height_m=h,
-            canopy=mission.threat.canopy_occlusion,
-            detection=mission.threat.detection,
-            target_span_m=mission.drone.rotor_span_m,
-            off_axis_vigilance=mission.threat.off_axis_vigilance,
-            gap_map=gap_map_for(mission, grid),
+        # Three occlusion models on the same flown points: the binary DSM wall with
+        # the scalar and the measured gap, and crown transmission (measured gap).
+        tx = copy.deepcopy(m)
+        tx["threat"].setdefault("canopy_occlusion", {})["crown_transmission"] = True
+        medium = crown_medium_for(
+            Mission.model_validate(tx), dtm, dsm, surface.components["stem_density_per_ha"], grid
         )
+        scored = {}
+        for label, gaps, med in (
+            ("binary 0.10", None, None),
+            ("binary measured", gap_map_for(mission, grid), None),
+            ("transmission", None, medium),
+        ):
+            scored[label] = point_exposure(
+                dsm,
+                grid,
+                [Coordinate(x=x, y=y) for x, y in obs],
+                pts,
+                observer_height_m=h,
+                canopy=mission.threat.canopy_occlusion,
+                detection=mission.threat.detection,
+                target_span_m=mission.drone.rotor_span_m,
+                off_axis_vigilance=mission.threat.off_axis_vigilance,
+                gap_map=gaps,
+                medium=med,
+            )
+        exp = scored["binary measured"]
         agl = np.median([p.altitude_agl_m for p in v])
         energy = plan.endurance.energy_fraction if plan.endurance else float("nan")
         print(
             f"{tname:32s} {pname:28s} zone vertices {len(v):3d}  median AGL {agl:5.1f}  "
             f"zone exposure mean {exp.mean():.3f} max {exp.max():.3f}  energy {energy:.2f}",
+            flush=True,
+        )
+        print(
+            "    "
+            + "  ".join(f"{k}: {v.mean():.3f} (max {v.max():.3f})" for k, v in scored.items()),
             flush=True,
         )

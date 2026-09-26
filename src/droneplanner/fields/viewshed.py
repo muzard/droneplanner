@@ -96,6 +96,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 import numpy as np
 
@@ -158,6 +159,14 @@ def _range_weight(range_m: float, full_m: float, zero_m: float) -> float:
     return (zero_m - range_m) / (zero_m - full_m)
 
 
+def _range_weights(slant: np.ndarray, full_m: float, zero_m: float) -> np.ndarray:
+    """:func:`_range_weight` over an array."""
+    if math.isinf(full_m):
+        return np.ones_like(slant, dtype=np.float64)
+    ramp = (zero_m - slant) / max(zero_m - full_m, 1e-12)
+    return np.where(slant <= full_m, 1.0, np.where(slant >= zero_m, 0.0, ramp))
+
+
 def _canopy_terms(canopy: CanopyOcclusion | None) -> tuple[float, float]:
     """``(gap_fraction, tan(max_elev))``. ``None`` disables the sub-canopy model.
 
@@ -215,6 +224,7 @@ def single_viewshed(
     sector_mask: np.ndarray | None = None,
     trunk_space: TrunkSpace | None = None,
     gap_map: np.ndarray | None = None,
+    medium: CrownMedium | None = None,
 ) -> np.ndarray:
     """Per-cell visibility **weight** in [0, 1] for one observer (float32).
 
@@ -247,6 +257,13 @@ def single_viewshed(
     eye = float(dsm[r0, c0]) + observer_height_m
     gap, steep_tan = _canopy_terms(canopy)
     full_m, zero_m = _range_terms(detection, target_span_m)
+    if medium is not None:
+        # Crown transmission replaces the horizon march, the sub-canopy rule and the
+        # trunk-space pass: all three are special cases of one line integral.
+        visible = _medium_viewshed(
+            medium, dsm, observer_rc, eye, target, cell_size_m, full_m, zero_m
+        )
+        return _apply_sector(visible, sector_mask, dsm.shape)
 
     for rt, ct in _boundary_cells(rows, cols):
         max_angle = -math.inf
@@ -295,11 +312,18 @@ def single_viewshed(
                     w = t * _range_weight(slant, full_m, zero_m)
                     if w > visible[r, c]:
                         visible[r, c] = w
-    if sector_mask is not None:
-        if sector_mask.shape != dsm.shape:
-            raise ValueError("sector_mask must have the same shape as the DSM")
-        visible = visible * sector_mask.astype(np.float32)
-    return visible
+    return _apply_sector(visible, sector_mask, dsm.shape)
+
+
+def _apply_sector(
+    visible: np.ndarray, sector_mask: np.ndarray | None, shape: tuple[int, ...]
+) -> np.ndarray:
+    if sector_mask is None:
+        return visible
+    if sector_mask.shape != shape:
+        raise ValueError("sector_mask must have the same shape as the DSM")
+    out: np.ndarray = visible * sector_mask.astype(np.float32)
+    return out
 
 
 def single_viewshed_bool(
@@ -381,6 +405,180 @@ def _trunk_space_weight(
     return transmit
 
 
+@dataclass(frozen=True)
+class CrownMedium:
+    """The canopy as an attenuating medium (``CanopyOcclusion.crown_transmission``).
+
+    Per cell: ``crown_k_per_m`` in the crown layer [crown base, DSM top] and
+    ``trunk_k_per_m`` from the crown base down to the ground; zero where there is
+    no canopy. Build it with ``fields.composite.crown_medium_for``.
+    """
+
+    dtm: np.ndarray
+    crown_base_m: np.ndarray
+    """Absolute (AMSL) crown-base elevation."""
+    crown_k_per_m: np.ndarray
+    trunk_k_per_m: np.ndarray
+
+    @classmethod
+    def build(
+        cls,
+        dtm: np.ndarray,
+        dsm: np.ndarray,
+        crown_base_agl_m: np.ndarray,
+        gap: np.ndarray | float,
+        stems_per_m2: np.ndarray | float,
+        trunk_diameter_m: float = 0.25,
+        open_below_m: float = 2.0,
+    ) -> CrownMedium:
+        """Calibrate the crown attenuation so a VERTICAL pass through a cell's whole
+        crown layer transmits exactly its gap probability.
+
+        A slant path of length ``s`` through crown depth ``D`` then transmits
+        ``gap^(s/D)`` (turbid medium). For clumped conifer crowns the effective
+        clumping index rises off nadir, so real slant gaps are *smaller* than this
+        predicts — the model errs toward exposure, the safe direction here.
+        """
+        dtm = np.asarray(dtm, dtype=np.float64)
+        dsm = np.asarray(dsm, dtype=np.float64)
+        chm = np.clip(dsm - dtm, 0.0, None)
+        treed = chm >= open_below_m
+        base_agl = np.clip(np.asarray(crown_base_agl_m, dtype=np.float64), 0.0, chm)
+        depth = np.maximum(chm - base_agl, 0.5)
+        p = np.clip(np.broadcast_to(np.asarray(gap, dtype=np.float64), chm.shape), 1e-4, 1.0)
+        crown_k = np.where(treed, -np.log(p) / depth, 0.0)
+        stems = np.broadcast_to(np.asarray(stems_per_m2, dtype=np.float64), chm.shape)
+        trunk_k = np.where(treed, stems * trunk_diameter_m, 0.0)
+        return cls(
+            dtm=dtm,
+            crown_base_m=dtm + base_agl,
+            crown_k_per_m=crown_k,
+            trunk_k_per_m=trunk_k,
+        )
+
+
+SAMPLES_PER_CELL = 2
+"""Pieces per cell of horizontal run in :func:`crown_transmittance` (each piece
+looks up its midpoint's cell)."""
+
+
+def _layer_length(
+    h_a: np.ndarray, h_b: np.ndarray, lo: np.ndarray, hi: np.ndarray, length: np.ndarray
+) -> np.ndarray:
+    """3D length of a straight piece (heights ``h_a`` -> ``h_b``, length ``length``)
+    lying between ``lo`` and ``hi``: exact for a linear height, so a steep line's
+    short crossing of a crown layer is resolved however few pieces there are."""
+    top = np.maximum(h_a, h_b)
+    bot = np.minimum(h_a, h_b)
+    span = top - bot
+    overlap = np.clip(np.minimum(top, hi) - np.maximum(bot, lo), 0.0, None)
+    flat = span < 1e-9
+    inside_flat = (bot >= lo) & (bot < hi)
+    frac = np.where(flat, inside_flat.astype(np.float64), overlap / np.where(flat, 1.0, span))
+    out: np.ndarray = frac * length
+    return out
+
+
+def crown_transmittance(
+    medium: CrownMedium,
+    dsm: np.ndarray,
+    observer_rc: tuple[int, int],
+    eye_elev_m: float,
+    target_r: np.ndarray,
+    target_c: np.ndarray,
+    target_elev_m: np.ndarray,
+    cell_size_m: float,
+) -> np.ndarray:
+    """Transmittance in [0, 1] of the straight sightline to each target.
+
+    Each line is cut into ``SAMPLES_PER_CELL`` pieces per cell of its own horizontal
+    run (so a target's answer does not depend on which other targets share the
+    call — the raster and the flown re-score agree exactly). Each piece takes its
+    midpoint's cell; the lengths it spends in that cell's crown layer and trunk
+    space are integrated exactly from the heights at its two ends. Any piece dipping
+    below its ground blocks the line.
+    """
+    r0, c0 = observer_rc
+    tr = np.asarray(target_r, dtype=np.float64).ravel()
+    tc = np.asarray(target_c, dtype=np.float64).ravel()
+    tz = np.asarray(target_elev_m, dtype=np.float64).ravel()
+    out = np.ones(tr.shape, dtype=np.float64)
+    if tr.size == 0:
+        return out
+    run = np.hypot(tr - r0, tc - c0)
+    pieces = np.maximum(np.ceil(run * SAMPLES_PER_CELL), 1.0)
+    rows, cols = dsm.shape
+    # Distance bands keep short lines from looping over the longest one's pieces.
+    band_edges = [0.0, 8.0, 32.0, 128.0, 512.0, math.inf]
+    for lo, hi in pairwise(band_edges):
+        sel = np.flatnonzero((run > lo) & (run <= hi))
+        if sel.size == 0:
+            continue
+        k_i = pieces[sel]
+        dr = tr[sel] - r0
+        dc = tc[sel] - c0
+        dz = tz[sel] - eye_elev_m
+        piece_len = np.hypot(run[sel] * cell_size_m, dz) / k_i
+        tau = np.zeros(sel.size)
+        blocked = np.zeros(sel.size, dtype=bool)
+        for i in range(int(k_i.max())):
+            live = i < k_i
+            f_a = np.minimum(i / k_i, 1.0)
+            f_b = np.minimum((i + 1) / k_i, 1.0)
+            f_m = 0.5 * (f_a + f_b)
+            rr = np.clip(np.rint(r0 + f_m * dr).astype(np.int64), 0, rows - 1)
+            cc = np.clip(np.rint(c0 + f_m * dc).astype(np.int64), 0, cols - 1)
+            h_a = eye_elev_m + f_a * dz
+            h_b = eye_elev_m + f_b * dz
+            ground = medium.dtm[rr, cc]
+            base = medium.crown_base_m[rr, cc]
+            top = dsm[rr, cc]
+            blocked |= live & (np.minimum(h_a, h_b) < ground)
+            crown = _layer_length(h_a, h_b, base, top, piece_len)
+            trunks = _layer_length(h_a, h_b, ground, np.minimum(base, top), piece_len)
+            tau += np.where(
+                live,
+                crown * medium.crown_k_per_m[rr, cc] + trunks * medium.trunk_k_per_m[rr, cc],
+                0.0,
+            )
+        out[sel] = np.where(blocked, 0.0, np.exp(-tau))
+    return out
+
+
+def _medium_viewshed(
+    medium: CrownMedium,
+    dsm: np.ndarray,
+    observer_rc: tuple[int, int],
+    eye: float,
+    target: np.ndarray,
+    cell_size_m: float,
+    full_m: float,
+    zero_m: float,
+) -> np.ndarray:
+    """:func:`single_viewshed` under ``crown_transmission``: transmittance x range."""
+    rows, cols = dsm.shape
+    r0, c0 = observer_rc
+    rr, cc = np.mgrid[0:rows, 0:cols]
+    horiz = np.hypot(rr - r0, cc - c0) * cell_size_m
+    slant = np.hypot(horiz, target - eye)
+    rng = _range_weights(slant, full_m, zero_m)
+    visible = np.zeros((rows, cols), dtype=np.float32)
+    live = np.flatnonzero((rng > 0.0).ravel())
+    t = crown_transmittance(
+        medium,
+        dsm,
+        observer_rc,
+        eye,
+        rr.ravel()[live],
+        cc.ravel()[live],
+        target.ravel()[live],
+        cell_size_m,
+    )
+    visible.ravel()[live] = (t * rng.ravel()[live]).astype(np.float32)
+    visible[r0, c0] = 1.0
+    return visible
+
+
 def cumulative_exposure(
     dsm: np.ndarray,
     grid: Grid,
@@ -395,8 +593,13 @@ def cumulative_exposure(
     off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
     trunk_space: TrunkSpace | None = None,
     gap_map: np.ndarray | None = None,
+    medium: CrownMedium | None = None,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each cell, in [0, 1] (float32).
+
+    ``medium`` (``CanopyOcclusion.crown_transmission``) scores every sightline by
+    transmittance through the canopy instead of the DSM horizon, and supersedes
+    ``trunk_space`` and ``gap_map`` (both are folded into it).
 
     ``gap_map`` replaces ``canopy.sub_canopy_gap_fraction`` per cell with a measured
     value (``layers.canopy_gap_fraction``).
@@ -440,6 +643,7 @@ def cumulative_exposure(
                     element_mask(grid, element),
                     trunk_space,
                     gap_map,
+                    medium,
                 ),
                 out=seen,
             )
@@ -497,6 +701,25 @@ def _point_weight(
     return max(base, t * _range_weight(slant, full_m, zero_m))
 
 
+def _medium_point(
+    transmit: float,
+    observer_rc: tuple[int, int],
+    eye_elev_m: float,
+    target_rc: tuple[int, int],
+    target_elev_m: float,
+    cell_size_m: float,
+    detection: DetectionModel | None,
+    target_span_m: float,
+) -> float:
+    """Point twin of :func:`_medium_viewshed`: transmittance x range weight."""
+    if target_rc == observer_rc:
+        return 1.0
+    full_m, zero_m = _range_terms(detection, target_span_m)
+    horiz = math.hypot(target_rc[0] - observer_rc[0], target_rc[1] - observer_rc[1])
+    slant = math.hypot(horiz * cell_size_m, target_elev_m - eye_elev_m)
+    return float(transmit) * _range_weight(slant, full_m, zero_m)
+
+
 def _march_point_weight(
     dsm: np.ndarray,
     observer_rc: tuple[int, int],
@@ -549,6 +772,7 @@ def point_exposure(
     off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
     trunk_space: TrunkSpace | None = None,
     gap_map: np.ndarray | None = None,
+    medium: CrownMedium | None = None,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each ``(x, y, z_amsl)`` point.
 
@@ -571,6 +795,21 @@ def point_exposure(
     for group in views:
         obs_rc = grid.world_to_pixel(group[0].observer)
         eye = float(dsm[obs_rc]) + observer_height_m
+        through = None
+        if medium is not None:
+            # One vectorised pass per observer; the per-element loop then only
+            # applies range and attention, exactly as the raster does.
+            rcs = [grid.world_to_pixel(Coordinate(x=x, y=y)) for x, y, _ in points]
+            through = crown_transmittance(
+                medium,
+                dsm,
+                obs_rc,
+                eye,
+                np.array([r for r, _ in rcs]),
+                np.array([c for _, c in rcs]),
+                np.array([z for _, _, z in points]),
+                cell,
+            )
         for i, (x, y, z) in enumerate(points):
             rc = grid.world_to_pixel(Coordinate(x=x, y=y))
             seen = 0.0
@@ -579,6 +818,14 @@ def point_exposure(
                 # observer is less attentive, not blind (C3 + off_axis_vigilance).
                 attention = element_bearing_weight(element, x, y)
                 if attention <= 0.0:
+                    continue
+                det = detection if element.detection is None else element.detection
+                if through is not None:
+                    seen = max(
+                        seen,
+                        attention
+                        * _medium_point(through[i], obs_rc, eye, rc, z, cell, det, target_span_m),
+                    )
                     continue
                 seen = max(
                     seen,

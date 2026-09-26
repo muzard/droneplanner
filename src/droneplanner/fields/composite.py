@@ -39,7 +39,7 @@ from droneplanner.fields.stem_density import build_stem_clutter
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_penalty
 from droneplanner.fields.util import normalize01
-from droneplanner.fields.viewshed import TrunkSpace, cumulative_exposure
+from droneplanner.fields.viewshed import CrownMedium, TrunkSpace, cumulative_exposure
 from droneplanner.forest.navigability import FlyabilityField
 from droneplanner.io.stand_data import stand_density_raster
 from droneplanner.model.grid import Grid
@@ -174,6 +174,7 @@ def build_cost_surface(
         off_axis_vigilance=vigilance,
         trunk_space=trunk_space_for(mission, dtm, chm, clutter["stem_density_per_ha"]),
         gap_map=gap_map_for(mission, grid),
+        medium=crown_medium_for(mission, dtm, dsm, clutter["stem_density_per_ha"], grid),
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -369,6 +370,36 @@ def trunk_space_for(
         stems_per_m2=np.asarray(stems_per_ha, dtype=np.float32) / 10_000.0,
         trunk_diameter_m=occ.trunk_diameter_m,
         max_range_m=occ.trunk_space_max_range_m,
+    )
+
+
+def crown_medium_for(
+    mission: Mission,
+    dtm: np.ndarray,
+    dsm: np.ndarray,
+    stems_per_ha: np.ndarray,
+    grid: Grid,
+) -> CrownMedium | None:
+    """The canopy as a medium (``CanopyOcclusion.crown_transmission``), or None.
+
+    Crown base from ``AltitudePolicy.crown_ratio`` (else the occlusion's own
+    ratio), vertical gap probability from the measured map (else the scalar), stem
+    density from the clutter field. One builder for the raster and the flown
+    re-score, so they cannot disagree."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission:
+        return None
+    ratio = mission.altitude.crown_ratio or occ.trunk_space_crown_ratio
+    chm = np.clip(np.asarray(dsm, dtype=np.float64) - np.asarray(dtm, dtype=np.float64), 0.0, None)
+    measured = gap_map_for(mission, grid)
+    return CrownMedium.build(
+        dtm,
+        dsm,
+        crown_base_agl_m=chm * (1.0 - ratio),
+        gap=occ.sub_canopy_gap_fraction if measured is None else measured,
+        stems_per_m2=np.asarray(stems_per_ha, dtype=np.float64) / 10_000.0,
+        trunk_diameter_m=occ.trunk_diameter_m,
+        open_below_m=occ.crown_open_below_m,
     )
 
 
