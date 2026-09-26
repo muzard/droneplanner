@@ -160,3 +160,31 @@ def test_the_markdown_report_opens_with_an_operator_briefing() -> None:
     assert "## Operator briefing" in briefing
     assert "| 1 |" in briefing  # the climb table
     assert "FIRST CLIMB" in briefing
+
+
+def test_flight_inside_the_crown_layer_is_reported_unless_crown_ratio_keeps_it_under() -> None:
+    """2026-09-26: at 12 m AGL under a ~16 m canopy the aircraft is inside live crowns
+    (crown base ~8 m) — branches to hit and little crown overhead for cover. The report
+    says so while crown_ratio (opt-in) is off, and stays quiet once it is on."""
+    grid = Grid(transform=(CELL, 0.0, 0.0, 0.0, -CELL, N * CELL), rows=N, cols=N, crs="EPSG:32633")
+    dtm = np.zeros((N, N), dtype=np.float32)
+    dsm = np.full((N, N), 16.0, dtype=np.float32)
+    start = grid.pixel_to_world(N // 2, 1)
+    end = grid.pixel_to_world(N // 2, N - 2)
+    base = make_mission(
+        name="crowns-ao",
+        start={"x": start.x, "y": start.y},
+        end={"x": end.x, "y": end.y},
+        waypoint_spacing_m=CELL,
+        cruise_agl_m=12.0,
+    )
+    for ratio, expect in ((None, True), (0.5, False)):
+        mission = base.model_copy(
+            update={"altitude": base.altitude.model_copy(update={"crown_ratio": ratio})}
+        )
+        plan = plan_corridor(mission, build_cost_surface(dtm, dsm, grid, mission))
+        report = build_report(mission, plan, generated_at=None)
+        found = [f for f in report.findings if f.code == "flight_in_crown_layer"]
+        assert bool(found) is expect, ratio
+        if expect:
+            assert plan.objective_scores["below_canopy_in_crown_layer_m"] > 10 * CELL

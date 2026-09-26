@@ -527,6 +527,12 @@ def plan_corridor(
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
         **_escape_envelope(vertices, chm, grid, surface.components.get("stem_density_per_ha")),
+        "below_canopy_in_crown_layer_m": _crown_layer_length(
+            vertices,
+            chm,
+            grid,
+            mission.altitude.crown_ratio or mission.threat.canopy_occlusion.trunk_space_crown_ratio,
+        ),
         **_unopened_transitions(vertices, surface.components.get("canopy_opening"), grid),
         **cable_settle_lengths(
             vertices, chm, grid, surface.components.get("canopy_opening"), covered
@@ -747,6 +753,21 @@ def _escape_envelope(
         ),
         "escape_likely_length_m": likely,
     }
+
+
+def _crown_layer_length(
+    vertices: Sequence[TrajectoryVertex], chm: np.ndarray, grid: Grid, crown_ratio: float
+) -> float:
+    """Route length flown under the canopy but ABOVE the estimated crown base
+    (canopy x (1 - crown_ratio)) — i.e. inside live crowns (2026-09-26)."""
+    total = 0.0
+    for a, b in pairwise(vertices):
+        if a.flight_band not in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK):
+            continue
+        canopy = float(chm[grid.world_to_pixel(Coordinate(x=a.x, y=a.y))])
+        if a.altitude_agl_m > canopy * (1.0 - crown_ratio) + 1e-6:
+            total += math.dist((a.x, a.y), (b.x, b.y))
+    return total
 
 
 OPENING_SEARCH_M = 200.0

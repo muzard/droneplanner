@@ -657,6 +657,25 @@ def build_report(
             )
         )
 
+    in_crowns = plan.objective_scores.get("below_canopy_in_crown_layer_m", 0.0)
+    if in_crowns > 0.0 and mission.altitude.crown_ratio is None:
+        default_ratio = mission.threat.canopy_occlusion.trunk_space_crown_ratio
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="flight_in_crown_layer",
+                message=(
+                    f"{in_crowns:.0f} m of below-canopy flight is planned above the estimated "
+                    f"crown base (canopy x {1.0 - default_ratio:.2f}) — inside live crowns: "
+                    "branches the SITL trunks "
+                    "do not have, and only part of the crown overhead for cover (Askola: 12 m "
+                    "AGL exceeded the 0.15 exposure cap against a close airborne sensor on "
+                    "2 of 12 bearings; under the crown base it passed all 12). Set "
+                    "altitude.crown_ratio to fly under the crown base."
+                ),
+            )
+        )
+
     if end is not None and end.sharp_corners > 0:
         findings.append(
             Finding(
