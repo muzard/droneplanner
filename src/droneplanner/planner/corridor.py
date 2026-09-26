@@ -706,7 +706,8 @@ escape climbs to the local canopy top plus this."""
 
 ESCAPE_LIKELY_ABOVE_PER_HA = 1000.0
 """Past this stand density an escape stops being hypothetical: GPS-denied SITL flew
-~1000/ha with 0 escapes in 4 seed sets, and 1200 and 1500/ha with 1 in 4 and 1 in 3
+~1000/ha with 0 escapes in 4 seed sets; above it 1 genuine dead end in 8 traverses (1200/ha;
+the 1500/ha escape was a false trigger on a long detour)
 (droneflight, 2026-09-26) — the local planner met gaps it could not thread."""
 
 

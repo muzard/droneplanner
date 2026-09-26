@@ -105,7 +105,7 @@ def test_the_report_states_how_high_an_in_flight_escape_could_go() -> None:
 
 
 def test_the_report_says_where_an_escape_is_likely_not_just_how_high() -> None:
-    """SITL 2026-09-26: past ~1000 stems/ha one traverse in four met a gap it could not
+    """SITL 2026-09-26: past ~1000 stems/ha one traverse in eight met a gap it could not
     thread and escaped. The briefing names the below-canopy length in such stands."""
     mission, plan, _ = _plan(slice(20, 23), fallback=True)
     assert plan.objective_scores["escape_likely_length_m"] == 0.0  # thicket flown over

@@ -635,7 +635,7 @@ def build_report(
         likely = plan.objective_scores.get("escape_likely_length_m", 0.0)
         where = (
             f" {likely:.0f} m of that runs through stands denser than 1000 stems/ha, "
-            "where SITL needed an escape on about one traverse in four — expect one there."
+            "where SITL hit a genuine dead end on one traverse in eight — be ready for one."
             if likely > 0.0
             else ""
         )
