@@ -159,6 +159,16 @@ class CanopyOcclusion(BaseModel):
         ge=0.0,
         description="Crown transmission: a cell with less canopy than this has no crown.",
     )
+    observer_vantage_m: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Crown transmission: an observer placed in vegetation taller than its eye "
+            "stands instead at the nearest open cell within this radius — a real observer "
+            "steps out to look (2026-09-26). 0 keeps observers exactly where placed; "
+            "sectors bound to a moved observer move with it."
+        ),
+    )
 
 
 class DetectionModel(BaseModel):

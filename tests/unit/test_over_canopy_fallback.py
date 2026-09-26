@@ -225,3 +225,48 @@ def test_an_observer_standing_in_a_stand_is_flagged_under_crown_transmission() -
         plan = plan_corridor(mission, build_cost_surface(dtm, dsm, grid, mission))
         report = build_report(mission, plan, generated_at=None)
         assert any(f.code == "observers_in_vegetation" for f in report.findings) is expect
+
+
+def test_an_observer_with_a_vantage_radius_steps_out_to_the_nearest_clearing() -> None:
+    """CanopyOcclusion.observer_vantage_m: an observer placed in a stand stands at the
+    nearest open cell within the radius — the warning goes quiet and it sees more."""
+    from droneplanner.fields.altitude import canopy_height
+    from droneplanner.fields.composite import vantage_mission
+    from droneplanner.model.geometry import Coordinate
+    from droneplanner.model.mission import CanopyOcclusion
+
+    grid = Grid(transform=(CELL, 0.0, 0.0, 0.0, -CELL, N * CELL), rows=N, cols=N, crs="EPSG:32633")
+    dtm = np.zeros((N, N), dtype=np.float32)
+    dsm = np.full((N, N), 16.0, dtype=np.float32)
+    dsm[3:8, 23:26] = 0.0  # a clearing 3 cells (75 m) east of the observer
+    start = grid.pixel_to_world(N // 2, 1)
+    end = grid.pixel_to_world(N // 2, N - 2)
+    base = make_mission(
+        name="vantage",
+        start={"x": start.x, "y": start.y},
+        end={"x": end.x, "y": end.y},
+        waypoint_spacing_m=CELL,
+        cruise_agl_m=6.0,
+    )
+    eye = grid.pixel_to_world(5, 20)
+    results = {}
+    for vantage in (0.0, 100.0):
+        threat = base.threat.model_copy(
+            update={
+                "observers": [Coordinate(x=eye.x, y=eye.y)],
+                "observer_height_m": 2.0,
+                "canopy_occlusion": CanopyOcclusion(
+                    crown_transmission=True, observer_vantage_m=vantage
+                ),
+            }
+        )
+        mission = base.model_copy(update={"threat": threat})
+        moved = vantage_mission(mission, canopy_height(dtm, dsm), grid).threat.observers[0]
+        assert grid.world_to_pixel(moved) == ((5, 20) if vantage == 0.0 else (5, 23))
+        surface = build_cost_surface(dtm, dsm, grid, mission)
+        plan = plan_corridor(mission, surface)
+        report = build_report(mission, plan, generated_at=None)
+        warned = any(f.code == "observers_in_vegetation" for f in report.findings)
+        assert warned is (vantage == 0.0)
+        results[vantage] = float(surface.components["exposure"].mean())
+    assert results[100.0] > results[0.0]  # out of the stand it sees further

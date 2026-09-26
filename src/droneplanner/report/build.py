@@ -667,8 +667,9 @@ def build_report(
                     f"{hidden_eyes} observer(s) stand in vegetation taller than their eye "
                     f"({mission.threat.observer_height_m:.0f} m). Under crown transmission the "
                     "eye is on the ground and looks out THROUGH it, so these observers see "
-                    "little (demo AO: exposed cells 1335 -> 6 when its observers in 4-5 m "
-                    "scrub moved off the scrub top). A real observer picks a vantage point — "
+                    "little (demo AO: exposed cells 1335 -> 6 — its observers stand inside "
+                    "15-18 m stands, where the old model put their eye on the crowns). A real "
+                    "observer picks a vantage point (threat.canopy_occlusion.observer_vantage_m) — "
                     "place observers where they would actually stand to look."
                 ),
             )

@@ -31,6 +31,7 @@ from droneplanner.fields.composite import (
     crown_medium_for,
     gap_map_for,
     trunk_space_for,
+    vantage_mission,
 )
 from droneplanner.fields.stems import (
     StemMap,
@@ -483,16 +484,18 @@ def plan_corridor(
     flown_samples = sample_flown_profile(
         [(p.x, p.y) for p in fpts], amsl, profile, samples_per_leg=EXPOSURE_SAMPLES_PER_LEG
     )
+    # The same vantage points build_cost_surface used (crown transmission only).
+    placed = vantage_mission(mission, chm, grid)
     flown_exposure = point_exposure(
         surface.dsm,
         grid,
-        list(mission.threat.observers),
+        list(placed.threat.observers),
         flown_samples,
         observer_height_m=mission.threat.observer_height_m,
         canopy=mission.threat.canopy_occlusion,
         detection=mission.threat.detection,
         target_span_m=mission.drone.rotor_span_m,
-        sectors=mission.threat.sectors,
+        sectors=placed.threat.sectors,
         # Must match build_cost_surface, or the flown re-score grades the route
         # against a different adversary than the one it was planned for.
         off_axis_vigilance=mission.threat.off_axis_vigilance,
@@ -527,7 +530,7 @@ def plan_corridor(
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
         **_escape_envelope(vertices, chm, grid, surface.components.get("stem_density_per_ha")),
-        "observers_in_vegetation": float(_observers_in_vegetation(mission, chm, grid)),
+        "observers_in_vegetation": float(_observers_in_vegetation(placed, chm, grid)),
         "below_canopy_in_crown_layer_m": _crown_layer_length(
             vertices,
             chm,

@@ -106,6 +106,10 @@ def build_cost_surface(
     # ground level made the concealment metric — and the route it drives —
     # systematically wrong about the thing being hidden.
     chm = canopy_height(dtm, dsm)
+    # Observers at their vantage points (crown transmission only; inert otherwise).
+    placed = vantage_mission(mission, chm, grid).threat
+    observers = list(placed.observers)
+    sectors = placed.sectors
     # Where concealment is required at all (Mission.covered_radius_m). Outside it
     # the drone flies over the canopy, and its exposure is not costed.
     covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
@@ -371,6 +375,45 @@ def trunk_space_for(
         trunk_diameter_m=occ.trunk_diameter_m,
         max_range_m=occ.trunk_space_max_range_m,
     )
+
+
+def vantage_mission(mission: Mission, chm: np.ndarray, grid: Grid) -> Mission:
+    """``mission`` with observers moved to their vantage points
+    (``CanopyOcclusion.observer_vantage_m``), or unchanged.
+
+    Only under crown transmission, where the eye is on the ground: an observer in
+    vegetation taller than its eye moves to the nearest open cell within the radius;
+    sectors bound to it move with it so the binding survives. One function for the
+    cost surface and the flown re-score, so they cannot disagree."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission or occ.observer_vantage_m <= 0.0:
+        return mission
+    from scipy.ndimage import distance_transform_edt
+
+    from droneplanner.model.geometry import Coordinate
+
+    blocked = np.asarray(chm) >= max(occ.crown_open_below_m, mission.threat.observer_height_m)
+    if blocked.all() or not blocked.any():
+        return mission
+    dist, idx = distance_transform_edt(blocked, return_indices=True)
+
+    def move(c: Coordinate) -> Coordinate:
+        r, col = grid.world_to_pixel(c)
+        if not blocked[r, col] or dist[r, col] * grid.cell_size_m > occ.observer_vantage_m:
+            return c
+        p = grid.pixel_to_world(int(idx[0, r, col]), int(idx[1, r, col]))
+        return Coordinate(x=p.x, y=p.y)
+
+    threat = mission.threat.model_copy(
+        update={
+            "observers": [move(o) for o in mission.threat.observers],
+            "sectors": [
+                s if s.observer is None else s.model_copy(update={"observer": move(s.observer)})
+                for s in mission.threat.sectors
+            ],
+        }
+    )
+    return mission.model_copy(update={"threat": threat})
 
 
 def crown_medium_for(
