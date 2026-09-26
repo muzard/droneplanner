@@ -216,7 +216,7 @@ ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
     (600.0, 1.5),
     (800.0, 1.5),
     (1000.0, 1.0),
-    (1200.0, 0.4),
+    (1200.0, 0.5),
 )
 """``(stems/ha, speed m/s)`` the planner prices below-canopy flight at: the
 harness envelope **anchored to SITL**, which is the arbiter.
@@ -240,7 +240,7 @@ stand / speed   clean seed sets (min air)     contact
 ~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ~1000/ha 1.0§   **4/4** (+0.27 m)             — (`askolam230`, RTF 1.0, 0 escapes)
 1200/ha 1.0¶    4/4 strike-free (⚠️ +0.07 m)   — (**1 escape** in 4)
-1500/ha 0.5¶    3/3 valid (+0.52 m)           — (**1 escape** in 3; 4th voided)
+1500/ha 0.5¶    **4/4** (+0.52 m)             — (**1 escape** in 4)
 ==============  ============================  =============================
 
 ¶ 2026-09-26, `forest_mvp1200n` / `forest_mvp1500n` (MVP route, stand over the first
@@ -248,9 +248,13 @@ stand / speed   clean seed sets (min air)     contact
 1200/ha air +0.33 / +0.50 / +0.48 / **+0.07 m** — the thin one (seed set 6/7) is in
 ordinary flight at 11.4 m AGL and 0.95 m/s, approaching the dead end that then
 triggered its escape. The pre-registered bar was 4/4 with > 0.15 m of air, so **the
-1200/ha anchor stays 0.4**. 1500/ha at 0.5: air +0.52 / +0.78 / +0.58 m, seed set
-6/7 voided (the host was loaded, RTF fell to 0.11) — **not adopted on 3 seeds**; it
-stays beyond the envelope (flown over by default).
+1200/ha anchor is not raised to 1.0**. 1500/ha at 0.5: air +0.52 / +0.78 / +0.58 / +0.52 m
+(seed set 6/7 re-flown after a first run at RTF 0.11 was voided) — **4/4**, so **1200/ha
+→ 0.5** (was 0.4, discounted from the harness): a *denser* stand flew clean at that speed
+with ≥ 0.52 m of air on every seed set. **No 1500 anchor is added**, deliberately:
+:func:`beyond_envelope` is "denser than the last anchor", so a 1500 anchor would move the
+over-canopy fallback from 1200 to 1500/ha and plan *under* stands where one traverse in
+four hits a dead end — what the user asked the fallback to prevent (2026-09-25).
 🔑 **Passability, not speed, is what breaks first past ~1000/ha:** one traverse in
 four at both 1200 and 1500/ha reaches a gap the airframe cannot thread (the local
 planner's speed cap goes to 0) and needs the escape climb, which got it out cleanly
@@ -270,8 +274,9 @@ onboard stack stalled 3/3 there until it cleared memory the scan sees through
 planned.
 
 (Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
-So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5 and ~1000/ha → 1.0
-are measured** (2026-09-25: 800/ha raised 1.25 → 1.5, ~1000/ha 0.75 → 1.0).
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5, ~1000/ha → 1.0 and
+1200/ha → 0.5 are measured** (the last bounded by 1500/ha at 0.5, 2026-09-26;
+2026-09-25: 800/ha raised 1.25 → 1.5, ~1000/ha 0.75 → 1.0).
 600/ha also flew 2 m/s strike-free, but at 600/ha the margin is thin at *both*
 speeds — a 1.9 m median gap threaded by a 0.9 m airframe — so it is not raised on
 that evidence.
