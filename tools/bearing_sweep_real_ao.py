@@ -36,10 +36,14 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--bearings", type=int, default=12)
 ap.add_argument("--range", type=float, default=600.0)
 ap.add_argument("--height", type=float, default=300.0)
+ap.add_argument("--start", type=float, nargs=2, default=None, help="Launch x y (EPSG:3067).")
+ap.add_argument("--crown-ratio", type=float, default=0.55, help="For the crown-aware posture.")
 args = ap.parse_args()
 
 base = yaml.safe_load(Path("data/askola_ao/mission_measured.yaml").read_text())
 base["covered_radius_m"] = ZONE_M
+if args.start is not None:
+    base["start"] = {"x": args.start[0], "y": args.start[1]}
 with rasterio.open(base["layers"]["dtm"]) as d:
     dtm = np.array(d.read(1), dtype=float)
     t = d.transform
@@ -51,7 +55,7 @@ grid = Grid(
 sx, sy = base["start"]["x"], base["start"]["y"]
 postures = {
     "below": {},
-    "crown-aware": {"altitude": {"crown_ratio": 0.55, "min_agl_m": 4.0}},
+    "crown-aware": {"altitude": {"crown_ratio": args.crown_ratio, "min_agl_m": 4.0}},
 }
 models = ("binary", "transmission")
 results: dict[tuple[str, str], list[tuple[float, float]]] = {}

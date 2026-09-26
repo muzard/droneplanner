@@ -546,6 +546,17 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   crowns. Without crown transmission the eye stays on the DSM, for the reason above.
   Note it moves elevated sensors too: a "300 m" sensor is now 300 m above the
   terrain, not above the canopy (≤ ~25 m difference).
+- 🟠 **The binary sub-canopy rule is optimistic for a drone INSIDE the crown layer
+  (found 2026-09-26).** It credits a target under its own crown with that cell's full
+  vertical gap fraction wherever the target sits — but at 12 m AGL in Askola's ~16 m
+  stands (crown base ~8 m) only ~4 m of crown is overhead. Crown transmission integrates
+  just the crown actually crossed; against a 300 m sensor 300 m out it takes the worst
+  bearing **0.120 → 0.200** and fails the 0.15 cap on 2/12 bearings, where the binary
+  model passed all 12. Crown-aware flight (under the crown base) passes everywhere (worst
+  0.059). Not fixed in the binary model: the fix *is* crown transmission (opt-in), and
+  `crown_ratio` stays opt-in per the user — so with both off, reports on tall-crowned
+  stands understate exposure at the default 12 m. The measured gap map is also cut at
+  8 m, i.e. for the trunk band, not for 12 m.
 - ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
   at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
   median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the
