@@ -632,6 +632,13 @@ def build_report(
     if esc is not None:
         esc_from = plan.objective_scores.get("escape_first_m", 0.0)
         span = plan.objective_scores.get("escape_exposed_length_m", 0.0)
+        likely = plan.objective_scores.get("escape_likely_length_m", 0.0)
+        where = (
+            f" {likely:.0f} m of that runs through stands denser than 1000 stems/ha, "
+            "where SITL needed an escape on about one traverse in four — expect one there."
+            if likely > 0.0
+            else ""
+        )
         findings.append(
             Finding(
                 severity=Severity.INFO,
@@ -643,8 +650,9 @@ def build_report(
                     f"{ESCAPE_HOLD_M:.0f} m of route, then descends. On this route that can "
                     f"happen anywhere along the {span:.0f} m flown under the canopy, from "
                     f"{esc_from:.0f} m after launch, and would take it up to {esc:.0f} m AGL "
-                    "(tallest nearby canopy + 3 m) — visible above the crowns. Turn it off "
-                    "with --escape-after 0 to stop and report instead."
+                    "(tallest nearby canopy + 3 m) — visible above the crowns."
+                    + where
+                    + " Turn it off with --escape-after 0 to stop and report instead."
                 ),
             )
         )

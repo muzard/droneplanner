@@ -526,7 +526,7 @@ def plan_corridor(
         "below_canopy_beyond_envelope_m": beyond_m,
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
-        **_escape_envelope(vertices, chm, grid),
+        **_escape_envelope(vertices, chm, grid, surface.components.get("stem_density_per_ha")),
         **_unopened_transitions(vertices, surface.components.get("canopy_opening"), grid),
         **cable_settle_lengths(
             vertices, chm, grid, surface.components.get("canopy_opening"), covered
@@ -694,8 +694,17 @@ ESCAPE_MARGIN_M = 3.0
 escape climbs to the local canopy top plus this."""
 
 
+ESCAPE_LIKELY_ABOVE_PER_HA = 1000.0
+"""Past this stand density an escape stops being hypothetical: GPS-denied SITL flew
+~1000/ha with 0 escapes in 4 seed sets, and 1200 and 1500/ha with 1 in 4 and 1 in 3
+(droneflight, 2026-09-26) — the local planner met gaps it could not thread."""
+
+
 def _escape_envelope(
-    vertices: Sequence[TrajectoryVertex], chm: np.ndarray, grid: Grid
+    vertices: Sequence[TrajectoryVertex],
+    chm: np.ndarray,
+    grid: Grid,
+    density_per_ha: np.ndarray | None = None,
 ) -> dict[str, float]:
     """How high an in-flight ESCAPE CLIMB could take the aircraft on this route.
 
@@ -722,12 +731,21 @@ def _escape_envelope(
         float(local_top[grid.world_to_pixel(Coordinate(x=vertices[i].x, y=vertices[i].y))])
         for i in under
     )
+    likely = 0.0
+    if density_per_ha is not None:
+        for i in under:
+            if i + 1 >= len(along):
+                continue
+            cell = grid.world_to_pixel(Coordinate(x=vertices[i].x, y=vertices[i].y))
+            if float(density_per_ha[cell]) > ESCAPE_LIKELY_ABOVE_PER_HA:
+                likely += along[i + 1] - along[i]
     return {
         "escape_max_agl_m": worst + ESCAPE_MARGIN_M,
         "escape_first_m": along[under[0]],
         "escape_exposed_length_m": sum(
             along[i + 1] - along[i] for i in under if i + 1 < len(along)
         ),
+        "escape_likely_length_m": likely,
     }
 
 

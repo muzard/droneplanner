@@ -104,6 +104,22 @@ def test_the_report_states_how_high_an_in_flight_escape_could_go() -> None:
     assert "STRAIGHT UP" in finding.message
 
 
+def test_the_report_says_where_an_escape_is_likely_not_just_how_high() -> None:
+    """SITL 2026-09-26: past ~1000 stems/ha one traverse in four met a gap it could not
+    thread and escaped. The briefing names the below-canopy length in such stands."""
+    mission, plan, _ = _plan(slice(20, 23), fallback=True)
+    assert plan.objective_scores["escape_likely_length_m"] == 0.0  # thicket flown over
+    report = build_report(mission, plan, generated_at=None)
+    [finding] = [f for f in report.findings if f.code == "escape_climb_policy"]
+    assert "denser than 1000" not in finding.message
+
+    mission, plan, _ = _plan(slice(20, 23), fallback=False)  # planned through it
+    assert plan.objective_scores["escape_likely_length_m"] >= 2 * CELL
+    report = build_report(mission, plan, generated_at=None)
+    [finding] = [f for f in report.findings if f.code == "escape_climb_policy"]
+    assert "denser than 1000 stems/ha" in finding.message
+
+
 def test_a_climb_moves_back_to_a_canopy_opening_and_an_unopened_one_is_reported() -> None:
     """The aircraft cannot climb through closed crowns (2026-09-25): an under->over
     transition is moved back along the route to the nearest opening, and one with
