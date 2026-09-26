@@ -657,6 +657,23 @@ def build_report(
             )
         )
 
+    hidden_eyes = int(plan.objective_scores.get("observers_in_vegetation", 0.0))
+    if hidden_eyes:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="observers_in_vegetation",
+                message=(
+                    f"{hidden_eyes} observer(s) stand in vegetation taller than their eye "
+                    f"({mission.threat.observer_height_m:.0f} m). Under crown transmission the "
+                    "eye is on the ground and looks out THROUGH it, so these observers see "
+                    "little (demo AO: exposed cells 1335 -> 6 when its observers in 4-5 m "
+                    "scrub moved off the scrub top). A real observer picks a vantage point — "
+                    "place observers where they would actually stand to look."
+                ),
+            )
+        )
+
     in_crowns = plan.objective_scores.get("below_canopy_in_crown_layer_m", 0.0)
     if in_crowns > 0.0 and mission.altitude.crown_ratio is None:
         default_ratio = mission.threat.canopy_occlusion.trunk_space_crown_ratio

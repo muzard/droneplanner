@@ -192,3 +192,36 @@ def test_flight_inside_the_crown_layer_is_reported_unless_crown_ratio_keeps_it_u
 
             briefing = report_to_markdown(report).split("## Summary")[0]
             assert "Flying inside the crowns" in briefing
+
+
+def test_an_observer_standing_in_a_stand_is_flagged_under_crown_transmission() -> None:
+    """2026-09-26: with crown transmission the eye is on the ground, so an observer placed
+    inside vegetation taller than its eye looks out through it and sees little. The report
+    says so — observer placement now decides what they see."""
+    from droneplanner.model.geometry import Coordinate
+    from droneplanner.model.mission import CanopyOcclusion
+
+    grid = Grid(transform=(CELL, 0.0, 0.0, 0.0, -CELL, N * CELL), rows=N, cols=N, crs="EPSG:32633")
+    dtm = np.zeros((N, N), dtype=np.float32)
+    dsm = np.full((N, N), 16.0, dtype=np.float32)
+    start = grid.pixel_to_world(N // 2, 1)
+    end = grid.pixel_to_world(N // 2, N - 2)
+    base = make_mission(
+        name="observer-in-stand",
+        start={"x": start.x, "y": start.y},
+        end={"x": end.x, "y": end.y},
+        waypoint_spacing_m=CELL,
+        cruise_agl_m=6.0,
+    )
+    eye = grid.pixel_to_world(5, 20)
+    for transmission, expect in ((True, True), (False, False)):
+        threat = base.threat.model_copy(
+            update={
+                "observers": [Coordinate(x=eye.x, y=eye.y)],
+                "canopy_occlusion": CanopyOcclusion(crown_transmission=transmission),
+            }
+        )
+        mission = base.model_copy(update={"threat": threat})
+        plan = plan_corridor(mission, build_cost_surface(dtm, dsm, grid, mission))
+        report = build_report(mission, plan, generated_at=None)
+        assert any(f.code == "observers_in_vegetation" for f in report.findings) is expect

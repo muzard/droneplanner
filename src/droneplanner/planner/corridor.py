@@ -527,6 +527,7 @@ def plan_corridor(
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
         **_escape_envelope(vertices, chm, grid, surface.components.get("stem_density_per_ha")),
+        "observers_in_vegetation": float(_observers_in_vegetation(mission, chm, grid)),
         "below_canopy_in_crown_layer_m": _crown_layer_length(
             vertices,
             chm,
@@ -753,6 +754,22 @@ def _escape_envelope(
         ),
         "escape_likely_length_m": likely,
     }
+
+
+def _observers_in_vegetation(mission: Mission, chm: np.ndarray, grid: Grid) -> int:
+    """Ground observers standing in vegetation taller than their eye, under crown
+    transmission — where the eye is at ``dtm + h`` and looks OUT through it (2026-09-26).
+    Zero with transmission off: there the eye sits on the DSM, above the vegetation."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission:
+        return 0
+    eye = mission.threat.observer_height_m
+    count = 0
+    for o in mission.threat.observers:
+        canopy = float(chm[grid.world_to_pixel(o)])
+        if canopy >= max(occ.crown_open_below_m, eye):
+            count += 1
+    return count
 
 
 def _crown_layer_length(
