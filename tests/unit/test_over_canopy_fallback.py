@@ -188,3 +188,7 @@ def test_flight_inside_the_crown_layer_is_reported_unless_crown_ratio_keeps_it_u
         assert bool(found) is expect, ratio
         if expect:
             assert plan.objective_scores["below_canopy_in_crown_layer_m"] > 10 * CELL
+            from droneplanner.io.report import report_to_markdown
+
+            briefing = report_to_markdown(report).split("## Summary")[0]
+            assert "Flying inside the crowns" in briefing
