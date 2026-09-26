@@ -546,6 +546,14 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   crowns. Without crown transmission the eye stays on the DSM, for the reason above.
   Note it moves elevated sensors too: a "300 m" sensor is now 300 m above the
   terrain, not above the canopy (≤ ~25 m difference).
+  🟠 **Every fixture observer stands in vegetation (checked 2026-09-26).** Demo AO: inside
+  18.3 m and 15.5 m stands, no opening within 200 m. Askola: one inside a 25.2 m stand
+  (74 open cells within ~100 m), one in 3.4 m growth. They were placed with the eye on the
+  DSM, where cover underfoot did not matter; under crown transmission it does (demo AO
+  exposed cells 1335 → 6). `observer_vantage_m` (opt-in) steps them out to the nearest
+  opening, and `observers_in_vegetation` WARNs. Placing fixture observers at deliberate
+  vantage points is the prerequisite for making crown transmission the default — for the
+  demo AO it runs into the open observer-relocation decision (moving the hills).
 - 🟠 **The binary sub-canopy rule is optimistic for a drone INSIDE the crown layer
   (found 2026-09-26).** It credits a target under its own crown with that cell's full
   vertical gap fraction wherever the target sits — but at 12 m AGL in Askola's ~16 m
