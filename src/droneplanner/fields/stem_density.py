@@ -240,7 +240,7 @@ stand / speed   clean seed sets (min air)     contact
 ~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ~1000/ha 1.0§   **4/4** (+0.27 m)             — (`askolam230`, RTF 1.0, 0 escapes)
 1200/ha 1.0¶    4/4 strike-free (⚠️ +0.07 m)   — (**1 escape** in 4)
-1500/ha 0.5¶    **4/4** (+0.52 m)             — (**1 escape** in 4)
+1500/ha 0.5¶    **4/4** (+0.52 m)             — (1 escape in 4, a FALSE trigger)
 ==============  ============================  =============================
 
 ¶ 2026-09-26, `forest_mvp1200n` / `forest_mvp1500n` (MVP route, stand over the first
@@ -253,13 +253,15 @@ triggered its escape. The pre-registered bar was 4/4 with > 0.15 m of air, so **
 → 0.5** (was 0.4, discounted from the harness): a *denser* stand flew clean at that speed
 with ≥ 0.52 m of air on every seed set. **No 1500 anchor is added**, deliberately:
 :func:`beyond_envelope` is "denser than the last anchor", so a 1500 anchor would move the
-over-canopy fallback from 1200 to 1500/ha and plan *under* stands where one traverse in
-four hits a dead end — what the user asked the fallback to prevent (2026-09-25).
-🔑 **Passability, not speed, is what breaks first past ~1000/ha:** one traverse in
-four at both 1200 and 1500/ha reaches a gap the airframe cannot thread (the local
-planner's speed cap goes to 0) and needs the escape climb, which got it out cleanly
-every time. At ~1000/ha, 0 escapes in 4. So the envelope's dense edge is where the
-report's `escape_climb_policy` stops being hypothetical.
+over-canopy fallback from 1200 to 1500/ha and plan *under* stands where genuine dead ends
+occur — what the user asked the fallback to prevent (2026-09-25).
+🔑 **Passability, not speed, is what breaks first past ~1000/ha — but less often than
+first read.** One traverse at 1200/ha (h1g) hit a real dead end: no path for 20 s, then
+the escape climb. The 1500/ha escape (h5e) was a **false trigger** — 0 blocked steps, a
+12.7 m detour at 0.5 m/s tripping "20 s without progress" (droneflight now waits for a
+30 m detour when the planner has a path). So genuine dead ends above 1000/ha: **1 in 8
+traverses**; at ~1000/ha, 0 in 4. Revisit the 1500 anchor after a re-fly with the fixed
+trigger — until then the fallback stays at 1200.
 
 ‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
 band so the VM holds real time), memory clearing on: +1.11 to +1.35 m surface.
