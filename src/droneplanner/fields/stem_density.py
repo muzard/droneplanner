@@ -239,7 +239,23 @@ stand / speed   clean seed sets (min air)     contact
 800/ha 1.5 m/s‡ **4/4** (+0.29 m)             — (one earlier run at RTF 0.2 voided)
 ~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
 ~1000/ha 1.0§   **4/4** (+0.27 m)             — (`askolam230`, RTF 1.0, 0 escapes)
+1200/ha 1.0¶    4/4 strike-free (⚠️ +0.07 m)   — (**1 escape** in 4)
+1500/ha 0.5¶    3/3 valid (+0.52 m)           — (**1 escape** in 3; 4th voided)
 ==============  ============================  =============================
+
+¶ 2026-09-26, `forest_mvp1200n` / `forest_mvp1500n` (MVP route, stand over the first
+~550 m, ±15 m band), memory clearing + escape climb + sensing at target height on.
+1200/ha air +0.33 / +0.50 / +0.48 / **+0.07 m** — the thin one (seed set 6/7) is in
+ordinary flight at 11.4 m AGL and 0.95 m/s, approaching the dead end that then
+triggered its escape. The pre-registered bar was 4/4 with > 0.15 m of air, so **the
+1200/ha anchor stays 0.4**. 1500/ha at 0.5: air +0.52 / +0.78 / +0.58 m, seed set
+6/7 voided (the host was loaded, RTF fell to 0.11) — **not adopted on 3 seeds**; it
+stays beyond the envelope (flown over by default).
+🔑 **Passability, not speed, is what breaks first past ~1000/ha:** one traverse in
+four at both 1200 and 1500/ha reaches a gap the airframe cannot thread (the local
+planner's speed cap goes to 0) and needs the escape climb, which got it out cleanly
+every time. At ~1000/ha, 0 escapes in 4. So the envelope's dense edge is where the
+report's `escape_climb_policy` stops being hypothetical.
 
 ‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
 band so the VM holds real time), memory clearing on: +1.11 to +1.35 m surface.
