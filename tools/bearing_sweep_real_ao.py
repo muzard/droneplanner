@@ -77,7 +77,9 @@ for k in range(args.bearings):
                 m[key].update(v)
             mission = Mission.model_validate(m)
             plan, surface = plan_over_terrain(mission, dtm, dsm, grid, route_index=0)
-            v = [p for p in plan.vertices if math.hypot(p.x - sx, p.y - sy) <= ZONE_M]
+            # Strictly inside: the vertex AT the radius is where the route hands over to
+            # the uncovered (over-canopy) posture, and would be scored as fully exposed.
+            v = [p for p in plan.vertices if math.hypot(p.x - sx, p.y - sy) < ZONE_M - 1.0]
             pts = [(p.x, p.y, p.ground_elev_m + p.altitude_agl_m) for p in v]
             exp = point_exposure(
                 dsm,
