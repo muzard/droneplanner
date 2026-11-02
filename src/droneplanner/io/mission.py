@@ -67,8 +67,32 @@ def _resolve_coordinates(data: dict[str, Any]) -> dict[str, Any]:
     return resolved
 
 
+def _resolve_layer_paths(data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+    """Anchor relative ``layers`` paths at the mission file's directory.
+
+    A mission file is portable only if its layer paths do not depend on where the
+    process happens to run. Absolute paths pass through unchanged.
+    """
+    layers = data.get("layers")
+    if not isinstance(layers, dict):
+        return data
+    anchored = {
+        key: (
+            str(base_dir / value)
+            if isinstance(value, str) and not Path(value).is_absolute()
+            else value
+        )
+        for key, value in layers.items()
+    }
+    return {**data, "layers": anchored}
+
+
 def load_mission(path: str | Path) -> Mission:
-    """Load and validate a mission YAML file into a ``Mission``."""
+    """Load and validate a mission YAML file into a ``Mission``.
+
+    Relative paths under ``layers`` are resolved against the directory of the
+    mission file, not the process working directory.
+    """
     path = Path(path)
     try:
         raw_text = path.read_text(encoding="utf-8")
@@ -83,7 +107,7 @@ def load_mission(path: str | Path) -> Mission:
     if not isinstance(data, dict):
         raise MissionLoadError(f"mission file {path} must contain a mapping at the top level")
 
-    resolved = _resolve_coordinates(data)
+    resolved = _resolve_layer_paths(_resolve_coordinates(data), path.parent)
     try:
         return Mission.model_validate(resolved)
     except Exception as exc:  # pydantic ValidationError -> a single clear error type

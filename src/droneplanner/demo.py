@@ -377,8 +377,8 @@ def _mission_doc(mission: Mission, grid: Grid, dtm_path: Path, dsm_path: Path) -
             "observers": [{"x": float(o.x), "y": float(o.y)} for o in mission.threat.observers]
         },
         "weights": mission.weights.model_dump(mode="json"),
-        # Absolute: the mission loader resolves layer paths against the process
-        # CWD, not the YAML's directory.
+        # Relative to the mission file, which is what the loader anchors them to,
+        # so an exported AO can be moved or committed without breaking.
         "layers": {"dtm": str(dtm_path), "dsm": str(dsm_path)},
         "k_routes": mission.k_routes,
         "seed": mission.seed,
@@ -416,8 +416,8 @@ def export_demo_ao(
     dtm, dsm, grid = demo_terrain(size=size, threat_margin_m=threat_margin_m)
     mission = demo_mission(grid)
 
-    dtm_path = (out / "dtm.tif").resolve()
-    dsm_path = (out / "dsm.tif").resolve()
+    dtm_path = out / "dtm.tif"
+    dsm_path = out / "dsm.tif"
     for path, data in ((dtm_path, dtm), (dsm_path, dsm)):
         write_raster(
             path,
@@ -426,7 +426,10 @@ def export_demo_ao(
 
     mission_path = out / "mission.yaml"
     mission_path.write_text(
-        yaml.safe_dump(_mission_doc(mission, grid, dtm_path, dsm_path), sort_keys=False),
+        yaml.safe_dump(
+            _mission_doc(mission, grid, Path(dtm_path.name), Path(dsm_path.name)),
+            sort_keys=False,
+        ),
         encoding="utf-8",
     )
     return mission_path

@@ -33,9 +33,9 @@ weights:
   snag: 0.5
   clutter: 0.0
 layers:
-  dtm: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/demo_ao/dtm.tif
-  dsm: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/demo_ao/dsm.tif
-  stem_map: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/worlds/forest_dense_trunks.csv
+  dtm: dtm.tif
+  dsm: dsm.tif
+  stem_map: ../worlds/forest_dense_trunks.csv
 k_routes: 1
 seed: 1
 waypoint_spacing_m: 25.0
