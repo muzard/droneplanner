@@ -632,6 +632,13 @@ def build_report(
     if esc is not None:
         esc_from = plan.objective_scores.get("escape_first_m", 0.0)
         span = plan.objective_scores.get("escape_exposed_length_m", 0.0)
+        likely = plan.objective_scores.get("escape_likely_length_m", 0.0)
+        where = (
+            f" {likely:.0f} m of that runs through stands denser than 1000 stems/ha, "
+            "where SITL hit a genuine dead end on one traverse in eight — be ready for one."
+            if likely > 0.0
+            else ""
+        )
         findings.append(
             Finding(
                 severity=Severity.INFO,
@@ -643,8 +650,46 @@ def build_report(
                     f"{ESCAPE_HOLD_M:.0f} m of route, then descends. On this route that can "
                     f"happen anywhere along the {span:.0f} m flown under the canopy, from "
                     f"{esc_from:.0f} m after launch, and would take it up to {esc:.0f} m AGL "
-                    "(tallest nearby canopy + 3 m) — visible above the crowns. Turn it off "
-                    "with --escape-after 0 to stop and report instead."
+                    "(tallest nearby canopy + 3 m) — visible above the crowns."
+                    + where
+                    + " Turn it off with --escape-after 0 to stop and report instead."
+                ),
+            )
+        )
+
+    hidden_eyes = int(plan.objective_scores.get("observers_in_vegetation", 0.0))
+    if hidden_eyes:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="observers_in_vegetation",
+                message=(
+                    f"{hidden_eyes} observer(s) stand in vegetation taller than their eye "
+                    f"({mission.threat.observer_height_m:.0f} m). Under crown transmission the "
+                    "eye is on the ground and looks out THROUGH it, so these observers see "
+                    "little (demo AO: exposed cells 1335 -> 6 — its observers stand inside "
+                    "15-18 m stands, where the old model put their eye on the crowns). A real "
+                    "observer picks a vantage point (threat.canopy_occlusion.observer_vantage_m) — "
+                    "place observers where they would actually stand to look."
+                ),
+            )
+        )
+
+    in_crowns = plan.objective_scores.get("below_canopy_in_crown_layer_m", 0.0)
+    if in_crowns > 0.0 and mission.altitude.crown_ratio is None:
+        default_ratio = mission.threat.canopy_occlusion.trunk_space_crown_ratio
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="flight_in_crown_layer",
+                message=(
+                    f"{in_crowns:.0f} m of below-canopy flight is planned above the estimated "
+                    f"crown base (canopy x {1.0 - default_ratio:.2f}) — inside live crowns: "
+                    "branches the SITL trunks "
+                    "do not have, and only part of the crown overhead for cover (Askola: 12 m "
+                    "AGL exceeded the 0.15 exposure cap against a close airborne sensor on "
+                    "2 of 12 bearings; under the crown base it passed all 12). Set "
+                    "altitude.crown_ratio to fly under the crown base."
                 ),
             )
         )

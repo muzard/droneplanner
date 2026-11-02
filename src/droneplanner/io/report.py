@@ -166,6 +166,7 @@ def write_report(json_path: str | Path, md_path: str | Path, report: RiskReport)
 _BRIEFING = (
     ("canopy_climb_in_zone", "Planned climbs out of cover"),
     ("canopy_transition_no_opening", "Climbs/descents with no canopy opening"),
+    ("flight_in_crown_layer", "Flying inside the crowns"),
     ("escape_climb_policy", "If it gets stuck"),
     ("cable_on_crowns", "Where the fiber lands"),
     ("open_crossings", "Road crossings (fiber across a road)"),

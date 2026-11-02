@@ -39,7 +39,7 @@ from droneplanner.fields.stem_density import build_stem_clutter
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_penalty
 from droneplanner.fields.util import normalize01
-from droneplanner.fields.viewshed import TrunkSpace, cumulative_exposure
+from droneplanner.fields.viewshed import CrownMedium, TrunkSpace, cumulative_exposure
 from droneplanner.forest.navigability import FlyabilityField
 from droneplanner.io.stand_data import stand_density_raster
 from droneplanner.model.grid import Grid
@@ -106,6 +106,10 @@ def build_cost_surface(
     # ground level made the concealment metric — and the route it drives —
     # systematically wrong about the thing being hidden.
     chm = canopy_height(dtm, dsm)
+    # Observers at their vantage points (crown transmission only; inert otherwise).
+    placed = vantage_mission(mission, chm, grid).threat
+    observers = list(placed.observers)
+    sectors = placed.sectors
     # Where concealment is required at all (Mission.covered_radius_m). Outside it
     # the drone flies over the canopy, and its exposure is not costed.
     covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
@@ -174,6 +178,7 @@ def build_cost_surface(
         off_axis_vigilance=vigilance,
         trunk_space=trunk_space_for(mission, dtm, chm, clutter["stem_density_per_ha"]),
         gap_map=gap_map_for(mission, grid),
+        medium=crown_medium_for(mission, dtm, dsm, clutter["stem_density_per_ha"], grid),
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -369,6 +374,75 @@ def trunk_space_for(
         stems_per_m2=np.asarray(stems_per_ha, dtype=np.float32) / 10_000.0,
         trunk_diameter_m=occ.trunk_diameter_m,
         max_range_m=occ.trunk_space_max_range_m,
+    )
+
+
+def vantage_mission(mission: Mission, chm: np.ndarray, grid: Grid) -> Mission:
+    """``mission`` with observers moved to their vantage points
+    (``CanopyOcclusion.observer_vantage_m``), or unchanged.
+
+    Only under crown transmission, where the eye is on the ground: an observer in
+    vegetation taller than its eye moves to the nearest open cell within the radius;
+    sectors bound to it move with it so the binding survives. One function for the
+    cost surface and the flown re-score, so they cannot disagree."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission or occ.observer_vantage_m <= 0.0:
+        return mission
+    from scipy.ndimage import distance_transform_edt
+
+    from droneplanner.model.geometry import Coordinate
+
+    blocked = np.asarray(chm) >= max(occ.crown_open_below_m, mission.threat.observer_height_m)
+    if blocked.all() or not blocked.any():
+        return mission
+    dist, idx = distance_transform_edt(blocked, return_indices=True)
+
+    def move(c: Coordinate) -> Coordinate:
+        r, col = grid.world_to_pixel(c)
+        if not blocked[r, col] or dist[r, col] * grid.cell_size_m > occ.observer_vantage_m:
+            return c
+        p = grid.pixel_to_world(int(idx[0, r, col]), int(idx[1, r, col]))
+        return Coordinate(x=p.x, y=p.y)
+
+    threat = mission.threat.model_copy(
+        update={
+            "observers": [move(o) for o in mission.threat.observers],
+            "sectors": [
+                s if s.observer is None else s.model_copy(update={"observer": move(s.observer)})
+                for s in mission.threat.sectors
+            ],
+        }
+    )
+    return mission.model_copy(update={"threat": threat})
+
+
+def crown_medium_for(
+    mission: Mission,
+    dtm: np.ndarray,
+    dsm: np.ndarray,
+    stems_per_ha: np.ndarray,
+    grid: Grid,
+) -> CrownMedium | None:
+    """The canopy as a medium (``CanopyOcclusion.crown_transmission``), or None.
+
+    Crown base from ``AltitudePolicy.crown_ratio`` (else the occlusion's own
+    ratio), vertical gap probability from the measured map (else the scalar), stem
+    density from the clutter field. One builder for the raster and the flown
+    re-score, so they cannot disagree."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission:
+        return None
+    ratio = mission.altitude.crown_ratio or occ.trunk_space_crown_ratio
+    chm = np.clip(np.asarray(dsm, dtype=np.float64) - np.asarray(dtm, dtype=np.float64), 0.0, None)
+    measured = gap_map_for(mission, grid)
+    return CrownMedium.build(
+        dtm,
+        dsm,
+        crown_base_agl_m=chm * (1.0 - ratio),
+        gap=occ.sub_canopy_gap_fraction if measured is None else measured,
+        stems_per_m2=np.asarray(stems_per_ha, dtype=np.float64) / 10_000.0,
+        trunk_diameter_m=occ.trunk_diameter_m,
+        open_below_m=occ.crown_open_below_m,
     )
 
 

@@ -139,6 +139,36 @@ class CanopyOcclusion(BaseModel):
         lt=1.0,
         description="Crown base = canopy x (1 - this) when AltitudePolicy.crown_ratio is unset.",
     )
+    crown_transmission: bool = Field(
+        default=False,
+        description=(
+            "Score every sightline by TRANSMITTANCE through the vegetation it crosses "
+            "instead of the binary DSM horizon (2026-09-26). Terrain (DTM) still blocks; "
+            "the canopy (DSM - DTM) becomes a medium: in the crown layer each cell "
+            "attenuates by its vertical gap probability per crown depth "
+            "(gap^(path/depth), turbid medium calibrated at nadir), under the crown base "
+            "the trunks do (exp(-stems/m^2 x trunk_diameter_m x path)). Fixes the binary "
+            "wall that scored a drone at 5-7 m under a neighbouring crown as exactly 0. "
+            "Replaces the sub-canopy steepness rule and trunk_space_sightlines (both "
+            "become special cases), and the observer stands on the TERRAIN (dtm + observer "
+            "height), not on the crowns. Off by default: it moves every historical figure."
+        ),
+    )
+    crown_open_below_m: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="Crown transmission: a cell with less canopy than this has no crown.",
+    )
+    observer_vantage_m: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Crown transmission: an observer placed in vegetation taller than its eye "
+            "stands instead at the nearest open cell within this radius — a real observer "
+            "steps out to look (2026-09-26). 0 keeps observers exactly where placed; "
+            "sectors bound to a moved observer move with it."
+        ),
+    )
 
 
 class DetectionModel(BaseModel):

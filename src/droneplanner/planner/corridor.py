@@ -28,8 +28,10 @@ from droneplanner.fields.altitude import (
 from droneplanner.fields.composite import (
     CostSurface,
     build_cost_surface,
+    crown_medium_for,
     gap_map_for,
     trunk_space_for,
+    vantage_mission,
 )
 from droneplanner.fields.stems import (
     StemMap,
@@ -482,16 +484,18 @@ def plan_corridor(
     flown_samples = sample_flown_profile(
         [(p.x, p.y) for p in fpts], amsl, profile, samples_per_leg=EXPOSURE_SAMPLES_PER_LEG
     )
+    # The same vantage points build_cost_surface used (crown transmission only).
+    placed = vantage_mission(mission, chm, grid)
     flown_exposure = point_exposure(
         surface.dsm,
         grid,
-        list(mission.threat.observers),
+        list(placed.threat.observers),
         flown_samples,
         observer_height_m=mission.threat.observer_height_m,
         canopy=mission.threat.canopy_occlusion,
         detection=mission.threat.detection,
         target_span_m=mission.drone.rotor_span_m,
-        sectors=mission.threat.sectors,
+        sectors=placed.threat.sectors,
         # Must match build_cost_surface, or the flown re-score grades the route
         # against a different adversary than the one it was planned for.
         off_axis_vigilance=mission.threat.off_axis_vigilance,
@@ -499,6 +503,9 @@ def plan_corridor(
             mission, surface.dtm, chm, surface.components["stem_density_per_ha"]
         ),
         gap_map=gap_map_for(mission, grid),
+        medium=crown_medium_for(
+            mission, surface.dtm, surface.dsm, surface.components["stem_density_per_ha"], grid
+        ),
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0
@@ -522,7 +529,14 @@ def plan_corridor(
         "below_canopy_beyond_envelope_m": beyond_m,
         "below_canopy_density_measured_m": measured_m,
         "canopy_climb_in_zone_m": sum(c.length_m for c in climbs),
-        **_escape_envelope(vertices, chm, grid),
+        **_escape_envelope(vertices, chm, grid, surface.components.get("stem_density_per_ha")),
+        "observers_in_vegetation": float(_observers_in_vegetation(placed, chm, grid)),
+        "below_canopy_in_crown_layer_m": _crown_layer_length(
+            vertices,
+            chm,
+            grid,
+            mission.altitude.crown_ratio or mission.threat.canopy_occlusion.trunk_space_crown_ratio,
+        ),
         **_unopened_transitions(vertices, surface.components.get("canopy_opening"), grid),
         **cable_settle_lengths(
             vertices, chm, grid, surface.components.get("canopy_opening"), covered
@@ -690,8 +704,18 @@ ESCAPE_MARGIN_M = 3.0
 escape climbs to the local canopy top plus this."""
 
 
+ESCAPE_LIKELY_ABOVE_PER_HA = 1000.0
+"""Past this stand density an escape stops being hypothetical: GPS-denied SITL flew
+~1000/ha with 0 escapes in 4 seed sets; above it 1 genuine dead end in 8 traverses (1200/ha;
+the 1500/ha escape was a false trigger on a long detour)
+(droneflight, 2026-09-26) — the local planner met gaps it could not thread."""
+
+
 def _escape_envelope(
-    vertices: Sequence[TrajectoryVertex], chm: np.ndarray, grid: Grid
+    vertices: Sequence[TrajectoryVertex],
+    chm: np.ndarray,
+    grid: Grid,
+    density_per_ha: np.ndarray | None = None,
 ) -> dict[str, float]:
     """How high an in-flight ESCAPE CLIMB could take the aircraft on this route.
 
@@ -718,13 +742,53 @@ def _escape_envelope(
         float(local_top[grid.world_to_pixel(Coordinate(x=vertices[i].x, y=vertices[i].y))])
         for i in under
     )
+    likely = 0.0
+    if density_per_ha is not None:
+        for i in under:
+            if i + 1 >= len(along):
+                continue
+            cell = grid.world_to_pixel(Coordinate(x=vertices[i].x, y=vertices[i].y))
+            if float(density_per_ha[cell]) > ESCAPE_LIKELY_ABOVE_PER_HA:
+                likely += along[i + 1] - along[i]
     return {
         "escape_max_agl_m": worst + ESCAPE_MARGIN_M,
         "escape_first_m": along[under[0]],
         "escape_exposed_length_m": sum(
             along[i + 1] - along[i] for i in under if i + 1 < len(along)
         ),
+        "escape_likely_length_m": likely,
     }
+
+
+def _observers_in_vegetation(mission: Mission, chm: np.ndarray, grid: Grid) -> int:
+    """Ground observers standing in vegetation taller than their eye, under crown
+    transmission — where the eye is at ``dtm + h`` and looks OUT through it (2026-09-26).
+    Zero with transmission off: there the eye sits on the DSM, above the vegetation."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission:
+        return 0
+    eye = mission.threat.observer_height_m
+    count = 0
+    for o in mission.threat.observers:
+        canopy = float(chm[grid.world_to_pixel(o)])
+        if canopy >= max(occ.crown_open_below_m, eye):
+            count += 1
+    return count
+
+
+def _crown_layer_length(
+    vertices: Sequence[TrajectoryVertex], chm: np.ndarray, grid: Grid, crown_ratio: float
+) -> float:
+    """Route length flown under the canopy but ABOVE the estimated crown base
+    (canopy x (1 - crown_ratio)) — i.e. inside live crowns (2026-09-26)."""
+    total = 0.0
+    for a, b in pairwise(vertices):
+        if a.flight_band not in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK):
+            continue
+        canopy = float(chm[grid.world_to_pixel(Coordinate(x=a.x, y=a.y))])
+        if a.altitude_agl_m > canopy * (1.0 - crown_ratio) + 1e-6:
+            total += math.dist((a.x, a.y), (b.x, b.y))
+    return total
 
 
 OPENING_SEARCH_M = 200.0
