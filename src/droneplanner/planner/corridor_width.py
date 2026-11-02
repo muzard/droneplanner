@@ -124,10 +124,27 @@ def _admissible_radius(mask: np.ndarray, cell_size_m: float, unbounded_m: float)
     return np.maximum((edt - 1.0) * cell_size_m, 0.0).astype(np.float32)
 
 
+EXPOSURE_STEP = 0.01
+"""Exposure differences below this do not count as "more exposed" (2026-09-26).
+
+Exposure has been a continuous detection weight since roadmap C1/C2, and crown
+transmission makes it strictly positive almost everywhere (e^-5 through 200 m of
+trunks). Compared exactly, a vertex at 0.000 then refused a neighbour at 0.0001 and
+13 of the demo MVP's corridors collapsed 50 m -> 0 for an exposure no observer could
+act on. Levels are compared in 1 % detection-probability bins instead."""
+
+
+def _exposure_level(exposure: np.ndarray) -> np.ndarray:
+    out: np.ndarray = np.floor(np.asarray(exposure, dtype=np.float64) / EXPOSURE_STEP).astype(
+        np.int64
+    )
+    return out
+
+
 def _distance_to_worse_exposure(
-    exposure: np.ndarray, cell_size_m: float, unbounded_m: float
-) -> dict[float, np.ndarray]:
-    """For each exposure level present, metres to the nearest MORE exposed cell.
+    exposure: np.ndarray, cell_size_m: float, unbounded_m: float, levels: set[int]
+) -> dict[int, np.ndarray]:
+    """For each requested exposure level, metres to the nearest MORE exposed cell.
 
     Admissibility has to be **relative to where you are**, not an absolute
     threshold. With two observers an absolute "exposure <= 0.5" admits cells that
@@ -135,12 +152,12 @@ def _distance_to_worse_exposure(
     see would happily reach into ground that is watched, which is precisely the
     promise-what-was-not-measured problem this module exists to fix.
 
-    Exposure is a fraction of observers, so it takes few distinct values and one
-    distance transform per level covers the whole route.
+    "More exposed" means a higher :data:`EXPOSURE_STEP` bin, and only the levels the
+    route actually sits at are transformed.
     """
+    binned = _exposure_level(exposure)
     return {
-        float(level): _admissible_radius(exposure <= level, cell_size_m, unbounded_m)
-        for level in np.unique(exposure)
+        level: _admissible_radius(binned <= level, cell_size_m, unbounded_m) for level in levels
     }
 
 
@@ -159,7 +176,11 @@ def assess_corridor(
     navigable = (
         ~surface.obstacle if surface.obstacle is not None else np.ones(exposure.shape, dtype=bool)
     )
-    d_worse = _distance_to_worse_exposure(exposure, grid.cell_size_m, cap)
+    cells = [grid.world_to_pixel(p) for p in points]
+    vertex_level = _exposure_level(exposure)
+    d_worse = _distance_to_worse_exposure(
+        exposure, grid.cell_size_m, cap, {int(vertex_level[rc]) for rc in cells}
+    )
     d_canopy = _admissible_radius(under_canopy, grid.cell_size_m, cap)
     d_navigable = _admissible_radius(navigable, grid.cell_size_m, cap)
 
@@ -169,7 +190,7 @@ def assess_corridor(
     for p in points:
         rc = grid.world_to_pixel(p)
         # Never deviate into ground more exposed than where you already are...
-        width = float(d_worse[float(exposure[rc])][rc])
+        width = float(d_worse[int(vertex_level[rc])][rc])
         # ...never leave the stand you are hiding inside...
         if under_canopy[rc]:
             width = min(width, float(d_canopy[rc]))

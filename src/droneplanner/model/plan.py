@@ -268,6 +268,28 @@ class EnduranceBudget(BaseModel):
         return self.endurance_s is not None and self.energy_time_s > self.endurance_s
 
 
+class CanopyClimb(BaseModel):
+    """A stretch inside the concealment zone flown OVER the canopy, not under it.
+
+    The operator must know these before launch: the aircraft leaves cover and
+    climbs to canopy height there, and a climb in the first few hundred metres
+    exposes the launch site itself."""
+
+    model_config = ConfigDict(frozen=True)
+
+    start_m: float = Field(ge=0, description="Along-route distance from launch.")
+    length_m: float = Field(ge=0)
+    max_agl_m: float = Field(description="Highest planned AGL in the stretch.")
+    max_canopy_m: float = Field(ge=0, description="Tallest canopy under the stretch.")
+    reason: str = Field(
+        description=(
+            "'dense_stand' (denser than the onboard envelope), 'crowns_too_low' "
+            "(crown base leaves no trunk space above the floor, AltitudePolicy.crown_ratio) "
+            "or 'stand_too_short' (below AltitudePolicy.min_canopy_m, or no room under it)."
+        )
+    )
+
+
 class Plan(BaseModel):
     """A single planned route (one of ``k`` for redundancy)."""
 
@@ -285,6 +307,7 @@ class Plan(BaseModel):
     objective_scores: dict[str, float] = Field(default_factory=dict)
     kinematics: KinematicReport | None = None
     endurance: EnduranceBudget | None = None
+    canopy_climbs: tuple[CanopyClimb, ...] = ()
 
     @property
     def start(self) -> Coordinate:

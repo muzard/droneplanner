@@ -215,3 +215,27 @@ def test_crowned_raster_matches_the_per_cell_band_everywhere() -> None:
             )
             assert raster[r, c] == np.float32(pref), f"cell {(r, c)} disagrees"
             assert (codes[r, c] == 2) == (band is FlightBand.BELOW_CANOPY)
+
+
+def test_over_canopy_skims_the_tallest_canopy_ahead_with_headroom_above() -> None:
+    """Real canopy is jagged cell to cell; over it, clear the tallest canopy within the
+    lookahead, and leave headroom so a short clearing is not a dive (2026-09-25)."""
+    from droneplanner.fields.altitude import OVER_HEADROOM_M, skim_canopy
+
+    chm = np.array([[10.0, 25.0, 10.0, 10.0, 10.0, 10.0]], dtype=np.float32)
+    policy = AltitudePolicy(skim_lookahead_m=20.0)  # 2 cells at 10 m
+    skim = skim_canopy(chm, policy, cell_size_m=10.0)
+    assert list(skim[0]) == [25.0, 25.0, 25.0, 25.0, 10.0, 10.0]
+    pref, floor, ceil, band = altitude_band_at(
+        (0, 3),
+        chm=chm,
+        target_agl_m=TARGET,
+        policy=policy,
+        covered=np.zeros_like(chm, bool),
+        skim=skim,
+    )
+    assert band is FlightBand.CANOPY_TOP
+    assert floor == pref == 25.0 + policy.canopy_clearance_m
+    assert ceil == pref + OVER_HEADROOM_M
+    raster = planned_flight_agl(chm, TARGET, policy, covered=np.zeros_like(chm, bool), skim=skim)
+    assert raster[0, 3] == np.float32(pref)

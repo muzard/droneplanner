@@ -214,9 +214,9 @@ ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
     (400.0, 2.0),
     (500.0, 1.5),
     (600.0, 1.5),
-    (800.0, 1.25),
-    (1000.0, 0.75),
-    (1200.0, 0.4),
+    (800.0, 1.5),
+    (1000.0, 1.0),
+    (1200.0, 0.5),
 )
 """``(stems/ha, speed m/s)`` the planner prices below-canopy flight at: the
 harness envelope **anchored to SITL**, which is the arbiter.
@@ -236,16 +236,39 @@ stand / speed   clean seed sets (min air)     contact
 600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
 600/ha 2 m/s    4/4 (+0.12 m)                 —
 800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
-800/ha 1.5 m/s  1/4 so far (+0.48 m)          — (pending; a 2nd ran at RTF 0.2, void)
-~1000/ha 0.5*   **4/4** (+0.33 m)             — (0/3 before memory clearing)
+800/ha 1.5 m/s‡ **4/4** (+0.29 m)             — (one earlier run at RTF 0.2 voided)
+~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
+~1000/ha 1.0§   **4/4** (+0.27 m)             — (`askolam230`, RTF 1.0, 0 escapes)
+1200/ha 1.0¶    4/4 strike-free (⚠️ +0.07 m)   — (**1 escape** in 4)
+1500/ha 0.5¶    **4/4** (+0.52 m)             — (1 escape in 4, a FALSE trigger)
 ==============  ============================  =============================
+
+¶ 2026-09-26, `forest_mvp1200n` / `forest_mvp1500n` (MVP route, stand over the first
+~550 m, ±15 m band), memory clearing + escape climb + sensing at target height on.
+1200/ha air +0.33 / +0.50 / +0.48 / **+0.07 m** — the thin one (seed set 6/7) is in
+ordinary flight at 11.4 m AGL and 0.95 m/s, approaching the dead end that then
+triggered its escape. The pre-registered bar was 4/4 with > 0.15 m of air, so **the
+1200/ha anchor is not raised to 1.0**. 1500/ha at 0.5: air +0.52 / +0.78 / +0.58 / +0.52 m
+(seed set 6/7 re-flown after a first run at RTF 0.11 was voided) — **4/4**, so **1200/ha
+→ 0.5** (was 0.4, discounted from the harness): a *denser* stand flew clean at that speed
+with ≥ 0.52 m of air on every seed set. **No 1500 anchor is added**, deliberately:
+:func:`beyond_envelope` is "denser than the last anchor", so a 1500 anchor would move the
+over-canopy fallback from 1200 to 1500/ha and plan *under* stands where genuine dead ends
+occur — what the user asked the fallback to prevent (2026-09-25).
+🔑 **Passability, not speed, is what breaks first past ~1000/ha — but less often than
+first read.** One traverse at 1200/ha (h1g) hit a real dead end: no path for 20 s, then
+the escape climb. The 1500/ha escape (h5e) was a **false trigger** — 0 blocked steps, a
+12.7 m detour at 0.5 m/s tripping "20 s without progress" (droneflight now waits for a
+30 m detour when the planner has a path). So genuine dead ends above 1000/ha: **1 in 8
+traverses**; at ~1000/ha, 0 in 4. Revisit the 1500 anchor after a re-fly with the fixed
+trigger — until then the fallback stays at 1200.
 
 ‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
 band so the VM holds real time), memory clearing on: +1.11 to +1.35 m surface.
 The 800/ha anchor (1.25) is commanded as 1.0, so this is what the planner sends.
 † 2026-09-25, with memory clearing (droneflight PR #5): still not clean — the anchor
 stays 2.0.
-\* 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
+§ 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
 1.5 m median spacing, real MML terrain): the 1000/ha anchor below (0.75) is
 commanded as 0.5 (``model.plan.commanded_speed_ms``), which is what flew. The
 onboard stack stalled 3/3 there until it cleared memory the scan sees through
@@ -253,10 +276,12 @@ onboard stack stalled 3/3 there until it cleared memory the scan sees through
 planned.
 
 (Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
-So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.0 and ~1000/ha →
-0.5 (as commanded) are measured**. 600/ha also flew 2 m/s strike-free, but at 600/ha
-the margin is thin at *both* speeds — a 1.9 m median gap threaded by a 0.9 m
-airframe — so it is not raised on that evidence.
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5, ~1000/ha → 1.0 and
+1200/ha → 0.5 are measured** (the last bounded by 1500/ha at 0.5, 2026-09-26;
+2026-09-25: 800/ha raised 1.25 → 1.5, ~1000/ha 0.75 → 1.0).
+600/ha also flew 2 m/s strike-free, but at 600/ha the margin is thin at *both*
+speeds — a 1.9 m median gap threaded by a 0.9 m airframe — so it is not raised on
+that evidence.
 The remaining anchors are the harness discounted by the SITL/harness ratio at the
 nearest validated density (3/5 = 0.6 at <= 200, 2/4 = 0.5 at >= 400).
 The harness passes 4-5 m/s at 200/ha: it is necessary, not sufficient.

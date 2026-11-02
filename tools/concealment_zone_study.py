@@ -75,6 +75,7 @@ def _plan(
     stem = dict(m.get("stem", {}) or {})
     stem["density_per_ha"] = density
     m["stem"] = stem
+    _no_overfly(m)
     plan, _ = plan_over_terrain(Mission.model_validate(m), dtm, dsm, grid, route_index=0)
     end = plan.endurance
     assert end is not None
@@ -85,6 +86,15 @@ def _plan(
         "closes": float(end.closes),
         "beyond": plan.objective_scores.get("below_canopy_beyond_envelope_m", 0.0),
     }
+
+
+def _no_overfly(m: dict[str, object]) -> None:
+    """The study asks how much can be flown UNDER cover. With the over-canopy
+    fallback on, a stand beyond the envelope is flown over and every radius
+    "closes" by giving the cover up (1500 stems/ha closed the whole route)."""
+    alt = dict(m.get("altitude", {}) or {})  # type: ignore[call-overload]
+    alt["over_canopy_when_unpassable"] = False
+    m["altitude"] = alt
 
 
 def solve_as_is(
@@ -134,6 +144,7 @@ def _plan_as_is(ao: Path, radius: float, mission_file: str) -> dict[str, float]:
     _, dtm, dsm, grid = _load(ao, mission_file)
     m = yaml.safe_load((ao / mission_file).read_text())
     m["covered_radius_m"] = radius
+    _no_overfly(m)
     plan, _ = plan_over_terrain(Mission.model_validate(m), dtm, dsm, grid, route_index=0)
     end = plan.endurance
     assert end is not None

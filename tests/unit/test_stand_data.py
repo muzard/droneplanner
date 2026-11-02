@@ -141,3 +141,25 @@ def test_an_unknown_data_model_is_refused_not_guessed(tmp_path: Path) -> None:
         db.execute("CREATE TABLE treestandsummary (treestandid INTEGER, stemcount INTEGER)")
     with pytest.raises(StandDataError, match="unknown"):
         read_stand_stemcounts(bad)
+
+
+def test_crown_ratio_is_the_stem_weighted_species_mix(tmp_path: Path) -> None:
+    """Spruce keeps a longer live crown than pine; the stand's ratio is their mix,
+    from present-day strata tall enough to matter (seedlings left out)."""
+    from droneplanner.io.stand_data import SPECIES_CROWN_RATIO, read_stand_crown_ratios
+
+    path = _gpkg_current_model(tmp_path)
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE treestratum (id INTEGER, treestandid INTEGER, treespecies INTEGER, "
+            "stemcount REAL, meanheight REAL, storey TEXT)"
+        )
+        for row in [
+            (1, 2, 1, 300.0, 18.0, "1"),  # pine
+            (2, 2, 2, 100.0, 16.0, "1"),  # spruce
+            (3, 2, 2, 5000.0, 1.5, "2"),  # spruce seedlings — ignored
+            (4, 1, 3, 999.0, 15.0, "1"),  # inventory class — ignored
+        ]:
+            db.execute("INSERT INTO treestratum VALUES (?, ?, ?, ?, ?, ?)", row)
+    expected = (300 * SPECIES_CROWN_RATIO["pine"] + 100 * SPECIES_CROWN_RATIO["spruce"]) / 400
+    assert read_stand_crown_ratios(path) == {21: expected}

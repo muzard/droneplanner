@@ -117,6 +117,58 @@ class CanopyOcclusion(BaseModel):
             "look-down observers, which are the ones the old model could not see."
         ),
     )
+    trunk_space_sightlines: bool = Field(
+        default=False,
+        description=(
+            "Let a near-horizontal sightline pass UNDER the crowns, attenuated by the "
+            "trunks, instead of treating the canopy as a wall (2026-09-25). An observer "
+            "standing on open ground can see a drone flying through a stand's trunk "
+            "space from its edge; the DSM march cannot. Transmittance exp(-stems/m^2 x "
+            "trunk_diameter_m x distance) under the crown base, blocked in the crown "
+            "layer, only within trunk_space_max_range_m. Off by default: it raises "
+            "below-canopy exposure near forest edges and moves every historical figure. "
+            "Observers standing inside a stand (eye on the crowns in this model) are "
+            "not covered — see SHORTFALLS."
+        ),
+    )
+    trunk_diameter_m: float = Field(default=0.25, gt=0.0, le=2.0)
+    trunk_space_max_range_m: float = Field(default=300.0, gt=0.0)
+    trunk_space_crown_ratio: float = Field(
+        default=0.5,
+        gt=0.0,
+        lt=1.0,
+        description="Crown base = canopy x (1 - this) when AltitudePolicy.crown_ratio is unset.",
+    )
+    crown_transmission: bool = Field(
+        default=False,
+        description=(
+            "Score every sightline by TRANSMITTANCE through the vegetation it crosses "
+            "instead of the binary DSM horizon (2026-09-26). Terrain (DTM) still blocks; "
+            "the canopy (DSM - DTM) becomes a medium: in the crown layer each cell "
+            "attenuates by its vertical gap probability per crown depth "
+            "(gap^(path/depth), turbid medium calibrated at nadir), under the crown base "
+            "the trunks do (exp(-stems/m^2 x trunk_diameter_m x path)). Fixes the binary "
+            "wall that scored a drone at 5-7 m under a neighbouring crown as exactly 0. "
+            "Replaces the sub-canopy steepness rule and trunk_space_sightlines (both "
+            "become special cases), and the observer stands on the TERRAIN (dtm + observer "
+            "height), not on the crowns. Off by default: it moves every historical figure."
+        ),
+    )
+    crown_open_below_m: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="Crown transmission: a cell with less canopy than this has no crown.",
+    )
+    observer_vantage_m: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Crown transmission: an observer placed in vegetation taller than its eye "
+            "stands instead at the nearest open cell within this radius — a real observer "
+            "steps out to look (2026-09-26). 0 keeps observers exactly where placed; "
+            "sectors bound to a moved observer move with it."
+        ),
+    )
 
 
 class DetectionModel(BaseModel):
@@ -380,6 +432,28 @@ class AltitudePolicy(BaseModel):
     crown_clearance_m: float = Field(
         default=1.0, ge=0, description="Vertical gap kept below the crown base."
     )
+    skim_lookahead_m: float = Field(
+        default=40.0,
+        ge=0,
+        description=(
+            "Over the canopy, fly at the TALLEST canopy within this distance plus the "
+            "clearance — not each cell's own top. Real canopy is jagged at 16 m cells "
+            "(10-20 m steps); skimming it cell by cell demanded 4-5 m/s of climb at "
+            "cruise and could reach a taller stand below its crowns. ~40 m is the ground "
+            "a 20 m climb takes at 3 m/s and 6 m/s. 0 = the old per-cell skim."
+        ),
+    )
+    over_canopy_when_unpassable: bool = Field(
+        default=True,
+        description=(
+            "Inside the concealment zone, fly OVER a stand that cannot be flown under "
+            "(denser than the onboard planner has been shown to fly) instead of "
+            "planning a NO-GO leg through it. Every such climb is listed in the report "
+            "(canopy_climbs, finding canopy_climb_in_zone) so the operator knows before "
+            "launch. False = the old behaviour: plan under it and raise "
+            "stem_density_beyond_envelope."
+        ),
+    )
 
 
 class Weights(BaseModel):
@@ -409,6 +483,18 @@ class Weights(BaseModel):
             "concealment posture the whole program exists for."
         ),
     )
+    cable_on_crowns: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "How hard to route AWAY from flying over closed canopy, where the laid "
+            "fiber settles on the crowns instead of the ground (laydown/settle.py, "
+            "roadmap C7): a per-metre penalty on cells flown over canopy >= 3 m with "
+            "no opening. 0 (default) keeps every route unchanged; the report measures "
+            "the crown length either way (finding cable_on_crowns). Whether the cable's "
+            "survival is worth the route change is the operator's call."
+        ),
+    )
 
 
 class LayerPaths(BaseModel):
@@ -435,6 +521,26 @@ class LayerPaths(BaseModel):
         ),
     )
     roads: Path | None = None
+    canopy_gap_fraction: Path | None = Field(
+        default=None,
+        description=(
+            "Raster on the DTM grid: per-cell probability a look-down sightline finds a "
+            "gap in the crowns (fraction of the 1 m canopy model open below the flight "
+            "band; tools/build_finnish_ao.py writes gapfrac.tif). Replaces "
+            "threat.canopy_occlusion.sub_canopy_gap_fraction cell by cell. Askola "
+            "(2026-09-26): median 0.04-0.16 by stand height — the literature 0.10 is the "
+            "median, but a quarter of tall cells exceed ~0.20-0.25."
+        ),
+    )
+    canopy_gaps: Path | None = Field(
+        default=None,
+        description=(
+            "Raster on the DTM grid, 1 where a cell holds a canopy OPENING a climb out "
+            "of (or descent back into) the trunk layer can use — tools/build_finnish_ao.py "
+            "derives it from the 1 m canopy model. Without it, open ground next to a "
+            "transition is the only opening assumed."
+        ),
+    )
     stem_map: Path | None = Field(
         default=None,
         description=(

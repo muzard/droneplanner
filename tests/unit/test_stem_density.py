@@ -189,6 +189,12 @@ class TestRoutingBehaviour:
             m = mission.model_copy(
                 update={
                     "weights": mission.weights.model_copy(update={"clutter": clutter_weight}),
+                    # The dense 12 m forest here is beyond the envelope: with the
+                    # over-canopy fallback it would be flown over at cruise and the
+                    # clutter term would have nothing to steer.
+                    "altitude": mission.altitude.model_copy(
+                        update={"over_canopy_when_unpassable": False}
+                    ),
                 }
             )
             plan = plan_corridor(m, build_cost_surface(dtm, dsm, grid, m))

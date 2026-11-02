@@ -32,13 +32,14 @@ from droneplanner.fields.altitude import (
     canopy_height,
     concealment_mask,
     planned_flight_agl,
+    skim_canopy,
 )
 from droneplanner.fields.snag import build_snag
 from droneplanner.fields.stem_density import build_stem_clutter
 from droneplanner.fields.survivability import build_survivability
 from droneplanner.fields.terrain import drainage_proxy, ridge_penalty, slope_penalty
 from droneplanner.fields.util import normalize01
-from droneplanner.fields.viewshed import cumulative_exposure
+from droneplanner.fields.viewshed import CrownMedium, TrunkSpace, cumulative_exposure
 from droneplanner.forest.navigability import FlyabilityField
 from droneplanner.io.stand_data import stand_density_raster
 from droneplanner.model.grid import Grid
@@ -105,14 +106,63 @@ def build_cost_surface(
     # ground level made the concealment metric — and the route it drives —
     # systematically wrong about the thing being hidden.
     chm = canopy_height(dtm, dsm)
+    # Observers at their vantage points (crown transmission only; inert otherwise).
+    placed = vantage_mission(mission, chm, grid).threat
+    observers = list(placed.observers)
+    sectors = placed.sectors
     # Where concealment is required at all (Mission.covered_radius_m). Outside it
     # the drone flies over the canopy, and its exposure is not costed.
     covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
-    flight_agl = planned_flight_agl(
-        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+    # Stem clutter needs the band (only stems the drone flies AMONG limit it), and
+    # the band may now need the clutter: a stand denser than the onboard envelope
+    # is flown OVER, not planned through (AltitudePolicy.over_canopy_when_unpassable).
+    measured = (
+        stand_density_raster(mission.layers.stand_data, grid)
+        if mission.layers.stand_data is not None
+        else None
     )
+
+    def _clutter(band: np.ndarray) -> dict[str, np.ndarray]:
+        return build_stem_clutter(
+            chm,
+            cruise_speed_ms=mission.drone.cruise_speed_ms,
+            min_canopy_m=mission.altitude.min_canopy_m,
+            among_stems=band >= 2,
+            density_override_per_ha=mission.stem.density_per_ha,
+            measured_per_ha=measured,
+        )
+
+    # Over-canopy legs clear the tallest canopy within the skim lookahead, not each
+    # cell's own top (AltitudePolicy.skim_lookahead_m).
+    skim = skim_canopy(chm, mission.altitude, grid.cell_size_m)
     flight_band = band_raster(
-        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=covered, skim=skim
+    )
+    clutter = _clutter(flight_band)
+    forced_over = np.zeros(chm.shape, dtype=bool)
+    enterable_zone = covered
+    if mission.altitude.over_canopy_when_unpassable:
+        forced_over = _regularise_forced(clutter["beyond_envelope"] > 0.5)
+        if flyability is not None:
+            # A lidar window is MEASURED free space; an inferred density must not
+            # overrule it.
+            forced_over &= ~(flyability.nav_ceil_m > 0.0)
+        if covered is not None:
+            forced_over &= covered
+        if forced_over.any():
+            zone_now = np.ones(chm.shape, dtype=bool) if covered is None else covered
+            enterable_zone = zone_now & ~forced_over
+            flight_band = band_raster(
+                chm,
+                mission.cruise_agl_m,
+                mission.altitude,
+                flyability,
+                covered=enterable_zone,
+                skim=skim,
+            )
+            clutter = _clutter(flight_band)
+    flight_agl = planned_flight_agl(
+        chm, mission.cruise_agl_m, mission.altitude, flyability, covered=enterable_zone, skim=skim
     )
     eye_m = mission.threat.observer_height_m
     exposure = cumulative_exposure(
@@ -126,6 +176,9 @@ def build_cost_surface(
         target_span_m=mission.drone.rotor_span_m,
         sectors=sectors,
         off_axis_vigilance=vigilance,
+        trunk_space=trunk_space_for(mission, dtm, chm, clutter["stem_density_per_ha"]),
+        gap_map=gap_map_for(mission, grid),
+        medium=crown_medium_for(mission, dtm, dsm, clutter["stem_density_per_ha"], grid),
     )
     # The ground field gets NEITHER model, and both omissions are deliberate.
     # Canopy: its target *is* the DSM surface, so a cell's own crown is never
@@ -166,19 +219,6 @@ def build_cost_surface(
     # flight stack may go here (TEST-PLAN N3). Priced as extra *seconds per metre*
     # rather than as an abstract risk, because seconds are what the endurance
     # budget spends — so this term and the N1 check argue in the same currency.
-    measured = (
-        stand_density_raster(mission.layers.stand_data, grid)
-        if mission.layers.stand_data is not None
-        else None
-    )
-    clutter = build_stem_clutter(
-        chm,
-        cruise_speed_ms=mission.drone.cruise_speed_ms,
-        min_canopy_m=mission.altitude.min_canopy_m,
-        among_stems=flight_band >= 2,
-        density_override_per_ha=mission.stem.density_per_ha,
-        measured_per_ha=measured,
-    )
 
     # Drone concealment terms apply only inside the concealment zone; the cable's
     # survivability applies everywhere, because the fiber stays on the ground.
@@ -189,6 +229,7 @@ def build_cost_surface(
         + weights.survivability * survivability
         + weights.snag * snag
         + weights.clutter * clutter["clutter_time_penalty"]
+        + weights.cable_on_crowns * _crown_laydown(chm, flight_band, mission, grid)
         - weights.cover * drainage * COVER_SCALE * zone
     )
 
@@ -197,8 +238,21 @@ def build_cost_surface(
         "ground_los": ground_los,  # the cable: line of sight only, no detection model
         "flight_agl": flight_agl,
         "canopy_height": chm,
+        "skim_canopy": skim.astype(np.float32),
         "flight_band": flight_band.astype(np.float32),
         "covered": zone,
+        # Cells inside the zone flown OVER because they cannot be flown under, and
+        # the zone the altitude policy may enter — the corridor must use this one,
+        # or it would plan under a stand the cost surface priced as flown over.
+        "forced_over_canopy": forced_over.astype(np.float32),
+        # Where the aircraft can get up through the canopy, or back down into the
+        # trunk layer (planner/corridor.py places every under/over transition at one).
+        "canopy_opening": _canopy_openings(mission, chm, grid),
+        "enterable_zone": (
+            np.ones(chm.shape, np.float32)
+            if enterable_zone is None
+            else enterable_zone.astype(np.float32)
+        ),
         "survivability": survivability,
         "snag": snag,
         "ridge": ridge,
@@ -236,3 +290,173 @@ def build_cost_surface(
         road_mask=road_mask,
         flyability=flyability,
     )
+
+
+FORCED_CLOSE_CELLS = 2
+"""Gaps of up to this many cells between flown-over stands are flown over too."""
+
+
+def _regularise_forced(mask: np.ndarray) -> np.ndarray:
+    """Close small gaps and pad by one cell, so over/under does not porpoise.
+
+    🔴 Why: along a canopy gradient the envelope edge (1200 stems/ha ≈ a 12.7 m
+    canopy by inference) is crossed cell by cell, and a route that alternates
+    under (~10 m AGL) and over (~16 m) on consecutive 25 m legs demands more
+    climb than the airframe has and breaks the terrain guarantee. One decision
+    per stand, with room to climb before it, is what an operator can read and a
+    flight controller can fly.
+    """
+    from scipy.ndimage import binary_closing, binary_dilation
+
+    if not mask.any():
+        return mask
+    square = np.ones((3, 3), dtype=bool)
+    closed = binary_closing(mask, structure=square, iterations=FORCED_CLOSE_CELLS)
+    out: np.ndarray = binary_dilation(closed | mask, structure=square)
+    return out
+
+
+OPENING_HEIGHT_M = 5.0
+"""Canopy lower than this is an opening (matches tools/build_finnish_ao.py)."""
+
+
+def _canopy_openings(mission: Mission, chm: np.ndarray, grid: Grid) -> np.ndarray:
+    """1 where a climb out of / descent into the canopy has room, else 0.
+
+    From ``layers.canopy_gaps`` (the 1 m canopy model's open columns) when given;
+    otherwise only open ground, and the cells beside it (a stand edge), count —
+    a DSM grid cannot see the strip roads and crown gaps a 1 m model can.
+    """
+    from scipy.ndimage import binary_dilation
+
+    path = mission.layers.canopy_gaps
+    if path is not None:
+        from droneplanner.io.raster import read_raster
+
+        r = read_raster(path)
+        if r.shape != (grid.rows, grid.cols) or tuple(r.transform) != tuple(grid.transform):
+            raise ValueError(f"{path}: canopy_gaps must be on the DTM grid (shape + transform)")
+        return (r.data > 0.5).astype(np.float32)
+    open_ground = chm < OPENING_HEIGHT_M
+    out: np.ndarray = binary_dilation(open_ground, structure=np.ones((3, 3), dtype=bool))
+    return out.astype(np.float32)
+
+
+def _crown_laydown(
+    chm: np.ndarray, flight_band: np.ndarray, mission: Mission, grid: Grid
+) -> np.ndarray:
+    """1 where the drone flies OVER canopy with no opening — the fiber settles on the
+    crowns there (laydown/settle.py). 0 when ``weights.cable_on_crowns`` is 0."""
+    from droneplanner.laydown.settle import CROWN_SETTLE_M
+
+    if mission.weights.cable_on_crowns <= 0.0:
+        return np.zeros(chm.shape, dtype=np.float32)
+    over = flight_band < 2  # not flown among the stems
+    opening = _canopy_openings(mission, chm, grid) > 0.5
+    out: np.ndarray = (over & (chm >= CROWN_SETTLE_M) & ~opening).astype(np.float32)
+    return out
+
+
+def trunk_space_for(
+    mission: Mission, dtm: np.ndarray, chm: np.ndarray, stems_per_ha: np.ndarray
+) -> TrunkSpace | None:
+    """The under-crown sightline inputs, or None when the mission leaves it off.
+
+    One builder for the raster field and the flown re-score (planner/corridor.py),
+    so the two cannot disagree about what an observer sees through the trunks."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.trunk_space_sightlines:
+        return None
+    ratio = mission.altitude.crown_ratio or occ.trunk_space_crown_ratio
+    return TrunkSpace(
+        dtm=np.asarray(dtm, dtype=np.float32),
+        crown_base_agl_m=(np.asarray(chm, dtype=np.float32) * (1.0 - ratio)),
+        stems_per_m2=np.asarray(stems_per_ha, dtype=np.float32) / 10_000.0,
+        trunk_diameter_m=occ.trunk_diameter_m,
+        max_range_m=occ.trunk_space_max_range_m,
+    )
+
+
+def vantage_mission(mission: Mission, chm: np.ndarray, grid: Grid) -> Mission:
+    """``mission`` with observers moved to their vantage points
+    (``CanopyOcclusion.observer_vantage_m``), or unchanged.
+
+    Only under crown transmission, where the eye is on the ground: an observer in
+    vegetation taller than its eye moves to the nearest open cell within the radius;
+    sectors bound to it move with it so the binding survives. One function for the
+    cost surface and the flown re-score, so they cannot disagree."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission or occ.observer_vantage_m <= 0.0:
+        return mission
+    from scipy.ndimage import distance_transform_edt
+
+    from droneplanner.model.geometry import Coordinate
+
+    blocked = np.asarray(chm) >= max(occ.crown_open_below_m, mission.threat.observer_height_m)
+    if blocked.all() or not blocked.any():
+        return mission
+    dist, idx = distance_transform_edt(blocked, return_indices=True)
+
+    def move(c: Coordinate) -> Coordinate:
+        r, col = grid.world_to_pixel(c)
+        if not blocked[r, col] or dist[r, col] * grid.cell_size_m > occ.observer_vantage_m:
+            return c
+        p = grid.pixel_to_world(int(idx[0, r, col]), int(idx[1, r, col]))
+        return Coordinate(x=p.x, y=p.y)
+
+    threat = mission.threat.model_copy(
+        update={
+            "observers": [move(o) for o in mission.threat.observers],
+            "sectors": [
+                s if s.observer is None else s.model_copy(update={"observer": move(s.observer)})
+                for s in mission.threat.sectors
+            ],
+        }
+    )
+    return mission.model_copy(update={"threat": threat})
+
+
+def crown_medium_for(
+    mission: Mission,
+    dtm: np.ndarray,
+    dsm: np.ndarray,
+    stems_per_ha: np.ndarray,
+    grid: Grid,
+) -> CrownMedium | None:
+    """The canopy as a medium (``CanopyOcclusion.crown_transmission``), or None.
+
+    Crown base from ``AltitudePolicy.crown_ratio`` (else the occlusion's own
+    ratio), vertical gap probability from the measured map (else the scalar), stem
+    density from the clutter field. One builder for the raster and the flown
+    re-score, so they cannot disagree."""
+    occ = mission.threat.canopy_occlusion
+    if not occ.crown_transmission:
+        return None
+    ratio = mission.altitude.crown_ratio or occ.trunk_space_crown_ratio
+    chm = np.clip(np.asarray(dsm, dtype=np.float64) - np.asarray(dtm, dtype=np.float64), 0.0, None)
+    measured = gap_map_for(mission, grid)
+    return CrownMedium.build(
+        dtm,
+        dsm,
+        crown_base_agl_m=chm * (1.0 - ratio),
+        gap=occ.sub_canopy_gap_fraction if measured is None else measured,
+        stems_per_m2=np.asarray(stems_per_ha, dtype=np.float64) / 10_000.0,
+        trunk_diameter_m=occ.trunk_diameter_m,
+        open_below_m=occ.crown_open_below_m,
+    )
+
+
+def gap_map_for(mission: Mission, grid: Grid) -> np.ndarray | None:
+    """Measured per-cell crown-gap probability (``layers.canopy_gap_fraction``), or
+    None to use the scalar ``sub_canopy_gap_fraction``. Shared by the raster field and
+    the flown re-score so they cannot disagree."""
+    path = mission.layers.canopy_gap_fraction
+    if path is None:
+        return None
+    from droneplanner.io.raster import read_raster
+
+    r = read_raster(path)
+    if r.shape != (grid.rows, grid.cols) or tuple(r.transform) != tuple(grid.transform):
+        raise ValueError(f"{path}: canopy_gap_fraction must be on the DTM grid")
+    out: np.ndarray = np.clip(r.data, 0.0, 1.0).astype(np.float32)
+    return out
