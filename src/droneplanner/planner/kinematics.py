@@ -188,24 +188,37 @@ def smooth_altitudes(
     ceils: list[float],
     seg_dists: list[float],
     limits: KinematicLimits,
+    leg_speeds_ms: list[float] | None = None,
 ) -> tuple[list[float], int, float, float]:
     """Pick a climb-feasible altitude in each [floor, ceil] band near ``prefs``.
 
     Prioritizes staying inside the navigable band; where the climb/descent limit
     cannot also be met, it clamps to the band and counts a climb_violation.
     Returns (altitudes, climb_violations, max_climb_rate, max_descent_rate).
+
+    ``leg_speeds_ms`` (per leg) turns the airframe's climb/descent RATE into metres
+    per horizontal metre at the speed each leg is actually flown. 🔴 Without it the
+    check assumed cruise everywhere: a 20 m climb over a stand, approached through
+    forest at 0.5 m/s, was scored as needing 40 m of ground instead of ~3 m, and the
+    Askola over-canopy plan reported 11 violations and 4.5 m/s peak climb for legs
+    SITL flew without trouble (2026-09-25).
     """
     n = len(prefs)
     if n == 0:
         return [], 0, 0.0, 0.0
-    up = limits.max_climb_rate_ms / limits.cruise_speed_ms  # meters up per horizontal meter
-    down = limits.max_descent_rate_ms / limits.cruise_speed_ms
+    if leg_speeds_ms is not None and len(leg_speeds_ms) != n - 1:
+        raise ValueError("leg_speeds_ms must have one entry per leg")
 
     alts = [min(max(prefs[0], floors[0]), ceils[0])]
     climb_violations = 0
     max_climb = max_descent = 0.0
     for i in range(1, n):
         d = seg_dists[i - 1]
+        v = limits.cruise_speed_ms
+        if leg_speeds_ms is not None:
+            v = min(limits.cruise_speed_ms, max(leg_speeds_ms[i - 1], 0.1))
+        up = limits.max_climb_rate_ms / v  # metres up per horizontal metre
+        down = limits.max_descent_rate_ms / v
         prev = alts[-1]
         lo_reach, hi_reach = prev - down * d, prev + up * d
         band_lo, band_hi = floors[i], ceils[i]
@@ -220,9 +233,38 @@ def smooth_altitudes(
             climb_violations += 1
         alts.append(z)
 
-        rate = abs(z - prev) / d * limits.cruise_speed_ms if d > 0 else 0.0
-        if z >= prev:
-            max_climb = max(max_climb, rate)
-        else:
-            max_descent = max(max_descent, rate)
+    # Backward pass: the forward pass cannot see a climb coming. Where the next
+    # vertex is higher than this one can reach, raise this one in advance (within
+    # its band) — e.g. do not descend into a 24 m clearing between two 25 m stands
+    # only to find the far stand out of reach (Askola, 2026-09-25). Likewise lower a
+    # vertex ahead of a descent it could not otherwise make.
+    speeds = [
+        limits.cruise_speed_ms
+        if leg_speeds_ms is None
+        else min(limits.cruise_speed_ms, max(leg_speeds_ms[i], 0.1))
+        for i in range(n - 1)
+    ]
+    for i in range(n - 2, -1, -1):
+        d = seg_dists[i]
+        up_i = limits.max_climb_rate_ms / speeds[i] * d
+        down_i = limits.max_descent_rate_ms / speeds[i] * d
+        if alts[i + 1] - alts[i] > up_i:
+            alts[i] = min(max(alts[i + 1] - up_i, floors[i]), ceils[i])
+        elif alts[i] - alts[i + 1] > down_i:
+            alts[i] = max(min(alts[i + 1] + down_i, ceils[i]), floors[i])
+
+    climb_violations = 0
+    for i in range(1, n):
+        d = seg_dists[i - 1]
+        v = speeds[i - 1]
+        dz = alts[i] - alts[i - 1]
+        if d > 0:
+            rate = abs(dz) / d * v
+            limit = limits.max_climb_rate_ms if dz >= 0 else limits.max_descent_rate_ms
+            if rate > limit + 1e-6:
+                climb_violations += 1
+            if dz >= 0:
+                max_climb = max(max_climb, rate)
+            else:
+                max_descent = max(max_descent, rate)
     return alts, climb_violations, max_climb, max_descent

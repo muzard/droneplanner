@@ -35,7 +35,7 @@ class TestDensityFromHeight:
 
     def test_reference_anchor_is_reproduced_exactly(self) -> None:
         chm = np.full((1, 1), 20.0, dtype=np.float32)
-        assert stem_density_per_ha(chm)[0, 0] == pytest.approx(600.0, rel=1e-4)
+        assert stem_density_per_ha(chm)[0, 0] == pytest.approx(730.0, rel=1e-4)
 
     def test_open_ground_has_no_stems(self) -> None:
         chm = np.array([[0.0, 1.0, 11.9, 12.0]], dtype=np.float32)
@@ -44,11 +44,11 @@ class TestDensityFromHeight:
         assert d[0][3] > 0.0
 
     def test_the_demo_ao_band_lands_where_measured(self) -> None:
-        """12-22 m stands -> ~520-1290 stems/ha, which is what the demo reports."""
+        """12-22 m stands -> ~640-1460 stems/ha on the Askola-fitted relation."""
         chm = np.array([[12.0, 22.0]], dtype=np.float32)
         d = stem_density_per_ha(chm, min_canopy_m=12.0)
-        assert d[0, 0] == pytest.approx(1291.0, rel=0.01)
-        assert d[0, 1] == pytest.approx(520.0, rel=0.01)
+        assert d[0, 0] == pytest.approx(1463.0, rel=0.01)
+        assert d[0, 1] == pytest.approx(641.0, rel=0.01)
 
 
 class TestSpacing:
@@ -96,7 +96,7 @@ class TestSpeedCap:
         """N3's headline, and the reason routing between stands cannot rescue N1.
 
         Clearing the 4.00 m/s endurance floor needs <=92 stems/ha. Under the
-        self-thinning relation that takes a **~70 m canopy** — taller than any
+        self-thinning relation that takes a **~90 m canopy** — taller than any
         managed forest — so the sparse-stand lever the TEST-PLAN hoped for does
         not exist at realistic stand heights.
         """
@@ -105,8 +105,8 @@ class TestSpeedCap:
             mean_stem_spacing_m(stem_density_per_ha(realistic)), cruise_speed_ms=CRUISE
         )
         assert np.all(speed < 4.0)
-        # It takes a redwood to get there.
-        tall = np.array([[70.0]], dtype=np.float32)
+        # It takes a redwood to get there (~90 m on the Askola-fitted relation).
+        tall = np.array([[100.0]], dtype=np.float32)
         assert (
             max_reactive_speed_ms(
                 mean_stem_spacing_m(stem_density_per_ha(tall)), cruise_speed_ms=CRUISE
@@ -139,6 +139,7 @@ class TestBuildStemClutter:
             "max_reactive_speed_ms",
             "max_speed_ms",
             "beyond_envelope",
+            "stem_density_measured",
             "clutter_time_penalty",
         }
         # Open ground: no stems, no penalty, full cruise.
@@ -188,6 +189,12 @@ class TestRoutingBehaviour:
             m = mission.model_copy(
                 update={
                     "weights": mission.weights.model_copy(update={"clutter": clutter_weight}),
+                    # The dense 12 m forest here is beyond the envelope: with the
+                    # over-canopy fallback it would be flown over at cruise and the
+                    # clutter term would have nothing to steer.
+                    "altitude": mission.altitude.model_copy(
+                        update={"over_canopy_when_unpassable": False}
+                    ),
                 }
             )
             plan = plan_corridor(m, build_cost_surface(dtm, dsm, grid, m))
@@ -199,6 +206,19 @@ class TestRoutingBehaviour:
 
 class TestOnboardPlanningEnvelope:
     """The speed cap is the local planner's MEASURED envelope, not reactive coherence."""
+
+    def test_the_planning_envelope_never_exceeds_the_harness(self) -> None:
+        """SITL is the arbiter and it is slower: 5 m/s at 200/ha failed 2/2 in SITL
+        where the harness flew it clean. The planner must never price faster."""
+        from droneplanner.fields.stem_density import (
+            HARNESS_ENVELOPE,
+            ONBOARD_PLANNING_ENVELOPE,
+        )
+
+        harness = dict(HARNESS_ENVELOPE)
+        for density, speed in ONBOARD_PLANNING_ENVELOPE:
+            assert speed <= harness[density]
+        assert dict(ONBOARD_PLANNING_ENVELOPE)[200.0] == 3.0  # SITL: clean on 4/4 seed sets
 
     def test_anchors_are_reproduced(self) -> None:
         from droneplanner.fields.stem_density import (
@@ -213,7 +233,7 @@ class TestOnboardPlanningEnvelope:
     def test_beyond_the_envelope_is_flagged_and_still_monotone(self) -> None:
         from droneplanner.fields.stem_density import beyond_envelope, max_planned_speed_ms
 
-        d = np.array([400.0, 800.0, 1600.0])
+        d = np.array([800.0, 1300.0, 1500.0])  # above the 0.3 m/s extrapolation floor
         v = max_planned_speed_ms(d, cruise_speed_ms=6.0)
         assert v[0] > v[1] > v[2] > 0.0
         assert list(beyond_envelope(d)) == [False, True, True]
@@ -233,4 +253,6 @@ class TestOnboardPlanningEnvelope:
         )
         assert out["stem_density_per_ha"][0, 0] == 0.0  # open ground stays open
         assert out["stem_density_per_ha"][0, 1] == pytest.approx(107.0)
-        assert out["max_speed_ms"][0, 1] == pytest.approx(min(6.0, CRUISE))
+        from droneplanner.fields.stem_density import ONBOARD_PLANNING_ENVELOPE
+
+        assert out["max_speed_ms"][0, 1] == pytest.approx(ONBOARD_PLANNING_ENVELOPE[0][1])

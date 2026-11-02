@@ -13,6 +13,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from droneplanner.model.plan import (
+    CanopyClimb,
     CrossingMethod,
     EnduranceBudget,
     FlyabilityClass,
@@ -100,6 +101,14 @@ class RiskReport(BaseModel):
         ),
     )
     corridor_half_width_median_m: float = Field(default=0.0, ge=0)
+    canopy_climbs: tuple[CanopyClimb, ...] = Field(
+        default=(),
+        description=(
+            "Every stretch inside the concealment zone flown OVER the canopy, in "
+            "route order, with its distance from launch — so a climb straight after "
+            "take-off is known before launch, not discovered in flight."
+        ),
+    )
 
     threat_sectors: tuple[str, ...] = Field(
         default=(),

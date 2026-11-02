@@ -344,7 +344,9 @@ on evidence.
 
 **1. The speed cap is now the ONBOARD PLANNER's measured envelope, not reactive
 coherence.** `fields/stem_density.ONBOARD_PLANNING_ENVELOPE`:
-**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0**, measured in droneflight's
+**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0** (⚠️ re-measured 2026-09-24 after
+the planner fixes and anchored to SITL: 200 → 3.0, 400 → 2.0, 800 → 1.25, 1200 →
+0.4 — see "HOW MUCH THE ZONE MUST SHRINK"), measured in droneflight's
 accel/jerk-limited harness with the new local planner (`droneflight/local_planner.py`).
 At 800/ha it stalls or strikes at every speed tried, so anything past 400 is
 flagged `beyond_envelope` and raises **`stem_density_beyond_envelope` CRITICAL**;
@@ -361,7 +363,7 @@ the cover reward are zeroed, no stem speed cap. **The cable's survivability term
 stays everywhere** — the fiber remains on the ground after the aircraft has gone.
 None = whole route (unchanged default).
 
-**3. DECISION: 1500 m.** `tools/concealment_zone_study.py` sweeps radius × density:
+**3. DECISION: 1500 m** (re-checked 2026-09-24: closes up to ~400 stems/ha; denser Finnish stands need 0.8-1.1 km). `tools/concealment_zone_study.py` sweeps radius × density:
 
 | stand density | largest radius that closes | energy at 1500 m |
 |---|---|---|
@@ -397,11 +399,393 @@ the forest band along a line to the equator. It now reads waypoints only.
 
 **The MVP mission is `demo_ao/mission_mvp.yaml`** (radius 1500, density 200):
 **5180 m, 1166 m below canopy at 3.0 m/s, 19.0 min, energy 0.82 → REVIEW (was
-NO-GO at 47.6 min).** Its world: `gz-world --stems-per-ha 200 --forest-radius
+NO-GO at 47.6 min)** — 3.0 m/s flown clean GPS-denied on 4/4 noise-seed sets. Its world: `gz-world --stems-per-ha 200 --forest-radius
 1500` → `worlds/forest_mvp.*` (1562 trunks over 7.8 ha, median NN 3.4 m).
 ⚠️ `demo_ao/dtm.tif` is 220×220 since the AO was enlarged; the older worlds were
 built from the 160×160 version. Terrain in the overlap is identical (a constant
 7.2 m zero-basing offset the world pose absorbs), so both are valid.
+
+## 📏 HOW MUCH THE ZONE MUST SHRINK IN DENSER FOREST (2026-09-24)
+User: *"Calculate how much the zone has to shrink if the forest is denser."*
+`tools/concealment_zone_study.py --solve --mission mission_mvp.yaml` steps the
+covered radius in 100 m and reports, per stand density, the largest radius below
+which every step still closes one sortie (30 min airframe, 20 % reserve), on the
+**SITL-anchored** envelope (`ONBOARD_PLANNING_ENVELOPE`: 200 → 3.0 m/s and 400 →
+2.0 as flown over four noise-seed sets; 500-600 → 1.5, 800 → 1.25, 1000 → 0.75,
+1200 → 0.4 discounted from the harness):
+
+| stems/ha | largest zone that closes | energy with the 1500 m zone |
+|---|---|---|
+| 200 | the whole route | 0.82 |
+| 300 | 3700 m | 0.88 |
+| **400** | **1800 m** | 0.96 |
+| 500-600 | **1100 m** | 1.11 — NO-GO |
+| 700-800 | **1100 m** (800/ha SITL-flown at 1.5 m/s 4/4, 2026-09-25; was 0.8-0.9 km) | 1.11 — NO-GO |
+| 900-1000 | **800 m** (1000/ha SITL-flown at 1.0 m/s 4/4, 2026-09-25; was 700 m) | 1.40 — NO-GO |
+| ≥ 1200 | 700 m | NO-GO |
+
+🔑 **For Finnish managed stands (~400-900 stems/ha under the canopy) the zone is
+1.8 km at the sparse end and ~0.8-1.1 km through most of the range.** The 1500 m
+MVP decision holds up to ~400/ha. **On a real Finnish AO use `layers.stand_data`
+and re-solve**: stands are then priced at their own density.
+⚠️ **Why SITL-anchored:** the harness (`HARNESS_ENVELOPE`) flies 200/ha at 5 m/s
+clean; GPS-denied SITL on the final stack is clean at 3 m/s on 4/4 seed sets and
+touches at 4 m/s (200/ha) and 3 m/s (400/ha). Raising an anchor = a four-seed
+SITL sweep (`~/sweep.sh`), each confirmed step enlarging the zone.
+✅ Four-seed SITL sweeps on the final code: 400/ha at 2 m/s clean 4/4 (min air
++0.28 m); **600/ha at 1.5 m/s clean 4/4** (world `forest_mvp600n`, 1725 trunks,
+±15 m band) — so the 500-600 anchor is measured, not discounted. ⚠️ Its thinnest
+pass was **+0.03 m of air**: at 600/ha (median gap 1.9 m) the 0.9 m airframe is
+near what can be threaded at all; 2 m/s was also strike-free (min +0.12 m) and
+is not adopted on margins that thin. Askola's median flyable stand is 640/ha.
+
+## 🇫🇮 FIRST REAL AO — ASKOLA, FROM OPEN DATA (2026-09-25)
+User: *"do that"* (build a real Finnish AO). `tools/build_finnish_ao.py` builds an AO
+from three open sources (all CC BY 4.0, downloads approved; files under `data/`,
+gitignored): **MML 10 m terrain** (read for the window from the Funet/CSC mirror's
+VRT — no registration), **Metsäkeskus Latvusmalli 1 m canopy height** (p95 per 16 m
+cell = canopy top), and **Metsäkeskus stand polygons** as `layers.stand_data`.
+AO: 4.5 × 4.5 km on Askola's west side (281² cells of 16 m, terrain 29-84 m, canopy
+≥ 12 m on 59 % of cells), 5.5 km route SW → NE, two observers 1.5 km off one side.
+Mission: `data/askola_ao/mission.yaml`; run the zone study with `--solve --as-is`
+(radius only, the AO's own densities).
+
+| `weights.clutter` | largest zone that closes | below-canopy flight at it | 1500 m zone |
+|---|---|---|---|
+| 0 (default: pure concealment) | **600 m** (0.98) | ~620 m | 1.50 — NO-GO |
+| 0.5 | 1200 m (0.98) | ~590 m | 1.03 — NO-GO |
+| 1.0 | 1200 m (0.99) | ~580 m | 1.04 — NO-GO |
+
+🔑 **On a real Finnish AO one battery buys ~550-600 m of below-canopy flight**,
+however the zone is drawn: with `clutter` on, the planner simply routes round the
+densest stands (over the canopy / in the open) and the zone grows while the
+covered flight does not. The 1500 m MVP zone does not close here.
+⚠️ The first ~900 m of forest by the start is **not in the stand data** (outside
+private-forest coverage), so it is priced from the canopy relation (now fitted to
+Askola) — and real canopy relief costs vertical work: even a 100 m zone uses 0.78
+of usable energy (`vertical_rate_amsl_exceeded`: 4.2 / 5.0 m/s true vertical).
+⚠️ With the default unaided 2 m ground observers 1.5 km away, exposure is 0
+everywhere (C2 detection range ~1 km), so this AO does not test concealment — only
+endurance and stems. Harness/SITL anchors as in "HOW MUCH THE ZONE MUST SHRINK".
+
+### 🐛 Real canopy broke the altitude profile — three fixes (2026-09-25)
+Askola's plans reported **"Trajectory INFEASIBLE", 8-11 climb violations, 4.2-4.5 m/s
+peak climb**. The demo AO never showed it (smooth synthetic canopy). Three causes:
+1. **The climb check assumed cruise on every leg** — a 20 m climb approached at
+   0.5 m/s was priced as needing 40 m of ground, not ~3 m. `smooth_altitudes` now
+   takes the COMMANDED speed per leg.
+2. **Skimming followed each 16 m cell's own canopy top** — real canopy steps 10-20 m
+   cell to cell, and a leg that cannot climb fast enough meets a taller stand below
+   its crowns (a collision the terrain guarantee does not check). Over the canopy
+   the plan now clears the **tallest canopy within `AltitudePolicy.skim_lookahead_m`
+   (40 m)** — `fields/altitude.skim_canopy`, in all three band functions.
+3. **Over-canopy / open cells had their ceiling pinned to the target**, so a 24 m
+   clearing between two 25 m stands forced a 15 m dive-and-climb at cruise. They now
+   have 40 m of headroom (`OVER_HEADROOM_M`), and the smoother gained a **backward
+   pass** that climbs early for a stand it can see coming.
+Result: Askola 600 m, measured 300 m and measured 400 m + fallback all **feasible,
+0 climb / 0 clearance violations** (peak climb ≤ 3.0 m/s); MVP unchanged (min AGL
+6.59 m, energy 0.82). **Zones re-solved after it:** the jagged skim had been charging
+climb energy the aircraft need not spend, so the original Askola start goes **400 →
+700 m** (0.99 at 700, ~740 m under the canopy); the measured zone stays **300 m**
+(0.88); measured + `clutter` 0.5 plateaus at ~460 m under the canopy. Latest numbers
+win over the tables above them in this file.
+**~1000 stems/ha raised 0.75 → 1.0 m/s (SITL 4/4 on `askolam230`, +0.27 m air, 0
+escapes):** the measured zone's energy at 300 m falls 0.88 → **0.68**, but the zone
+still stops at 300 m — at 400 m the route meets 32 m of stands **> 1200 stems/ha**,
+beyond anything flown. The binding constraint on measured Finnish stands is now the
+envelope's dense end, not the battery (with the over-canopy fallback on, those
+stands are flown over instead).
+
+### 🛣️ Real roads on the Askola AO (2026-09-26)
+`tools/build_finnish_ao.py` now also writes `roads.gpkg`: MML topographic database
+roads (MTK-tie 2025, CC BY 4.0, the approved MML/Funet source) read for the AO window
+only over `/vsicurl/` + bbox (the national file is 5 GB; the window was 260 segments
+in 2.4 s), vehicle roads only (`kohdeluokka` < 12300: 195 segments, 45 km — tracks
+and footpaths left out). Wired into every Askola mission as `layers.roads`. Effect:
+the Askola 600 m route **crosses 6 roads**, the measured-zone route **8** (0 before —
+there were no roads), for +25-33 m of route; each is an `open_crossings` point where
+the fiber lies across a road, now in the operator briefing.
+
+### 🌫️ Crown transmission — the canopy as a medium (2026-09-26, opt-in, PR #4)
+`threat.canopy_occlusion.crown_transmission` scores each sightline by transmittance
+instead of the binary DSM horizon: DTM blocks; each crossed cell's crown layer
+attenuates as gap^(path/crown depth) (calibrated so a vertical pass transmits exactly
+the cell's gap — measured `canopy_gap_fraction` or the scalar); trunks attenuate below
+the crown base. `fields/viewshed.CrownMedium` + `crown_transmittance` (vectorised,
+exact per-piece layer integration, so raster and flown re-score agree to float
+precision); one builder, `composite.crown_medium_for`. It supersedes the sub-canopy
+steepness rule and `trunk_space_sightlines`. Askola measured zone, 300 m / 12×:
+crown-aware **0.000 → 0.026**, below 0.096 → 0.076, canopy-top 1.000 — the binary
+wall's 0.000 was the artifact §6g flagged; the gate holds (13-38×). Off by default:
+it moves every historical figure. ⚠️ Turbid-medium scaling off nadir errs toward
+exposure for clumped conifers (safe direction). Under it the observer stands on the
+terrain (`dtm + h`), not on the crowns — a dismount inside a stand is nearly blind.
+**Bearing sweeps** (`tools/bearing_sweep_real_ao.py`, 300 m sensor, 12×, 12 bearings,
+the user's 0.15 cap): at 600 m out below-canopy passes everywhere; **at 300 m out, 12 m
+AGL fails 2/12 under transmission** (inside the crown layer of ~16 m spruce), crown-aware
+passes all 12. **WARNING `flight_in_crown_layer`** (score
+`below_canopy_in_crown_layer_m`) now tells the operator when below-canopy flight is above
+the estimated crown base while `crown_ratio` is off: demo MVP 1252 m, Askola 304 m.
+
+### 🔴 WHERE THE FIBER ENDS UP — roadmap C7, built minimally (2026-09-25)
+`laydown/settle.py` classes every metre of laid fiber by where it settles: dropped
+**through trunk space** (released under the canopy), **on the crowns** (released over
+canopy ≥ 3 m with no opening in the cell), or **on open ground**. Report: scores
+`cable_in_trunk_space_m` / `cable_on_crowns_m` / `cable_on_ground_m` /
+`cable_on_crowns_in_zone_m` and WARNING **`cable_on_crowns`**.
+
+| mission | route | fiber on crowns | of which in the zone |
+|---|---|---|---|
+| demo MVP (`mission_mvp.yaml`) | 5180 m | **3024 m (58 %)** | 240 m |
+| Askola 600 m (`mission_z600.yaml`, with gaps) | 5469 m | 1322 m | 0 m |
+| Askola measured 300 m (no gaps layer) | 3777 m | 1725 m | 17 m |
+| Askola measured 400 m + fallback (gaps) | 3809 m | 1054 m | 106 m |
+
+🔴 **This is a concept-level finding, not a planner defect.** "Only the first part
+needs cover" means the aircraft flies over the forest for the rest of the route —
+and **the fiber then lies on the crowns for most of its length**, where the tether
+model says it is most likely to break (snag), where wind works it, and where it is
+easiest to find and cut. The roadmap predicted exactly this ("it is entirely possible
+low flight is required for the cable's sake and not the drone's"). Options, all the
+user's call: route the uncovered part over open ground/roads (a cost term — changes
+routes), fly low through openings for the cable's sake (costs endurance), or accept
+and state it. ⚠️ Bounded model: crown length = what certainly does not reach the
+ground; no wind drift, no crown-closure physics. **Crown-edge hangs are counted**
+(`cable_crown_hangs`: where the cable passes between lying on crowns and dropping
+through trunk space — a span dragged over a crown edge as payout continues, i.e. a
+snag point): MVP **2**, Askola 600 m **0**.
+
+**Decision support — `weights.cable_on_crowns` (opt-in, default 0 = routes unchanged):**
+a per-metre penalty on cells flown over canopy ≥ 3 m with no opening.
+
+| AO | weight | route | fiber on crowns | below canopy | energy |
+|---|---|---|---|---|---|
+| demo MVP | 0 → 0.5 | 5180 → 4879 m | 3024 → **67 m** | 1227 → **0 m** | 0.82 → 0.63 |
+| **Askola 600 m (real gaps)** | 0 → **1** | 5469 → **5606 m** | 1322 → **214 m (−84 %)** | 595 → 555 m | 0.98 → 0.99 |
+
+On the synthetic demo AO the trade is all-or-nothing (its canopy has no openings, and
+exposure is zero, so nothing holds the route under) — the same shape as `clutter`
+there. **On the real AO it is cheap: −84 % fiber on crowns for +2.5 % route and −7 %
+below-canopy flight** — but that sortie was already at the battery's edge (0.99).
+
+### ⬆️ OVER THE CANOPY WHEN UNDER IS UNPASSABLE — with the operator told first (2026-09-25)
+User: *"Keep [crown-aware] opt-in and do some kind of system for it to rise over the
+canopy if it looks unpassable below. The operator should also be informed of that
+beforehand, so no surprises happen and the drone jumps up to height right from the
+launch site."*
+* **`AltitudePolicy.over_canopy_when_unpassable` (default ON).** A stand inside the
+  concealment zone denser than the onboard envelope (> 1200 stems/ha) is flown
+  **over**, instead of planned through as a CRITICAL NO-GO leg. The mask is closed
+  (gaps ≤ 2 cells) and padded one cell, so the aircraft does not porpoise under/over
+  along a canopy gradient; a lidar voxel window (measured free space) always wins.
+  Exposure is costed at the over-canopy altitude, so where a threat can see it the
+  router still prefers going round. `crown_ratio` stays opt-in; with it on, stands
+  whose crowns reach the floor are flown over too and reported as such.
+* **The operator sees every climb before launch:** `Plan.canopy_climbs` /
+  `report.json canopy_climbs` (distance from launch, length, max AGL, canopy,
+  reason: `dense_stand` / `crowns_too_low` / `stand_too_short`) and the WARNING
+  **`canopy_climb_in_zone`**, which **leads with "FIRST CLIMB N m FROM LAUNCH"** when
+  one starts within 200 m (`report.build.LAUNCH_CLIMB_M`). Short stands were
+  skimmed silently before; they are listed now too.
+* Askola measured zone at 400 m: **NO-GO → REVIEW**, "FIRST CLIMB 124 m FROM LAUNCH:
+  rises to 28 m AGL over 25 m canopy", plus a 15 m skim at 303 m. (Below-canopy
+  length fell 373 → 97 m there: exposure is 0 on that AO, so nothing pays the router
+  to stay under.)
+* **Onboard (droneflight):** the oracle sensor and contact check ignore trunks whose
+  tops the aircraft is above (`perception.OVERFLY_MARGIN_M`), so SITL can fly such a
+  plan honestly.
+* 🔴 **First SITL flight of it (o4e, Askola 400 m, GPS-denied): reached the goal but
+  touched a trunk on the DESCENT back under the canopy**, not on the climb. At 14 m
+  over 9 m trunks the altitude-aware oracle rightly ignored them; the plan then
+  descended and the aircraft came down onto one it had never mapped (−0.44 m).
+  Fixed onboard (droneflight PR #6): `fly-local` senses at min(current, target)
+  height, so a descent maps the trunk layer before entering it. **Re-flown with the
+  fix: 2/2 CLEAN** (o5e +1.10 m, o5a +1.07 m, 0 samples inside a trunk) — including
+  seed set 4/5, the one that touched.
+* ✅ **Canopy OPENINGS (2026-09-25, later).** Every under↔over transition must sit
+  within a cell of an opening; if not, the over-canopy stretch is extended along
+  the route (≤ `OPENING_SEARCH_M` 200 m) to the nearest one, and a transition with
+  none in reach raises WARNING **`canopy_transition_no_opening`**. Openings come
+  from **`layers.canopy_gaps`**: `tools/build_finnish_ao.py` now writes `gaps.tif` —
+  cells holding a ≥ 3×3 m column of the 1 m canopy model open below 5 m (strip
+  roads, crown gaps). **Askola: 49 % of tall-canopy cells have one**; with it the
+  measured-zone plan needs no extension and has no unopened transition, without
+  it (open ground only) 5 are flagged.
+* ✅ **In-flight escape (droneflight `fly-local --escape-after`, default 20 s):**
+  blocked among trunks, the aircraft climbs straight up to the local canopy top
+  + 3 m, holds it 50 m along the route, then descends (sensing its target height).
+  The report states the policy and its worst case before launch (INFO
+  **`escape_climb_policy`**: "…up to 26 m AGL…" on Askola). SITL test world with
+  an unmapped trunk wall: `tools/add_trunk_wall.py` → `askolam230w`.
+* 🐛 **Fixed: `below_canopy_length_m` now comes from the vertices** (where the aircraft
+  flies). It summed segment bands, which take a segment's *least* concealed cell — with
+  the padded forced-over mask Askola's 400 m plan read 0 m under the canopy with 19
+  vertices under it. MVP: 1166 → 1187 m (same route).
+* ⚠️ **Not modelled: getting up through the canopy — or back down** — beyond the
+  opening test above (no check of the crowns' actual 3D shape).
+* ⚠️ **Climb timing onboard vs the opening.** `fly-local` climbs EARLY — as soon as a
+  higher vertex is inside its ~22 m look-ahead (`window_altitude`) — so the aircraft
+  may start rising up to ~22 m before the vertex the planner put at the opening.
+  Harmless in SITL (bare trunks); in a real stand it would climb into crowns.
+  ✅ **Fixed onboard (droneflight PR #8):** a climb step > 4 m starts only once the
+  aircraft reaches the lower vertex (the opening) and is flown in place; terrain
+  steps keep the early climb. SITL regression pending. A real aircraft cannot climb
+  through closed crowns; it needs an opening. The climb happens in the padded
+  cell before the stand; whether a gap is there is not checked. Also unhandled: an
+  in-flight climb when the aircraft finds a stand impassable that the data said
+  was fine — today it stalls and reports, it does not climb.
+
+### 🔴 Endurance charged a speed the .plan never commanded — fixed (2026-09-25)
+The `.plan` writer floors leg speeds to 0.5 m/s steps; the endurance budget charged
+the raw cap. A 0.76 m/s leg was **flown at 0.5 and charged at 0.76** — SITL on the
+measured zone took 21.3 min against 17.5 planned. Worse, `max(0.5, …)` emitted a
+0.4 m/s cap (1200 stems/ha) as **0.5, faster than the planner's own limit**. Both
+now go through `model.plan.commanded_speed_ms` (0.5 steps; 0.1 steps below 0.5;
+never above the cap). **Emitted `.plan`s are byte-identical**; only verdicts move:
+
+| mission | planned before → after | flown (SITL) |
+|---|---|---|
+| Askola measured `m300` | 17.5 → **20.9 min** | 21.2-21.4 |
+| Askola `askola600` | 22.4 → **24.3 min** (energy 1.06, NO-GO) | 23.2-23.4 |
+
+Both now within ±4 % of flight (fly-local pays no mission-mode waypoint overhead,
+so the model is slightly conservative there). **Re-solved zones:** original Askola
+start **600 → 400 m**; measured zone 300 m (energy 0.91); measured + `clutter` 0.5
+plateaus at ~450 m below canopy. **One battery buys ~300-450 m of below-canopy
+flight on Askola.** The 600 m sortie that flew 4/4 clean below used 23.3 of 24
+usable minutes — it was at the battery's edge, not inside it.
+
+### ✅ Askola 600 m zone FLOWN in SITL — GPS-denied, **4/4 CLEAN** (2026-09-25)
+`askola600` world (real MML terrain, 442 trunks at the AO's density — *inferred*
+in the zone, see below), `out/askola600/mission.plan` (314 wp, forest legs
+1.0-1.5 m/s), `fly-local` + EV bridge, four noise-seed sets (`sim-logs/askola/`):
+
+| seeds | `b2-score` | min trunk-surface clearance | time | max nav error |
+|---|---|---|---|---|
+| 4/5 | 0 strikes, 0 ground | +0.728 m | 23.4 min | 11.2 m |
+| 0/1 | 0 / 0 | +0.732 m | 23.3 min | 14.1 m |
+| 2/3 | 0 / 0 | +0.763 m | 23.2 min | 14.0 m |
+| 6/7 | 0 / 0 | +0.765 m | 23.3 min | 17.1 m |
+
+Planned 22.4 min, harness 23.1 min — the endurance model holds on real relief to
+~4 %. **The first real-terrain Finnish sortie: one battery, GPS-denied, no lidar,
+0 strikes.** It tests terrain + trunks at 1.0-1.5 m/s; it does not test measured
+density or crowns (next section).
+
+### 🔴 Askola, MEASURED zone + crowns (2026-09-25, later the same day)
+**1. The 600 m result above was priced on inference, not measurement.** Within
+600 m of the original start, canopy ≥ 14 m covers 92 % of cells and the stand
+layer covers **0 %** (`below_canopy_density_measured_m` = 0.0 in its report) —
+Metsävarakuviot is mainly *private* forest, so state/company blocks are simply
+absent. Over the whole AO only 74 % of tall canopy is covered. So on a real AO,
+"measured density" must be checked per route, not assumed from `layers.stand_data`.
+**2. On measured stands the zone shrinks by half.** `mission_measured.yaml` moves
+the start into the south-centre block (~80 % of tall canopy surveyed; measured
+median **746 stems/ha** where tall; the zone's own stands ~1000-1200). Both
+observers stay west of the new line, 1.8-2.3 km off it.
+
+| `weights.clutter` | largest zone that closes, **in envelope** | below canopy |
+|---|---|---|
+| 0 | **300 m** (0.77) | ~280-300 m |
+| 0.5 | 1500 m (0.74) | plateaus at **~450 m** — routes round the densest stands |
+
+One battery buys **~300-450 m of below-canopy flight on measured stands**, against
+~550-600 m on the inferred ones. `m300` flies its forest legs at **0.5 m/s**
+(1000-1200 stems/ha — the extrapolated end of the envelope). Harness 2/2 clean
+(+0.49 m). **SITL (`askolam300`, 1702 trunks, GPS-denied): the old onboard stack
+stalled 3/3 at waypoint 4** (0 contacts — memory smear from slow drift, see
+`droneflight/CLAUDE.md`); **with memory clearing (droneflight PR #5) 2/2 reach the
+goal CLEAN — 4/4 seed sets, +0.78 to +1.01 m, 21.2-21.5 min** (the 17.5 min
+originally planned was the endurance-charging defect, now 20.9). So **~1000
+stems/ha at 0.5 m/s is SITL-flown over four seed sets**.
+🐛 **Solver defect fixed:** `--solve --as-is` checked energy only, and returned
+400 m for a plan the planner itself calls NO-GO (32 m beyond the envelope,
+`stem_density_beyond_envelope` CRITICAL). A radius now closes only if it is
+also in envelope. `--workers` / `--max-radius` keep the Mac quiet.
+
+**3. The "below canopy" band was inside the crowns.** Metsäkeskus strata give
+species per stand: Askola's fly-under stands are **49 % spruce, 26 % broadleaf,
+21 % pine by basal area**; along `m300`'s below-canopy stretch 57 / 18 / 24 % by
+stems, canopy median **15.4 m**, flown at **10.5-12 m AGL**. Every one of those
+trees has live crown at that height unless its crown ratio is below ~0.25
+(managed pine ~0.35-0.5, spruce ~0.55-0.8, birch ~0.4-0.55 — the ranges behind
+this estimate; Hynynen 1995, Can. J. For. Res. 25:57, models it for pine). So the
+aircraft was planned through the **crown layer** — branches metres wide, where
+the Gazebo world has bare 0.15 m cylinders. `min_canopy_m` was always a stand-in
+for crown base (its own docstring said so).
+➡️ **`AltitudePolicy.crown_ratio`** (opt-in; default None keeps every baseline)
+holds the below-canopy ceiling under `height × (1 − crown_ratio) − crown_clearance_m`
+in all three places the band is computed (pinned together by test). At the
+Askola mix (0.55): zone sizes and energy barely move — the stands are tall enough
+to keep *some* trunk space — but the flight drops to **5.1-7.0 m AGL**, onto the
+5 m floor, and the terrain guarantee then breaches it (**4.5-4.9 m, NO-GO**) at
+25, 16 and 10 m waypoint spacing alike.
+🔑 **In spruce-heavy managed forest the trunk space is a ~5-7 m band sitting on the
+planner's floor.** Flying it needs a lower floor (understory, DTM error — a risk
+call) or better terrain data (MML's 2 m DEM instead of the 10 m one); the
+alternative is to accept flight through crowns, which nothing here can simulate.
+Measured: **`min_agl_m` 4.0 makes it REVIEW** (0 violations, min 4.02 m, flown at
+5.1-6.9 m, energy 0.77 — unchanged). **SITL, GPS-denied, real terrain (`askolam300c`,
+memory clearing on): 2/2 CLEAN** (+1.03 / +0.85 m), flown **6.9 m AGL median, p5
+5.7-5.8, min 5.0** through the forest — trunk-space flight tracks real relief. Crowns are not flyable at these densities
+anyway: ~1000 stems/ha with ~1.5 m crown radii is ~70 % cover at the crown base.
+⚠️ **Understory is unmeasured, not absent.** Storey 2 (*alikasvos*) appears in 92
+present-day strata against ~8800 dominant ones; most tall stands are inventoried
+by remote sensing (storey 5), which cannot see under the crowns. Where it *is*
+recorded it averages **9.4 m and 323 stems/ha** — exactly the 5-7 m trunk-space
+band. So the 4 m floor rests on an understory the data is silent about.
+❓ Whether `crown_ratio` becomes the default is a baseline-changing call, left
+opt-in and set only in the Askola `*_cr*.yaml` variants (user, 2026-09-25: keep it
+opt-in). **Per-stand values** (`io/stand_data.read_stand_crown_ratios`, stem-weighted
+species mix: pine 0.42 / spruce 0.65 / broadleaf 0.47): Askola's 6894 stands give
+**0.45-0.62 (p5-p95), median 0.53** — so the scalar 0.55 is representative, and the
+per-stand spread moves a 15 m stand's crown base by only ~±1.2 m. Not wired as a
+per-cell raster for that reason; the reader is there when it is worth it.
+
+## 🌲 FINNISH MANAGED FOREST + MEASURED STAND DENSITY (2026-09-24)
+User: *"look up finnish forest data from a reliable source, and keep in mind that
+a large part of it is talousmetsää."* Detail and sources in the
+`fields/stem_density.py` docstring; the short version:
+
+* **Most of it is managed.** Luke (2025): 13 % of forest + poorly productive land
+  is protected (6 % south, 20 % north); the rest is talousmetsä, thinned to Tapio's
+  published targets. VMI11 development classes on production forest land:
+  **19 % seedling, 36 % young thinning, 30 % advanced thinning, 13 % mature.**
+* **Stems/ha by class** (Tapio *Metsänhoidon suositukset*): first thinning at
+  12–17 m dominant height leaves **pine 900–1200, spruce 700–1200, silver birch
+  700–800**; later thinnings and mature stands come down to **~400–900**. The
+  existing self-thinning anchors (600/ha at 20 m, N ∝ H^-1.5 → 1291 @ 12 m, 838 @
+  16 m, 429 @ 25 m) sit inside those ranges — the literature relation holds up.
+* 🔑 **The stands tall enough to fly under (~43 % of production forest) are
+  ~400–900 stems/ha — at and past the onboard planner's envelope.** Young thinning
+  stands are denser and their live crowns reach into the 5–10 m flight band, which
+  a trunk-only count flatters. Thinned talousmetsä is *easier* than unmanaged
+  forest of the same height — the one favourable fact.
+* **`layers.stand_data` — a measured density source now exists** (`io/stand_data.py`).
+  Suomen metsäkeskus publishes *Metsävarakuviot*: ~1.4 ha stand polygons from
+  airborne-laser inventory, updated twice a week, **free, CC BY 4.0**, GeoPackage
+  in EPSG:3067. `stand → treestand (type 2 = grown to today) → treestandsummary.stemcount`
+  replaces the canopy-height inference on treed cells; the canopy model still
+  decides treed vs open, and `stem.density_per_ha` still wins. Reported as
+  `below_canopy_density_measured_m`. ⚠️ Accuracy targets are on height (±2 m),
+  diameter (±3 cm) and basal area (±3 m²/ha) on 8 stands in 10 — stem count is
+  derived, roughly ±30 %. A planning prior only (user rule: never depended on in
+  flight); staleness errs *denser*, since stands are thinned and felled between
+  updates.
+* ✅ **Run on a real download (Askola, 13 MB zip, `data/metsakeskus/`, gitignored)
+  — and the data model had already changed**: `treestand.type` is now
+  `treestandclass` (present-day = '2') and summaries are split by `storey`. The
+  reader handles both and refuses an unknown one. Trunks at flight height = storeys
+  1+3+4; understory left out. Rasterises 7 959 stands in 1.6 s, reprojects fine.
+* 📊 **Askola, measured** (present-day, dominant storey): advanced thinning
+  **706 stems/ha** (IQR 565-887, 21.8 m), mature **494** (400-580, 25.8 m), young
+  thinning 1671 (13 m). Stands ≥ 16 m dominant height — the ones to fly under —
+  are **56 % of stand area, median 640 (IQR 506-846, p90 1139)** → a **~1.1 km**
+  zone at the median (table above).
+* 🔧 **The canopy-height relation was 29 % low** against those stands. Refitted:
+  **730 stems/ha at 20 m, exponent 1.36** (was 600 / 1.5 from literature) —
+  `fields/stem_density.py`. One municipality; use stand data where it exists.
 
 ## ✅ STEM DETECTION FROM LIDAR (2026-09-14) — `forest/stem_detect.py`
 `layers.point_cloud` → `pipeline._load_stems` → detected `StemMap` → the stem

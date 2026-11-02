@@ -47,12 +47,49 @@ densities and four speeds, so the mean is used here and the caveat is recorded.
 
 WHAT THIS BUYS, MEASURED
 On the demo AO it buys almost nothing, and that is the finding rather than a bug:
-its 12-22 m stands map to ~520-1290 stems/ha, i.e. **1.4-2.2 m spacing**, whereas
+its 12-22 m stands map to ~640-1460 stems/ha (2026-09-24 Askola fit; ~520-1290 on the
+literature anchor this was written with), whereas
 clearing the 4.00 m/s endurance floor needs **5.21 m / 92 stems/ha**. The whole
 available range sits an order of magnitude inside the infeasible region, so no
 amount of routing between stands recovers the mission. Proving the term *works*
 therefore needs a stand structure the demo does not contain, which is what the
 unit tests supply.
+
+FINNISH MANAGED FOREST ("talousmetsä") — CHECKED 2026-09-24
+Most Finnish forest is managed for wood: Luke's 2025 statistics put **13 %** of
+forest and poorly productive land under protection (6 % in the south, 20 % in the
+north), so the rest is talousmetsä, thinned to published targets. Those targets
+were the best available prior for stems/ha; the anchors above are now FITTED to
+real stand data (Askola), and the Askola medians are in the right-hand column:
+
+====================================  =========  ==============  =============
+development class (VMI11 share of      height      stems/ha         Askola median
+production forest land)                              (Tapio)         (Metsäkeskus)
+====================================  =========  ==============  =============
+seedling stand, taimikko (19 %)        < 7 m      2000+ small      open ground (*)
+young thinning stand (36 %)            7-16 m     1500-2500 before, 1671 @ 13 m
+                                                  700-1200 after
+                                                  first thinning
+advanced thinning stand (30 %)         16-22 m    ~500-900         706 @ 22 m
+mature stand, uudistuskypsä (13 %)     20-28 m    ~400-700         494 @ 26 m
+====================================  =========  ==============  =============
+
+(*) below ``AltitudePolicy.min_canopy_m`` the planner flies over, not under.
+Sources: Luke, *Suomen metsät 2009-2013* (LuoBio 59/2017), §4.2.1 class shares;
+Tapio, *Metsänhoidon suositukset*, first-thinning targets by species and site
+(pine 900-1200, spruce 700-1200, silver birch 700-800 stems/ha after thinning at
+12-17 m dominant height); later-thinning and mature figures are the ranges those
+targets thin down to, not a table value.
+
+🔑 **What it means for the aircraft.** The stands tall enough to fly *under* —
+advanced thinning and mature, ~43 % of production forest land — sit at roughly
+**400-900 stems/ha**: inside the onboard planner's envelope since 2026-09-24
+(:data:`ONBOARD_PLANNING_ENVELOPE`, 2.0-1.25 m/s across that range, SITL-anchored),
+though flown in SITL only at 200 and 400. Young thinning stands are denser
+still and their live crowns reach down into the 5-10 m band the aircraft would fly
+in; a trunk-only stem count flatters them. Thinned talousmetsä is *easier* than an
+unmanaged stand of the same height (fewer stems, less understory after pre-harvest
+clearing), which is the one favourable fact here.
 """
 
 from __future__ import annotations
@@ -64,19 +101,25 @@ import numpy as np
 REFERENCE_HEIGHT_M = 20.0
 """Canopy height the reference density is quoted at."""
 
-REFERENCE_STEMS_PER_HA = 600.0
-"""Stems/ha of a mature managed stand at :data:`REFERENCE_HEIGHT_M`.
+REFERENCE_STEMS_PER_HA = 730.0
+"""Stems/ha of a managed stand at :data:`REFERENCE_HEIGHT_M`.
 
-Mid-range for managed temperate/boreal forest. TEST-PLAN B2 independently calls
-400 stems/ha "the *low* end of real managed forest", which brackets this from
-below.
+MEASURED 2026-09-24 on real Finnish stand data: the Metsäkeskus Metsävarakuviot
+download for Askola (southern Finland, CC BY 4.0), present-day dominant storey,
+4 900+ stands with dominant height 12-32 m, area-weighted log-log fit:
+**N = 43 026 · H^-1.36 → 727 stems/ha at 20 m**. The literature value it replaces
+(600) under-predicted the measured median by 29 % (IQR of the ratio 0.98-1.66).
+Medians by height: 1308 @ 13 m, 1015 @ 16 m, 723 @ 20 m, 637 @ 22 m, 574 @ 26 m.
+⚠️ One municipality, thinned talousmetsä; the ±30 % stem-count uncertainty of the
+source (``io/stand_data.py``) applies. Where stand data exists, use it directly
+(``layers.stand_data``) — this relation is the fallback.
 """
 
-THINNING_EXPONENT = 1.5
-"""``N ~ H^-exponent``. Reineke plus height-diameter allometry gives 1.5-2.1;
-the low end is used because it is the conservative choice *for this planner* —
-it predicts less density variation between stands, so it claims less benefit from
-routing between them."""
+THINNING_EXPONENT = 1.36
+"""``N ~ H^-exponent``, fitted on the same Askola stands (see above). Reineke plus
+height-diameter allometry gives 1.5-2.1 for unmanaged self-thinning; thinned
+managed stands come out flatter, because thinning — not competition — sets their
+density."""
 
 MIN_MODELLED_HEIGHT_M = 2.0
 """Below this a "stand" is scrub, not stems the model describes."""
@@ -152,35 +195,132 @@ def max_reactive_speed_ms(
     return capped
 
 
-ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
+HARNESS_ENVELOPE: tuple[tuple[float, float], ...] = (
     (107.0, 6.0),
+    (200.0, 5.0),
+    (400.0, 4.0),
+    (500.0, 3.0),
+    (600.0, 3.0),
+    (800.0, 2.5),
+    (1000.0, 1.5),
+    (1200.0, 0.75),
+)
+"""What the offline harness flies clean — an UPPER BOUND, not a planning number.
+See :data:`ONBOARD_PLANNING_ENVELOPE` for why the planner does not use it."""
+
+ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
+    (107.0, 3.6),
     (200.0, 3.0),
     (400.0, 2.0),
+    (500.0, 1.5),
+    (600.0, 1.5),
+    (800.0, 1.5),
+    (1000.0, 1.0),
+    (1200.0, 0.5),
 )
-"""``(stems/ha, fastest clean speed m/s)`` for the onboard local planner.
+"""``(stems/ha, speed m/s)`` the planner prices below-canopy flight at: the
+harness envelope **anchored to SITL**, which is the arbiter.
 
-MEASURED 2026-09-23 in ``droneflight``'s accel/jerk-limited harness
-(`reactive.fly_with_local_planner`), oracle depth sensor, 90 deg FOV, 30 m range:
+DECISION 2026-09-24. GPS-denied SITL on the final flight stack (planner fixes
+incl. "steer, don't brake", VTRN fixes bled over 30 m), swept over four EV noise
+seed sets (0/1, 2/3, 4/5, 6/7) — one run is one noise draw:
 
-========  ===========================================  ==========================
-stems/ha  result                                       source
-========  ===========================================  ==========================
-107       **0 strikes over 5.2 km at 6.0 m/s** (+0.81 m)  the B2 dense manifest
-200       0 at 3.0 (+0.92 m); 1 per 1.2 km at 6.0      Poisson, r 0.08-0.25 m
-400       0 at 2.0 (+0.55 m); 0 at 3.0 but +0.05 m     Poisson
-800       **stalls or strikes at 2, 3 and 6 m/s**      Poisson — outside envelope
-========  ===========================================  ==========================
+==============  ============================  =============================
+stand / speed   clean seed sets (min air)     contact
+==============  ============================  =============================
+200/ha 3 m/s    **4/4** (+0.18 m)             —
+200/ha 4 m/s    4/5                           **0/1**
+400/ha 2 m/s    **4/4** (+0.28 m)             —
+400/ha 3 m/s    —                             **4/5 (2 contacts)**
+400/ha 3 m/s†   3/4 (+0.03 m on 4/5)          **0/1 (graze -0.04 m)**
+600/ha 1.5 m/s  **4/4** (⚠️ +0.03 m on 6/7)    —
+600/ha 2 m/s    4/4 (+0.12 m)                 —
+800/ha 1.0 m/s‡ **4/4** (+0.66 m)             —
+800/ha 1.5 m/s‡ **4/4** (+0.29 m)             — (one earlier run at RTF 0.2 voided)
+~1000/ha 0.5§   **4/4** (+0.33 m)             — (0/3 before memory clearing)
+~1000/ha 1.0§   **4/4** (+0.27 m)             — (`askolam230`, RTF 1.0, 0 escapes)
+1200/ha 1.0¶    4/4 strike-free (⚠️ +0.07 m)   — (**1 escape** in 4)
+1500/ha 0.5¶    **4/4** (+0.52 m)             — (1 escape in 4, a FALSE trigger)
+==============  ============================  =============================
 
-400/ha at 3.0 m/s was clean by five centimetres, so the envelope takes 2.0 there.
-Past the last anchor the onboard planner has not been shown to work at all:
-:func:`max_planned_speed_ms` extrapolates (speed inversely proportional to
-density) so a flight time can still be computed, and :func:`beyond_envelope` marks
-those cells so the report can say the number rests on nothing.
+¶ 2026-09-26, `forest_mvp1200n` / `forest_mvp1500n` (MVP route, stand over the first
+~550 m, ±15 m band), memory clearing + escape climb + sensing at target height on.
+1200/ha air +0.33 / +0.50 / +0.48 / **+0.07 m** — the thin one (seed set 6/7) is in
+ordinary flight at 11.4 m AGL and 0.95 m/s, approaching the dead end that then
+triggered its escape. The pre-registered bar was 4/4 with > 0.15 m of air, so **the
+1200/ha anchor is not raised to 1.0**. 1500/ha at 0.5: air +0.52 / +0.78 / +0.58 / +0.52 m
+(seed set 6/7 re-flown after a first run at RTF 0.11 was voided) — **4/4**, so **1200/ha
+→ 0.5** (was 0.4, discounted from the harness): a *denser* stand flew clean at that speed
+with ≥ 0.52 m of air on every seed set. **No 1500 anchor is added**, deliberately:
+:func:`beyond_envelope` is "denser than the last anchor", so a 1500 anchor would move the
+over-canopy fallback from 1200 to 1500/ha and plan *under* stands where genuine dead ends
+occur — what the user asked the fallback to prevent (2026-09-25).
+🔑 **Passability, not speed, is what breaks first past ~1000/ha — but less often than
+first read.** One traverse at 1200/ha (h1g) hit a real dead end: no path for 20 s, then
+the escape climb. The 1500/ha escape (h5e) was a **false trigger** — 0 blocked steps, a
+12.7 m detour at 0.5 m/s tripping "20 s without progress" (droneflight now waits for a
+30 m detour when the planner has a path). So genuine dead ends above 1000/ha: **1 in 8
+traverses**; at ~1000/ha, 0 in 4. Revisit the 1500 anchor after a re-fly with the fixed
+trigger — until then the fallback stays at 1200.
 
-⚠️ The harness is the one that predicted the wrong *mechanism* for reactive
-avoidance before B2 (see ``droneflight/reactive.py``). It now carries PX4's
-accel/jerk limits and reproduced B2's strike ordering, but this envelope is
-**unflown** until the SITL local-planner flight.
+‡ 2026-09-25, `forest_mvp800n` (1100 trunks, 800/ha over the first 900 m, ±15 m
+band so the VM holds real time), memory clearing on: +1.11 to +1.35 m surface.
+The 800/ha anchor (1.25) is commanded as 1.0, so this is what the planner sends.
+† 2026-09-25, with memory clearing (droneflight PR #5): still not clean — the anchor
+stays 2.0.
+§ 2026-09-25, Askola's MEASURED zone (Metsäkeskus stands, ~1000-1200 stems/ha,
+1.5 m median spacing, real MML terrain): the 1000/ha anchor below (0.75) is
+commanded as 0.5 (``model.plan.commanded_speed_ms``), which is what flew. The
+onboard stack stalled 3/3 there until it cleared memory the scan sees through
+(droneflight PR #5); with it 4/4 reached the goal, 21.2-21.5 min against 20.9
+planned.
+
+(Air = trunk-surface clearance from ``b2-score`` minus the 0.45 m airframe half-width.)
+So **200/ha → 3.0, 400/ha → 2.0, 600/ha → 1.5, 800/ha → 1.5, ~1000/ha → 1.0 and
+1200/ha → 0.5 are measured** (the last bounded by 1500/ha at 0.5, 2026-09-26;
+2026-09-25: 800/ha raised 1.25 → 1.5, ~1000/ha 0.75 → 1.0).
+600/ha also flew 2 m/s strike-free, but at 600/ha the margin is thin at *both*
+speeds — a 1.9 m median gap threaded by a 0.9 m airframe — so it is not raised on
+that evidence.
+The remaining anchors are the harness discounted by the SITL/harness ratio at the
+nearest validated density (3/5 = 0.6 at <= 200, 2/4 = 0.5 at >= 400).
+The harness passes 4-5 m/s at 200/ha: it is necessary, not sufficient.
+Overturn an anchor with a four-seed SITL sweep (``~/sweep.sh`` on the VM), never
+one run. Before "steer, don't brake" the same
+3 m/s grazed on seed set 4/5 three times out of three.
+
+The harness measurement behind it (:data:`HARNESS_ENVELOPE`):
+
+MEASURED 2026-09-24 with ``droneflight/tools/envelope_sweep.py``: the harness
+(`reactive.fly_with_local_planner`) flying the measured PX4 offboard response
+(0.3 s dead time + 0.4 s lag, drawn per seed from inside the fit), 10 Hz control,
+oracle depth sensor, 90 deg FOV, 30 m range, truth navigation, 1200 m of Poisson
+forest (trunk radii 0.08-0.25 m), seeds 10-13. An anchor is the fastest speed at
+which **all four seeds reach the goal with 0 strikes and > 0.15 m of air**:
+
+========  =====  ==============  ============================================
+stems/ha  m/s    min air gap     next step up / notes
+========  =====  ==============  ============================================
+107       6.0    +0.55 m         airframe cruise (+0.81 m over the 5.2 km manifest)
+200       5.0    +0.41 m         not tried above 5
+400       4.0    +0.28 m
+500       3.0    +0.27 m
+600       3.0    +0.34 m
+800       2.5    +0.36 m
+1000      1.5    +0.26 m         ⚠️ a seed STALLED at 1.0 (no strike): stalls exist here
+1200      0.75   +0.38 m         not tried faster; 1.0 and 1.5 failed before the fixes
+========  =====  ==============  ============================================
+
+The previous envelope (2026-09-23: 107 -> 6, 200 -> 3, 400 -> 2, 800 fails) was
+measured before four planner defects were fixed — see ``droneflight/CLAUDE.md``,
+"the loop found four more defects": prediction from the wrong dynamics model,
+a speed-blind pursuit lookahead that deadlocked, and no momentum limit. The
+same fixes took two GPS-denied SITL contacts to a clean flight (fix5).
+
+⚠️ The harness is necessary, not sufficient: it did not reproduce the SITL
+contacts the fixes came from, and it passes 5 m/s at 200/ha where SITL fails.
+Past 1200 the extrapolation (speed inversely proportional to density) rests on
+nothing, and :func:`beyond_envelope` says so.
 
 Replaces :func:`max_reactive_speed_ms` as the planner's speed cap: the reactive
 policy it modelled is dead in flight (N2, 34-41 strikes), so capping speed by
@@ -200,8 +340,11 @@ def max_planned_speed_ms(stems_per_ha: np.ndarray, *, cruise_speed_ms: float) ->
     number for a demonstrated one.
     """
     density = np.asarray(stems_per_ha, dtype=np.float32)
-    xs = np.array([d for d, _ in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
-    ys = np.array([v for _, v in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
+    # Open ground (0 stems/ha) is cruise, and a stand sparser than the first
+    # anchor interpolates up to it — not clamped to the first anchor's speed,
+    # which slowed every open cell once that anchor fell below cruise.
+    xs = np.array([0.0] + [d for d, _ in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
+    ys = np.array([cruise_speed_ms] + [v for _, v in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
     last_d, last_v = ONBOARD_PLANNING_ENVELOPE[-1]
     inside = np.interp(density, xs, ys)
     with np.errstate(divide="ignore"):
@@ -241,6 +384,7 @@ def build_stem_clutter(
     min_canopy_m: float = 2.0,
     among_stems: np.ndarray | None = None,
     density_override_per_ha: float | None = None,
+    measured_per_ha: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """All four rasters at once — density, spacing, speed cap, time penalty.
 
@@ -251,6 +395,13 @@ def build_stem_clutter(
     below-canopy cells coincide, but wrong as soon as a route goes over a stand.
     """
     density = stem_density_per_ha(chm, min_canopy_m=min_canopy_m)
+    measured = np.zeros(density.shape, dtype=bool)
+    if measured_per_ha is not None and density_override_per_ha is None:
+        # Stand data (io/stand_data.py) replaces the inference where a stand
+        # covers a treed cell. The canopy model still decides treed vs open: it is
+        # the newer of the two, and a stand felled since its inventory is open.
+        measured = (density > 0.0) & np.isfinite(measured_per_ha) & (measured_per_ha > 0.0)
+        density = np.where(measured, measured_per_ha, density).astype(np.float32)
     if density_override_per_ha is not None:
         # An operator's stated density replaces the canopy-height inference on
         # every treed cell (open cells stay open).
@@ -272,5 +423,6 @@ def build_stem_clutter(
         "max_reactive_speed_ms": reactive,
         "max_speed_ms": speed,
         "beyond_envelope": outside.astype(np.float32),
+        "stem_density_measured": measured.astype(np.float32),
         "clutter_time_penalty": traversal_time_penalty(speed, cruise_speed_ms=cruise_speed_ms),
     }

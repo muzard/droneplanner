@@ -31,19 +31,15 @@ from __future__ import annotations
 
 import itertools
 import json
-import math
 from pathlib import Path
 from typing import Any
 
 from droneplanner.model.geometry import crs_to_lonlat
-from droneplanner.model.plan import Plan
+from droneplanner.model.plan import Plan, commanded_speed_ms
 
 _MAV_CMD_NAV_WAYPOINT = 16
 _MAV_CMD_DO_CHANGE_SPEED = 178
 _SPEED_TYPE_GROUND = 1
-_SPEED_STEP_MS = 0.5
-"""Leg speeds are floored to this step, so a speed that wobbles by centimetres per
-second along a stand does not emit a change item at every vertex."""
 _MAV_FRAME_GLOBAL_RELATIVE_ALT = 3
 _PX4_FIRMWARE = 12  # QGC firmwareType for PX4 Pro
 _MULTIROTOR = 2  # QGC vehicleType
@@ -85,7 +81,7 @@ def leg_speeds_ms(plan: Plan) -> list[float]:
     out = []
     for a, b in itertools.pairwise(vs):
         v = min(a.speed_hint_ms, b.speed_hint_ms)
-        out.append(max(_SPEED_STEP_MS, math.floor(v / _SPEED_STEP_MS) * _SPEED_STEP_MS))
+        out.append(commanded_speed_ms(v))
     return out
 
 
