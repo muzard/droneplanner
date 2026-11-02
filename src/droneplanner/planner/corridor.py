@@ -17,8 +17,13 @@ from itertools import pairwise
 import numpy as np
 
 from droneplanner.crossings.detect import detect_crossings
-from droneplanner.fields.altitude import altitude_band_at, canopy_height
+from droneplanner.fields.altitude import altitude_band_at, canopy_height, concealment_mask
 from droneplanner.fields.composite import CostSurface, build_cost_surface
+from droneplanner.fields.stems import (
+    StemMap,
+    assess_stem_clearance,
+    required_clearance_m,
+)
 from droneplanner.fields.viewshed import point_exposure
 from droneplanner.forest.navigability import CLASS_TO_ENUM, FlyabilityField
 from droneplanner.model.geometry import Coordinate
@@ -37,9 +42,11 @@ from droneplanner.planner.corridor_width import assess_corridor
 from droneplanner.planner.endurance import route_budget
 from droneplanner.planner.kinematics import (
     KinematicLimits,
+    amsl_vertical_rates,
     fillet_path,
     smooth_altitudes,
 )
+from droneplanner.planner.stem_route import refine_through_stems
 from droneplanner.planner.terrain_profile import (
     FlownProfile,
     assess_clearance,
@@ -136,7 +143,12 @@ def _segment_flyability(
     return CLASS_TO_ENUM[worst]
 
 
-def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) -> Plan:
+def plan_corridor(
+    mission: Mission,
+    surface: CostSurface,
+    route_index: int = 0,
+    stems: StemMap | None = None,
+) -> Plan:
     """Plan the concealment-aware corridor route over a cost surface."""
     grid = surface.grid
     start_rc = grid.world_to_pixel(mission.start)
@@ -178,10 +190,31 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     # profile has to track the ground rather than span it. See ``_subdivide``.
     spaced = _subdivide(filleted, mission.waypoint_spacing_m)
 
+    # --- Route BETWEEN the stems, if a stem map was supplied (TEST-PLAN N4) -----
+    # The coarse search runs on 25 m cells and cannot see a 2.4 m gap, so its
+    # centreline is laid with no knowledge of where the trunks are — measured
+    # against the dense manifest it passes THROUGH one (min clearance -0.033 m,
+    # 37 samples inside the airframe's requirement, against the 37 strikes B2
+    # actually flew). This re-lays the line at 0.5 m inside the lateral freedom
+    # the corridor already grants. It runs BEFORE the altitude solve so clearance,
+    # kinematics and endurance all score the line that will really be flown.
+    stem_report = None
+    if stems is not None and len(stems) > 0:
+        spaced, stem_report = refine_through_stems(
+            spaced,
+            stems,
+            required_m=required_clearance_m(
+                mission.drone.rotor_span_m, mission.stem.clearance_margin_m
+            ),
+            min_half_width_m=mission.stem.min_half_width_m,
+            max_half_width_m=mission.stem.max_half_width_m,
+        )
+
     def _ground_at(x: float, y: float) -> float:
         return float(surface.dtm[grid.world_to_pixel(Coordinate(x=x, y=y))])
 
     chm = canopy_height(surface.dtm, surface.dsm)
+    covered = concealment_mask(grid, mission.start, mission.covered_radius_m)
 
     def _band_at(p: Coordinate) -> tuple[float, float, float, FlightBand]:
         return altitude_band_at(
@@ -190,6 +223,7 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             target_agl_m=mission.cruise_agl_m,
             policy=mission.altitude,
             flyability=flyability,
+            covered=covered,
         )
 
     def _solve_altitudes(
@@ -253,7 +287,12 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
     # aircraft cannot hold cruise through a stand whose gaps are tighter than its
     # reaction distance, so the budget is scored at the speed each leg can
     # actually be flown — not at a cruise figure the forest forbids.
-    speed_cap = surface.components["max_reactive_speed_ms"]
+    # Since 2026-09-23 the cap is the ONBOARD-PLANNING envelope, measured in the
+    # droneflight harness, not the reactive-coherence limit: reactive avoidance
+    # is dead in flight (N2), so pricing the mission on it priced a flight stack
+    # that will not fly. `max_reactive_speed_ms` stays in the components for
+    # comparison only.
+    speed_cap = surface.components["max_speed_ms"]
     vertex_speeds = [float(min(speed, speed_cap[grid.world_to_pixel(p)])) for p in fpts]
     endurance = route_budget(
         [(p.x, p.y) for p in fpts], amsl, mission, speed_limits_ms=vertex_speeds
@@ -287,6 +326,16 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             fpts, alts, bands, corridor.half_width_m, vertex_speeds, strict=True
         )
     )
+    # The smoother constrains the *AGL* profile, but the airframe's climb limit
+    # applies to true vertical motion. Over relief the two differ — a constant-AGL
+    # route reports 0.00 m/s while genuinely climbing — so measure both and let
+    # the report say when the flown rate exceeds the limit (SHORTFALLS 0b).
+    max_climb_amsl, max_descent_amsl = amsl_vertical_rates(
+        [v.ground_elev_m for v in vertices],
+        [v.altitude_agl_m for v in vertices],
+        seg_dists,
+        limits.cruise_speed_ms,
+    )
     kinematics = KinematicReport(
         # Reversals are allowed (low payout speed mitigates snag), so they do not
         # break feasibility — turn-radius, climb-rate and terrain-clearance
@@ -299,6 +348,8 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         reversals=reversals,
         max_climb_rate_ms=max_climb,
         max_descent_rate_ms=max_descent,
+        max_climb_rate_amsl_ms=max_climb_amsl,
+        max_descent_rate_amsl_ms=max_descent_amsl,
         climb_violations=climb_violations,
         min_clearance_agl_m=clearance.min_clearance_agl_m,
         clearance_violations=clearance.violations,
@@ -373,9 +424,41 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
         detection=mission.threat.detection,
         target_span_m=mission.drone.rotor_span_m,
         sectors=mission.threat.sectors,
+        # Must match build_cost_surface, or the flown re-score grades the route
+        # against a different adversary than the one it was planned for.
+        off_axis_vigilance=mission.threat.off_axis_vigilance,
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0
+
+    # How much of the route is flown among stems denser than the onboard planner
+    # has been shown to handle (fields/stem_density.ONBOARD_PLANNING_ENVELOPE).
+    beyond = surface.components.get("beyond_envelope")
+    beyond_m = 0.0
+    if beyond is not None:
+        for a, b in pairwise(fpts):
+            if beyond[grid.world_to_pixel(a)] > 0.0:
+                beyond_m += a.distance_to(b)
+
+    stem_scores: dict[str, float] = {"below_canopy_beyond_envelope_m": beyond_m}
+    if stems is not None and len(stems) > 0:
+        sc = assess_stem_clearance(
+            [(p.x, p.y) for p in fpts],
+            stems,
+            required_m=required_clearance_m(
+                mission.drone.rotor_span_m, mission.stem.clearance_margin_m
+            ),
+        )
+        stem_scores |= {
+            "stem_min_clearance_m": sc.min_clearance_m,
+            "stem_p05_clearance_m": sc.p05_clearance_m,
+            "stem_sub_clearance_samples": float(sc.strikes),
+            "stem_samples": float(sc.samples),
+            "stem_mapped_fraction": sc.mapped_fraction,
+            "stem_route_length_ratio": stem_report.length_ratio if stem_report else 1.0,
+            "stem_windows_failed": float(stem_report.windows_failed if stem_report else 0),
+            "stem_vertices_snapped": float(stem_report.vertices_snapped if stem_report else 0),
+        }
 
     return Plan(
         mission_name=mission.name,
@@ -406,6 +489,10 @@ def plan_corridor(mission: Mission, surface: CostSurface, route_index: int = 0) 
             "max_exposure_corridor": corridor.max_exposure,
             "corridor_half_width_min_m": corridor.min_half_width_m,
             "corridor_half_width_median_m": corridor.median_half_width_m,
+            # Stem routing (N4). Scored on the FINAL line, after altitude solving
+            # and CFIT densification, so it grades what is emitted — not what the
+            # refinement pass happened to hand back.
+            **stem_scores,
         },
         kinematics=kinematics,
         endurance=endurance,
@@ -421,12 +508,13 @@ def plan_over_terrain(
     road_mask: np.ndarray | None = None,
     flyability: FlyabilityField | None = None,
     route_index: int = 0,
+    stems: StemMap | None = None,
 ) -> tuple[Plan, CostSurface]:
     """Build the cost surface for a terrain and plan the corridor over it."""
     surface = build_cost_surface(
         dtm, dsm, grid, mission, road_mask=road_mask, flyability=flyability
     )
-    plan = plan_corridor(mission, surface, route_index=route_index)
+    plan = plan_corridor(mission, surface, route_index=route_index, stems=stems)
     return plan, surface
 
 

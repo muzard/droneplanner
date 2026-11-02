@@ -71,9 +71,24 @@ class FlyabilityField:
     nav_ceil_m: np.ndarray  # float32, top of the navigable altitude band (AGL)
 
 
-def build_flyability(voxels: VoxelGrid, config: FlyabilityConfig) -> FlyabilityField:
-    """Classify navigability per column from a voxel occupancy grid."""
-    profile = segment_vertical(voxels, understory_top_m=config.understory_top_m)
+def build_flyability(
+    voxels: VoxelGrid,
+    config: FlyabilityConfig,
+    ground_level: np.ndarray | None = None,
+) -> FlyabilityField:
+    """Classify navigability per column from a voxel occupancy grid.
+
+    ``ground_level`` (``VoxelGrid.ground_level(dtm)``) is the per-column height
+    datum. Every altitude this returns is **AGL for that column**, which is how
+    ``planner/corridor.py`` and ``fields/altitude.py`` consume them — adding them
+    to the local DTM. Omit it only when the cloud is already height-normalized;
+    on real relief omitting it reports one column's band at another's datum
+    (SHORTFALLS 1b).
+    """
+    profile = segment_vertical(
+        voxels, understory_top_m=config.understory_top_m, ground_level=ground_level
+    )
+    ground = profile.ground_level.astype(np.int64)
     clearance = clearance_grid(voxels)  # (nz, rows, cols)
     nz = clearance.shape[0]
 
@@ -89,13 +104,17 @@ def build_flyability(voxels: VoxelGrid, config: FlyabilityConfig) -> FlyabilityF
     best_clearance = np.where(has_window, banded.max(axis=0), 0.0).astype(np.float32)
     best_level = banded.argmax(axis=0)
     vz = voxels.voxel_size_z
-    max_alt = np.where(has_window, (best_level + 0.5) * vz, 0.0).astype(np.float32)
+    max_alt = np.where(has_window, (best_level + 0.5 - ground) * vz, 0.0).astype(np.float32)
 
     # Navigable altitude band = the free window, inset by the airframe radius so
     # the drone keeps clearance from the understory below and canopy above.
-    floor = profile.free_window_base_level * vz + config.r_drone
-    ceil = (profile.free_window_top_level + 1) * vz - config.r_drone
-    mid = 0.5 * (profile.free_window_base_level + profile.free_window_top_level + 1) * vz
+    # Level indices are absolute (they count from z0), so every one is referred to
+    # its own column's ground before becoming a height.
+    base_agl = profile.free_window_base_level - ground
+    top_agl = profile.free_window_top_level - ground
+    floor = base_agl * vz + config.r_drone
+    ceil = (top_agl + 1) * vz - config.r_drone
+    mid = 0.5 * (base_agl + top_agl + 1) * vz
     invalid = (floor > ceil) | ~has_window
     nav_floor = np.where(invalid, mid, floor).astype(np.float32)
     nav_ceil = np.where(invalid, mid, ceil).astype(np.float32)

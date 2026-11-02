@@ -136,3 +136,36 @@ def test_band_raster_codes_each_case() -> None:
     # A lidar window promotes every covered cell to the measured trunk band.
     lidar = band_raster(np.full((4, 4), 12.0, dtype=np.float32), TARGET, POLICY, _flyability())
     assert np.all(lidar == 3)
+
+
+class TestConcealmentZone:
+    """Mission.covered_radius_m — cover only for the first part (user, 2026-09-14)."""
+
+    def test_outside_the_zone_a_tall_stand_is_flown_over(self) -> None:
+        from droneplanner.fields.altitude import _band_from_canopy
+
+        inside = _band_from_canopy(20.0, 10.0, POLICY, covered=True)
+        outside = _band_from_canopy(20.0, 10.0, POLICY, covered=False)
+        assert inside[3] == FlightBand.BELOW_CANOPY
+        assert outside[3] == FlightBand.CANOPY_TOP
+        assert outside[0] >= 20.0 + POLICY.canopy_clearance_m
+
+    def test_mask_is_radial_about_the_start(self) -> None:
+        from droneplanner.fields.altitude import concealment_mask
+        from droneplanner.model.geometry import Coordinate
+
+        grid = Grid(
+            transform=(10.0, 0.0, 0.0, 0.0, -10.0, 100.0), rows=10, cols=10, crs="EPSG:32633"
+        )
+        mask = concealment_mask(grid, Coordinate(x=5.0, y=95.0), 30.0)
+        assert mask is not None
+        assert mask[0, 0] and mask[0, 3] and not mask[0, 4] and not mask[9, 9]
+        assert concealment_mask(grid, Coordinate(x=5.0, y=95.0), None) is None
+
+    def test_raster_and_point_agree_under_a_zone(self) -> None:
+        chm = np.full((1, 2), 20.0, dtype=np.float32)
+        covered = np.array([[True, False]])
+        agl = planned_flight_agl(chm, 10.0, POLICY, covered=covered)
+        codes = band_raster(chm, 10.0, POLICY, covered=covered)
+        assert codes[0, 0] == 2 and codes[0, 1] == 1
+        assert agl[0, 0] < 20.0 < agl[0, 1]

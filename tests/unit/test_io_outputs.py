@@ -85,3 +85,39 @@ def test_qgc_plan_written_and_valid_json(tmp_path: Path) -> None:
     loaded = json.loads(out.read_text())
     assert loaded["version"] == 1
     assert loaded["mission"]["items"][-1]["doJumpId"] == len(plan.vertices)
+
+
+def test_leg_speeds_become_do_change_speed_items() -> None:
+    """🔴 The planner's endurance verdict rests on per-leg speeds the .plan never
+    carried until 2026-09-23 — the vehicle flew cruise everywhere."""
+    plan = straight_line_plan(make_mission())
+    slowed = [
+        v.model_copy(update={"speed_hint_ms": 3.2 if 2 <= i <= 3 else v.speed_hint_ms})
+        for i, v in enumerate(plan.vertices)
+    ]
+    plan = plan.model_copy(update={"vertices": tuple(slowed)})
+    items = plan_to_qgc(plan)["mission"]["items"]
+    kinds = [it["command"] for it in items]
+    assert kinds.count(16) == len(plan.vertices)
+    speeds = [it["params"][1] for it in items if it["command"] == 178]
+    # Entering the slow stretch slows the leg INTO it (the slower end), floored to 0.5.
+    assert speeds == [3.0, plan.vertices[0].speed_hint_ms]
+    assert items[kinds.index(178) - 1]["command"] == 16
+
+
+def test_the_corridor_width_travels_with_the_plan() -> None:
+    """B3's blocker: the executor could not see the lateral freedom it was granted."""
+    plan = straight_line_plan(make_mission())
+    widths = [float(i % 7) for i in range(len(plan.vertices))]
+    plan = plan.model_copy(
+        update={
+            "vertices": tuple(
+                v.model_copy(update={"corridor_half_width_m": w})
+                for v, w in zip(plan.vertices, widths, strict=True)
+            )
+        }
+    )
+    doc = plan_to_qgc(plan)
+    assert doc["droneplanner"]["corridor_half_width_m"] == widths
+    n_wp = sum(1 for it in doc["mission"]["items"] if it["command"] == 16)
+    assert len(doc["droneplanner"]["corridor_half_width_m"]) == n_wp

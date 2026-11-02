@@ -9,6 +9,78 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 
 ## Recently closed
 
+- ✅ **2026-09-23 — the `.plan` carries per-leg speed.** `io/mavlink.py` emits
+  `MAV_CMD_DO_CHANGE_SPEED` where the (slower-end, 0.5 m/s-floored) leg speed
+  changes. The endurance verdict was computed at forest speed caps the vehicle was
+  never told about; the 2026-09-14 MVP flew 6.0 m/s through the whole route.
+- ✅ **2026-09-23 — the stem speed cap applied to cells flown OVER the canopy.**
+  Inert on the demo AO (treed and below-canopy cells coincided) but wrong for any
+  route that goes over a stand; now `among_stems`-gated. Found wiring the
+  concealment zone, which makes flying over stands routine.
+- ✅ **2026-09-23 — speed cap priced on a dead flight stack.** It was
+  `max_reactive_speed_ms` (reactive-avoidance coherence, N2: dead in flight). Now
+  the onboard local planner's measured envelope; past 400 stems/ha it is flagged
+  `stem_density_beyond_envelope` CRITICAL. See CLAUDE.md → "MVP MISSION".
+- 🐛 **2026-09-23 — `gz-world` read route points from every `.plan` item**, so the
+  first speed item would have placed the forest band along a line to (0, 0).
+  Waypoints only now.
+- ⚠️ **Still open:** the stem-density model itself is literature (demo stands
+  520–1290/ha). `stem.density_per_ha` lets a mission state a real figure, which is
+  what SITL missions must do; operationally it wants a stand inventory.
+
+- ✅ **The M2 navigable band was not AGL — FIXED 2026-09-14** (was item 1b, 🔴).
+  A voxel level index counts from `VoxelGrid.z0`, the point cloud's *global
+  minimum* elevation, so every height `segment_vertical` and `build_flyability`
+  derived was an absolute elevation being handed to `planner/corridor.py` and
+  `fields/altitude.py`, which add it to the local DTM **as if it were AGL**. The
+  module docstring already claimed "heights are meters above each column's
+  ground" — the code simply did not do it.
+
+  **Fix:** `VoxelGrid.ground_level(dtm)` converts a DTM to per-column ground
+  level indices; `segment_vertical` and `build_flyability` take it and refer the
+  understory band, the free-window search and every reported height to each
+  column's own ground; `pipeline._load_flyability` passes the DTM it already had.
+  Free-window level indices stay **absolute** on purpose, so the 3D EDT clearance
+  grid is still indexed in true geometry — height-normalizing the occupancy
+  itself would shear the space and corrupt horizontal clearance between columns
+  standing at different elevations.
+
+  **What it was doing, measured on identical 20 m stands over 0/30/70 m of
+  ground** (`tests/unit/test_forest.py`, three new tests):
+
+  | | before | after |
+  |---|---|---|
+  | `canopy_top_m` per column | 20.5 / 50.5 / 90.5 m | **20.5 m everywhere** |
+  | `nav_ceil_m` per column | 11.55 / 29.55 / 69.55 m | **11.55 m everywhere** |
+
+  🔴 **The worst case is the raised column, and it is worse than "wrong by the
+  relief".** A column standing above `z0` found the **void beneath its own
+  ground** — free voxels below the terrain, which no return ever occupies — and
+  reported it as the tallest free window available to fly through. Both raised
+  columns' navigable bands topped out *under their own terrain surface*
+  (29.55 m against 30 m of ground, 69.55 against 70). That is now pinned by test.
+
+  ⚠️ **Zero current routes change, and that is verifiable, not hopeful:**
+  `_load_flyability` returns `None` without `layers.point_cloud`, no mission in
+  the repo has one, and `demo_flyability` builds its field directly at `z0 = 0`.
+  The golden determinism test and all 331 planner tests pass unchanged. This
+  fix's value is entirely prospective — it unblocks the first real `.laz`, which
+  TEST-PLAN N4's stem map now depends on.
+
+  🟠 **Found while fixing it, NOT fixed — the free window can be open sky, and
+  which window wins is an artifact of the voxel grid's extent.** The search takes
+  the *tallest* free run above the understory. Above a stand's canopy there are
+  no returns, so free space runs to the top of the voxel grid — whose ceiling is
+  `cloud.z.max()`, a single absolute number shared by every column. A column on
+  low ground therefore has far more "sky" above it than one on high ground and
+  will pick flying **above** the canopy; the high column, with its sky truncated,
+  picks the trunk space. Same forest, different posture, decided by where the
+  cloud happened to stop. Bounding the window at each column's own canopy top is
+  the obvious fix and is what the "trunk-space window" docstring intends, but it
+  changes which altitude the planner prefers in forest — a route change, so it is
+  the user's call, and open ground (no returns at all) needs a deliberate answer
+  first.
+
 - ✅ **The concealment was fake: the drone flew ABOVE the canopy — FIXED
   2026-07-27** (item 1c, 🔴🔴; raised by the user immediately after item 1 landed,
   and the more fundamental of the two). The planner held a fixed **30 m above
@@ -343,77 +415,56 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
    have found it** (constant altitude ⇒ no descent).
 
 0b. 🟠 **The climb/descent-rate check runs in AGL, so terrain-driven vertical
-   motion is invisible to it** (found 2026-07-27 while fixing item 0; **flagged,
-   deliberately not changed**). `smooth_altitudes` picks and constrains altitudes
-   in the **AGL** band, but the airframe's climb/descent limit applies to actual
-   vertical motion (**AMSL**). On a constant-30 m-AGL route over the demo AO's
-   73.5 m of relief the report says:
+   motion is invisible to it** (found 2026-07-27). `smooth_altitudes` picks and
+   constrains altitudes in the **AGL** band, but the airframe's climb/descent
+   limit applies to actual vertical motion (**AMSL**).
+
+   ✅ **MEASURED AND REPORTED 2026-09-14** — `planner/kinematics.amsl_vertical_rates`
+   computes the true rate from each vertex's `ground_elev_m + altitude_agl_m`;
+   `KinematicReport` carries `max_climb_rate_amsl_ms` / `max_descent_rate_amsl_ms`
+   beside the AGL pair, the markdown report prints both labelled, and exceeding
+   the airframe raises **`vertical_rate_amsl_exceeded` WARNING**.
+
+   ✅ **FLOWN 2026-09-14 — and the warning is falsified as a limit breach.** The
+   route predicted **2.56 m/s** of true descent; PX4 flew a maximum of **1.51 m/s**
+   with **0 of 47 343 samples** over 2.0 (`sim-logs/mvp/16_53_04.ulg`). PX4 clamps
+   descent at `MPC_Z_VEL_MAX_DN` (**1.5** — not the airframe spec's 2.0) and
+   spreads a descent across neighbouring legs, so a **per-leg** rate is the wrong
+   frame. The climb side went the other way: predicted 2.17, flown **2.82**,
+   because PX4 sawtooths around each terrain-following step. **The per-leg AMSL
+   model is wrong in BOTH directions** — same shape as the tether model before its
+   PX4 prior. The finding is kept and re-worded: it flags **tracking lag**, not a
+   violation, and the consequence of lag is terrain clearance, which
+   `terrain_profile.py` guarantees separately (6.59 m predicted, **7.05 m flown**).
+
+   🔴 **The pre-flight reasoning below was wrong, and is kept as the record.** That note measured the old constant-30 m posture, where the
+   real rates (0.83 / 0.93 m/s) sat well inside the limits. On today's
+   below-canopy demo route:
 
    | | max climb | max descent |
    |---|---|---|
-   | `KinematicReport` (AGL) | **0.00 m/s** | **0.00 m/s** |
-   | actually flown (AMSL) | 0.83 m/s | 0.93 m/s |
-   | airframe limit | 3.0 | 2.0 |
+   | AGL profile (what the smoother constrains) | 1.60 m/s | 1.60 m/s |
+   | **true vertical motion** | **2.17 m/s** | **2.56 m/s** |
+   | airframe limit | 3.0 | **2.0** |
+   | `climb_violations` reported | 0 | 0 |
 
-   Here it hides nothing — the real rates are well inside the limits — but the
-   check is *structurally* blind: on steeper terrain, or with a tighter descent
-   limit, it would pass a plan the airframe cannot fly. It is the same
-   AGL-vs-AMSL confusion that produced item 0, in a different place.
+   **The route asks for 2.56 m/s of descent against a 2.0 m/s airframe and the
+   feasibility check reports zero violations.** Tracking a canopy down a falling
+   slope compounds terrain motion with the AGL profile; hugging the surface is
+   exactly the posture that makes the two diverge.
 
-   **Not fixed here because it is a design decision, not a bug fix**: constraining
-   in AMSL would change routes and could make terrain-following plans infeasible
-   wherever terrain slope alone exceeds the climb rate — at which point the
-   planner must either climb off the terrain (losing concealment) or route around
-   the slope. That trade is the user's call. Item 0's fix is unaffected: it
-   computes in AMSL throughout.
-
-1. ✅ **Exposure at flight altitude — FIXED 2026-07-27**, see "Recently closed"
-   for the mechanism and the measured before/after. *Note (user, later
-   versions):* the fuller fix — using **lidar to determine cover** in the
-   visibility model — belongs to the online/perception side, not this offline
-   route planner; treat it as a later-version enhancement.
-
-1b. 🔴 **The M2 navigable altitude band is NOT height above ground — it is height
-   above the point cloud's global minimum z** (found 2026-07-27 while wiring the
-   flight-altitude viewshed; **flagged, deliberately not fixed**). `voxelize` is
-   called with `z_min = cloud.z.min()`, so a voxel level index is an *absolute*
-   elevation. `build_flyability` then reports `nav_floor_m` / `nav_ceil_m` /
-   `max_flyable_altitude_m` as `level * voxel_size_z` — still absolute — and
-   `planner/corridor.py` adds them to the local DTM **as if they were AGL**.
-
-   Measured on a synthetic tile with an identical 20 m canopy above the local
-   ground everywhere, over ground rising 0 → 70 m (so every column should report
-   the same band):
-
-   | local ground | `nav_floor_m` | `max_flyable_altitude_m` |
-   |---|---|---|
-   | 0 m | 26.45 | 95.75 |
-   | 30 m | 56.45 | 95.75 |
-   | 70 m | 2.95 | 2.75 |
-
-   Identical forest, three different answers. The planner would command 56 m
-   "AGL" over the 30 m column — through the canopy it is meant to hide in. The
-   segmentation is confused too: at the low column it picks the free space
-   *above* the canopy (95 m) as "max flyable altitude".
-
-   **Currently masked by exactly the degeneracies this file keeps warning about:**
-   no real point cloud has ever been run (`demo_flyability` builds a synthetic
-   field directly at `z0 = 0`), and flat inputs make absolute and relative
-   heights coincide. It bites the first time real lidar over real relief is
-   ingested — the same AGL-vs-AMSL confusion as item 0 and item 0b, in a third
-   place. *Fix: normalize the voxel grid (or the derived band) to height above
-   the DTM per column before segmentation.* Not done here because it changes the
-   forest model and the routes it produces, and because it deserves its own
-   verification pass.
-
-   ⚠️ **This bounds items 1 and 1c on real data:** the flight-altitude viewshed
-   is only as correct as the flight altitude handed to it, and `altitude_band_at`
-   lets a lidar voxel window *override* the canopy-derived ceiling — correctly,
-   since a measured free window beats a guess, but that override is exactly the
-   broken number. **Without lidar the new canopy path is unaffected** (it uses
-   `DSM - DTM`, which is per-cell terrain-relative by construction), so the
-   working configuration today is the one with no point cloud. The moment real
-   lidar is wired in, this must be fixed first.
+   ⚠️ **Deliberately NOT enforced.** Constraining the AMSL rate in
+   `smooth_altitudes` changes which altitudes the planner picks and therefore the
+   routes it emits, and it trades against the below-canopy posture (the aircraft
+   would have to leave the canopy profile on steep ground). Same reasoning as
+   `weights.clutter` defaulting to 0.0: measuring is unconditional, trading the
+   posture away is the operator's call. It is also the same AGL-vs-AMSL confusion
+   as item 0 and item 1b, which is now two-for-three closed.
+1b. ✅ **FIXED 2026-09-14 — the M2 navigable band is now AGL.** See "Recently
+   closed" for the mechanism, the measured before/after, and the one part
+   deliberately left open (which free window gets picked is still an artifact of
+   the voxel grid's vertical extent). No current route changes: the fix is on the
+   lidar path, and no point cloud has ever been ingested.
 2. 🟠 **Forest voxel resolution is tied to the corridor grid**
    (`pipeline._load_flyability`). The spec wants **0.25–0.5 m** voxels for
    clearance near the airframe scale; we voxelize at the DTM/DSM horizontal
@@ -649,7 +700,69 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
 - 🟡 **Lidar currency / DSM-vs-canopy coupling** is not validated; below-canopy
   concealment credit assumes the DSM includes canopy.
 
-### 🔴 No stem-map capability at all — and TEST-PLAN N4 makes it the critical path
+### ✅ STEM DETECTION IS BUILT (2026-09-14) — the gap is now DATA, not code
+
+`forest/stem_detect.py` detects individual stems in a point cloud, and
+`pipeline._load_stems` wires it to `layers.point_cloud`, so the chain
+**lidar → stem map → route** now runs end to end. The old table below is
+superseded except for its last row, which is the one that still matters.
+
+| capability | state |
+|---|---|
+| point-cloud reader (`io/pointcloud.py`) | ✅ built, and now **called** by the pipeline |
+| individual **stem detection** (position + radius) | ✅ **built** — height-normalized slice → single-linkage clustering → algebraic circle fit |
+| accuracy measured against known truth | ✅ `match_stems`, swept over density/occlusion/noise |
+| **any real `.laz`/`.las` ever ingested** | ❌ **still none. This is the whole remaining gap.** |
+
+**End-to-end proof, scored against ground truth the planner never saw:** a
+simulated 824 k-return cloud over the dense manifest yielded **2481 of 2500
+stems**, and the route planned *against those detections* clears the **true**
+stems at **+1.464 m with 0 breaches** — as good as planning against the truth
+manifest itself (+1.387 m). Detection error is negligible against the clearance
+budget.
+
+**What the accuracy sweep says the sensor must do** (400×400 m patch, 311 stems):
+
+| returns/m² on trunk | visible arc | range noise | detected | position RMSE |
+|---|---|---|---|---|
+| 400 | 0.50 | 0.02 m | 311/311 | **0.017 m** |
+| 100 | 0.50 | 0.02 m | 310/311 | 0.023 m |
+| 25 | 0.50 | 0.02 m | 310/311 | 0.024 m |
+| 10 | 0.50 | 0.02 m | 309/311 | 0.029 m |
+| **4** | 0.50 | 0.02 m | **100/311** | 0.036 m |
+| 100 | **0.25** | 0.02 m | 311/311 | **0.108 m** |
+| 100 | 0.50 | **0.10 m** | 305/311 | **0.134 m** |
+
+🔑 **Point density is NOT the binding constraint** — 400 → 10 returns/m² barely
+moves the error (0.017 → 0.029 m). It collapses between 10 and 4. What actually
+limits accuracy is **how much of the trunk the scanner sees** and **ranging
+noise**. Understory clutter (20 000 extra returns) produced **zero** phantom stems.
+
+🔑 **The circle fit is not polish, it removes a systematic error.** A scanner sees
+an arc, and an arc's *centroid* sits `2r/π` = 0.64r in front of the axis — toward
+the scanner. Measured: 0.096 m RMSE for a 0.15 m trunk against an analytic
+0.095 m. It does not average out, because every stem is displaced toward wherever
+it was seen from, so a centroid-based map is **shifted, not merely noisy**. Fitting
+the circle took RMSE to **0.017–0.029 m**, a 4–6× improvement.
+
+🔴 **Everything above came from `forest/synthetic_scan.py`, which is a VALIDATION
+FIXTURE, not a sensor model, and its numbers are an UPPER BOUND.** It draws returns
+directly on trunk surfaces: no beam, no footprint, no mixed pixels, no traced
+occlusion (a stem behind three others is as visible as one in the open), no
+branches, no lean, no wind, and — importantly — **no registration error between
+flight lines**, which is a leading contributor to real stem-position error. A
+detector that failed here would certainly fail on real data; succeeding here shows
+only that the algorithm is not the obstacle.
+
+➡️ **What is needed now is real data, and it is an acquisition problem.**
+Canopy-penetrating returns with direct trunk hits — UAV lidar under or just above
+the canopy, or a terrestrial/mobile survey. **ALS crown-centroid inference is the
+wrong instrument**: its 1–2 m position error would consume the entire **0.708 m**
+of clearance the stem-routed sortie actually flew with. The acceptance test is a
+public forest-inventory dataset with **field-surveyed** stem positions, which is
+what `match_stems` was written to score against.
+
+### 🔴 (superseded above) No stem-map capability at all — TEST-PLAN N4's critical path
 
 Routing *between mapped stems* is now the only surviving architecture for
 below-canopy flight (reactive avoidance is dead: four independent negatives, see

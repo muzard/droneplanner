@@ -99,13 +99,18 @@ from collections.abc import Sequence
 import numpy as np
 
 from droneplanner.fields.sectors import (
+    element_bearing_weight,
     element_mask,
-    element_sees_bearing,
     resolve_threat_elements,
 )
 from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
-from droneplanner.model.mission import CanopyOcclusion, DetectionModel, ThreatSector
+from droneplanner.model.mission import (
+    DEFAULT_OFF_AXIS_VIGILANCE,
+    CanopyOcclusion,
+    DetectionModel,
+    ThreatSector,
+)
 from droneplanner.raster_lines import bresenham
 
 
@@ -306,6 +311,7 @@ def cumulative_exposure(
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
     sectors: Sequence[ThreatSector] = (),
+    off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each cell, in [0, 1] (float32).
 
@@ -325,7 +331,7 @@ def cumulative_exposure(
     if not observers and not any(s.observer is not None for s in sectors):
         return np.zeros((rows, cols), dtype=np.float32)
 
-    views = resolve_threat_elements(observers, sectors)
+    views = resolve_threat_elements(observers, sectors, off_axis_vigilance)
     accum = np.zeros((rows, cols), dtype=np.float32)
     for group in views:
         rc = grid.world_to_pixel(group[0].observer)
@@ -406,6 +412,7 @@ def point_exposure(
     detection: DetectionModel | None = None,
     target_span_m: float = 0.0,
     sectors: Sequence[ThreatSector] = (),
+    off_axis_vigilance: float = DEFAULT_OFF_AXIS_VIGILANCE,
 ) -> np.ndarray:
     """Mean per-observer visibility weight for each ``(x, y, z_amsl)`` point.
 
@@ -422,7 +429,7 @@ def point_exposure(
     if n == 0 or (not observers and not any(s.observer is not None for s in sectors)):
         return np.zeros(n, dtype=np.float32)
 
-    views = resolve_threat_elements(observers, sectors)
+    views = resolve_threat_elements(observers, sectors, off_axis_vigilance)
     accum = np.zeros(n, dtype=np.float32)
     cell = grid.cell_size_m
     for group in views:
@@ -432,11 +439,15 @@ def point_exposure(
             rc = grid.world_to_pixel(Coordinate(x=x, y=y))
             seen = 0.0
             for element in group:
-                if not element_sees_bearing(element, x, y):
+                # A sector scales the weight rather than gating it: off-axis the
+                # observer is less attentive, not blind (C3 + off_axis_vigilance).
+                attention = element_bearing_weight(element, x, y)
+                if attention <= 0.0:
                     continue
                 seen = max(
                     seen,
-                    _point_weight(
+                    attention
+                    * _point_weight(
                         dsm,
                         obs_rc,
                         eye,

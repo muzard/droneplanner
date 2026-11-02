@@ -76,8 +76,10 @@ def report_to_markdown(report: RiskReport) -> str:
         lines.append(f"| Tightest turn achieved | {k.tightest_turn_radius_m:.1f} m |")
         lines.append(f"| Turn-radius violations | {k.turn_violations} |")
         lines.append(f"| Reversals | {k.reversals} |")
-        lines.append(f"| Max climb rate | {k.max_climb_rate_ms:.2f} m/s |")
-        lines.append(f"| Max descent rate | {k.max_descent_rate_ms:.2f} m/s |")
+        lines.append(f"| Max climb rate (AGL profile) | {k.max_climb_rate_ms:.2f} m/s |")
+        lines.append(f"| Max descent rate (AGL profile) | {k.max_descent_rate_ms:.2f} m/s |")
+        lines.append(f"| Max climb rate (true vertical) | {k.max_climb_rate_amsl_ms:.2f} m/s |")
+        lines.append(f"| Max descent rate (true vertical) | {k.max_descent_rate_amsl_ms:.2f} m/s |")
         lines.append(f"| Climb-rate violations | {k.climb_violations} |")
         lines.append("")
 

@@ -147,7 +147,75 @@ def max_reactive_speed_ms(
     if reaction_time_s <= 0.0:
         raise ValueError("reaction_time_s must be positive")
     spacing = np.asarray(spacing_m, dtype=np.float32)
-    return np.minimum(spacing / reaction_time_s, cruise_speed_ms).astype(np.float32)
+    # Typed local: numpy 2.4's stubs (CI's Python 3.11 job) call this chain Any.
+    capped: np.ndarray = np.minimum(spacing / reaction_time_s, cruise_speed_ms).astype(np.float32)
+    return capped
+
+
+ONBOARD_PLANNING_ENVELOPE: tuple[tuple[float, float], ...] = (
+    (107.0, 6.0),
+    (200.0, 3.0),
+    (400.0, 2.0),
+)
+"""``(stems/ha, fastest clean speed m/s)`` for the onboard local planner.
+
+MEASURED 2026-09-23 in ``droneflight``'s accel/jerk-limited harness
+(`reactive.fly_with_local_planner`), oracle depth sensor, 90 deg FOV, 30 m range:
+
+========  ===========================================  ==========================
+stems/ha  result                                       source
+========  ===========================================  ==========================
+107       **0 strikes over 5.2 km at 6.0 m/s** (+0.81 m)  the B2 dense manifest
+200       0 at 3.0 (+0.92 m); 1 per 1.2 km at 6.0      Poisson, r 0.08-0.25 m
+400       0 at 2.0 (+0.55 m); 0 at 3.0 but +0.05 m     Poisson
+800       **stalls or strikes at 2, 3 and 6 m/s**      Poisson — outside envelope
+========  ===========================================  ==========================
+
+400/ha at 3.0 m/s was clean by five centimetres, so the envelope takes 2.0 there.
+Past the last anchor the onboard planner has not been shown to work at all:
+:func:`max_planned_speed_ms` extrapolates (speed inversely proportional to
+density) so a flight time can still be computed, and :func:`beyond_envelope` marks
+those cells so the report can say the number rests on nothing.
+
+⚠️ The harness is the one that predicted the wrong *mechanism* for reactive
+avoidance before B2 (see ``droneflight/reactive.py``). It now carries PX4's
+accel/jerk limits and reproduced B2's strike ordering, but this envelope is
+**unflown** until the SITL local-planner flight.
+
+Replaces :func:`max_reactive_speed_ms` as the planner's speed cap: the reactive
+policy it modelled is dead in flight (N2, 34-41 strikes), so capping speed by
+*its* coherence limit priced the mission on a flight stack nobody will fly.
+"""
+
+
+def max_planned_speed_ms(stems_per_ha: np.ndarray, *, cruise_speed_ms: float) -> np.ndarray:
+    """Fastest demonstrated-clean speed for onboard planning, capped at cruise.
+
+    Linear in density between the :data:`ONBOARD_PLANNING_ENVELOPE` anchors, and
+    cruise at or below the first anchor (and on open ground). **Past the last
+    anchor it is an extrapolation, not a measurement**: speed falls in inverse
+    proportion to density (floored at 0.3 m/s). That keeps the cost surface
+    preferring the sparser of two unflyable stands and keeps the flight time
+    finite; :func:`beyond_envelope` marks those cells so nobody mistakes the
+    number for a demonstrated one.
+    """
+    density = np.asarray(stems_per_ha, dtype=np.float32)
+    xs = np.array([d for d, _ in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
+    ys = np.array([v for _, v in ONBOARD_PLANNING_ENVELOPE], dtype=np.float32)
+    last_d, last_v = ONBOARD_PLANNING_ENVELOPE[-1]
+    inside = np.interp(density, xs, ys)
+    with np.errstate(divide="ignore"):
+        beyond = np.maximum(last_v * last_d / np.maximum(density, 1e-6), 0.3)
+    speed: np.ndarray = np.where(density > last_d, beyond, inside).astype(np.float32)
+    capped: np.ndarray = np.minimum(speed, np.float32(cruise_speed_ms)).astype(np.float32)
+    return capped
+
+
+def beyond_envelope(stems_per_ha: np.ndarray) -> np.ndarray:
+    """Cells denser than the onboard planner has been shown to fly."""
+    limit = ONBOARD_PLANNING_ENVELOPE[-1][0]
+    out: np.ndarray = np.asarray(stems_per_ha, dtype=np.float32) > limit
+    return out
 
 
 def traversal_time_penalty(max_speed_ms: np.ndarray, *, cruise_speed_ms: float) -> np.ndarray:
@@ -167,15 +235,42 @@ def traversal_time_penalty(max_speed_ms: np.ndarray, *, cruise_speed_ms: float) 
 
 
 def build_stem_clutter(
-    chm: np.ndarray, *, cruise_speed_ms: float, min_canopy_m: float = 2.0
+    chm: np.ndarray,
+    *,
+    cruise_speed_ms: float,
+    min_canopy_m: float = 2.0,
+    among_stems: np.ndarray | None = None,
+    density_override_per_ha: float | None = None,
 ) -> dict[str, np.ndarray]:
-    """All four rasters at once — density, spacing, speed cap, time penalty."""
+    """All four rasters at once — density, spacing, speed cap, time penalty.
+
+    ``among_stems`` marks the cells the drone actually flies *below the canopy*.
+    Elsewhere it is above the crowns and the stems cannot limit its speed, so the
+    cap is cruise there. Before 2026-09-23 the cap applied to every treed cell,
+    including ones flown over — inert on the demo AO, where the treed and the
+    below-canopy cells coincide, but wrong as soon as a route goes over a stand.
+    """
     density = stem_density_per_ha(chm, min_canopy_m=min_canopy_m)
+    if density_override_per_ha is not None:
+        # An operator's stated density replaces the canopy-height inference on
+        # every treed cell (open cells stay open).
+        density = np.where(density > 0.0, np.float32(density_override_per_ha), 0.0).astype(
+            np.float32
+        )
     spacing = mean_stem_spacing_m(density)
-    speed = max_reactive_speed_ms(spacing, cruise_speed_ms=cruise_speed_ms)
+    reactive = max_reactive_speed_ms(spacing, cruise_speed_ms=cruise_speed_ms)
+    speed = max_planned_speed_ms(density, cruise_speed_ms=cruise_speed_ms)
+    outside = beyond_envelope(density)
+    if among_stems is not None:
+        cruise = np.float32(cruise_speed_ms)
+        reactive = np.where(among_stems, reactive, cruise).astype(np.float32)
+        speed = np.where(among_stems, speed, cruise).astype(np.float32)
+        outside = outside & among_stems
     return {
         "stem_density_per_ha": density,
         "stem_spacing_m": np.where(np.isfinite(spacing), spacing, 0.0).astype(np.float32),
-        "max_reactive_speed_ms": speed,
+        "max_reactive_speed_ms": reactive,
+        "max_speed_ms": speed,
+        "beyond_envelope": outside.astype(np.float32),
         "clutter_time_penalty": traversal_time_penalty(speed, cruise_speed_ms=cruise_speed_ms),
     }

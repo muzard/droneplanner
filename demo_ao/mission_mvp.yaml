@@ -1,0 +1,56 @@
+# MVP mission (2026-09-23). The demo AO with two decisions applied, both documented
+# in droneplanner/CLAUDE.md -> "MVP MISSION":
+#   covered_radius_m 1500 — concealment only for the first part (user, 2026-09-14);
+#     1500 m is the largest zone that closes on one battery at EVERY density the
+#     onboard planner has been shown to fly (tools/concealment_zone_study.py).
+#   stem.density_per_ha 200 — the density of the Gazebo forest this is flown in
+#     (gz-world --stems-per-ha 200 --forest-radius 1500), so speed and endurance are
+#     priced for the world actually flown, not the canopy-height inference.
+name: demo-ao-mvp
+crs: EPSG:32633
+start:
+  x: 500312.5
+  y: 5200287.5
+end:
+  x: 503712.5
+  y: 5203687.5
+drone:
+  rotor_span_m: 0.9
+  mass_kg: 6.5
+  min_turn_radius_m: 8.0
+  climb_rate_max_ms: 3.0
+  descent_rate_max_ms: 2.0
+  cruise_speed_ms: 6.0
+  endurance_s: 1800.0
+  energy_reserve_fraction: 0.2
+spool:
+  length_m: 8000.0
+  mass_kg: 1.6
+  payout_side: drone
+threat:
+  observers:
+  - x: 501687.5
+    y: 5202787.5
+  - x: 502487.5
+    y: 5201187.5
+weights:
+  exposure: 1.0
+  cover: 1.0
+  length: 0.5
+  survivability: 1.0
+  snag: 0.5
+  clutter: 0.0
+layers:
+  dtm: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/demo_ao/dtm.tif
+  dsm: /Users/arttu/Claude/Projects/DroneAutomation/droneplanner/demo_ao/dsm.tif
+k_routes: 1
+seed: 1
+waypoint_spacing_m: 25.0
+cruise_agl_m: 12.0
+altitude:
+  min_agl_m: 5.0
+  canopy_clearance_m: 3.0
+  min_canopy_m: 12.0
+covered_radius_m: 1500.0
+stem:
+  density_per_ha: 200.0

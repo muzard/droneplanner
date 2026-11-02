@@ -40,7 +40,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 228 tests, ~95% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 380 tests, ~95% cov
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -294,6 +294,28 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
   assumption moves the answer — fully-masked AO fraction **19.1 % → 28.0 %**
   between a 500 m and a 2000 m horizon. ⚠️ Sectors are **azimuth only**: no
   elevation extent, so a 300 m sensor searching a 90° arc searches it to zenith.
+- **Heights derived from a voxel grid are referred to each column's ground
+  (2026-09-14 — don't regress).** A voxel level index counts from `VoxelGrid.z0`,
+  the point cloud's *global minimum* elevation, but `planner/corridor.py` and
+  `fields/altitude.py` add the band to the **local DTM** as if it were AGL.
+  `VoxelGrid.ground_level(dtm)` supplies the per-column datum; `segment_vertical`
+  and `build_flyability` take it and refer the understory band, the free-window
+  search and every reported height to it. 🔑 **Free-window level indices stay
+  ABSOLUTE on purpose** — the 3D EDT clearance grid is indexed in true geometry,
+  and height-normalizing the occupancy itself would shear the space and corrupt
+  horizontal clearance between columns at different elevations. Pinned by three
+  tests in `tests/unit/test_forest.py`; the damning one is that a column standing
+  above `z0` used to find the **void beneath its own ground** and report it as
+  navigable.
+- **The climb check is AGL; the airframe limit is not (2026-09-14).**
+  `smooth_altitudes` constrains the AGL profile, so terrain-following motion is
+  invisible to `climb_violations`. `kinematics.amsl_vertical_rates` measures the
+  true rate from `ground_elev_m + altitude_agl_m`, `KinematicReport` carries it,
+  and `vertical_rate_amsl_exceeded` WARNS when it beats the airframe. On the demo
+  route that is **2.56 m/s descent against a 2.0 m/s limit with zero violations
+  reported**. **Deliberately not enforced** — constraining it changes routes and
+  trades against the below-canopy posture, so it follows `weights.clutter`:
+  measure unconditionally, let the operator trade.
 - **CRS discipline:** projected metric CRS only; geographic rejected on load.
 - **Determinism:** same mission+seed ⇒ byte-identical output (golden test).
 - **Human-in-the-loop:** report caps at REVIEW (never blind GO) until analysis is
@@ -314,6 +336,155 @@ viewshed, for the cable) + snag + road penalty + forest term (reward/penalty) �
 cover (drainage defilade). Non-navigable forest → Theta\* obstacle.
 `planner/corridor.py` runs the search then the kinematic pass.
 
+## ✅ MVP MISSION + ONE-SORTIE ENDURANCE (2026-09-23) — decisions, and why
+Working autonomously toward the MVP under two user rules: **assume no lidar unless
+absolutely necessary**, and **measure-and-decide rather than ask** (both in
+memory). Four changes, each with the choice recorded here so it can be overturned
+on evidence.
+
+**1. The speed cap is now the ONBOARD PLANNER's measured envelope, not reactive
+coherence.** `fields/stem_density.ONBOARD_PLANNING_ENVELOPE`:
+**107 stems/ha → 6.0 m/s, 200 → 3.0, 400 → 2.0**, measured in droneflight's
+accel/jerk-limited harness with the new local planner (`droneflight/local_planner.py`).
+At 800/ha it stalls or strikes at every speed tried, so anything past 400 is
+flagged `beyond_envelope` and raises **`stem_density_beyond_envelope` CRITICAL**;
+the speed there is an extrapolation (∝ 1/density) kept only so the cost surface
+still prefers the sparser of two unflyable stands. The old
+`max_reactive_speed_ms` stays in `components` for comparison; `corridor.py` reads
+`max_speed_ms`. Also fixed: the cap used to apply to cells flown **over** the
+canopy — it now applies only where the band is below canopy.
+
+**2. "Only the first part needs cover" is `Mission.covered_radius_m`.** Radial from
+the start (a property of the ground, fixed before any route exists). Inside:
+the old behaviour. Outside: the drone flies **over** the canopy, drone exposure and
+the cover reward are zeroed, no stem speed cap. **The cable's survivability term
+stays everywhere** — the fiber remains on the ground after the aircraft has gone.
+None = whole route (unchanged default).
+
+**3. DECISION: 1500 m.** `tools/concealment_zone_study.py` sweeps radius × density:
+
+| stand density | largest radius that closes | energy at 1500 m |
+|---|---|---|
+| 107/ha | all (even the whole route, 0.67) | 0.67 |
+| 200/ha | all (whole route exactly 1.00) | 0.82 |
+| **400/ha** (top of demonstrated envelope) | **1500 m** | **0.96** |
+| canopy-height inference (520–1290/ha) | 500 m only (i.e. no cover) | beyond envelope |
+
+1500 m is the largest zone that closes on the 30 min airframe at **every density
+the onboard planner has been shown to fly**; it gives ~1.2 km of below-canopy
+flight on the demo route. **Flown GPS-denied in SITL at 200/ha: 0 strikes, 18.6 min
+(planned 19.0)** — droneflight RUNBOOK §4.14.
+⚠️ Its binding case, 400/ha at 2.0 m/s, is **marginal GPS-denied** in the harness
+(1 graze of −0.016 m in 6 seeds; clean on truth). If that edge does not hold, the
+same study says the zone must shrink toward 1000 m at 400/ha. ⚠️ Overturn it with a real stand density: at 107/ha the
+whole route could be covered. And note what this AO does NOT constrain: with the
+default unaided ground observers `exp_flown` is **0.000 at every radius** (C2), so
+on this fixture the zone is set by endurance alone.
+
+**4. `stem.density_per_ha` overrides the canopy-height density inference.** The
+literature relation says the demo stands are 520–1290/ha while every Gazebo forest
+is 107–200/ha, so a SITL mission must state the density of the world it flies or
+its endurance is priced for a different forest.
+
+**5. The `.plan` finally carries speed.** `io/mavlink.py` emits
+`MAV_CMD_DO_CHANGE_SPEED` (178) wherever the leg speed (slower end of the leg,
+floored to 0.5 m/s) changes. Until now the endurance verdict assumed forest speeds
+the vehicle was never told — the 2026-09-14 MVP flew 6.0 m/s everywhere.
+`droneflight`'s loader reads them back (`Waypoint.speed_ms`, `leg_speed_ms`).
+🐛 Found while doing it: `gz-world` read route points from **any** item with
+params[4:6], so a speed item would have added a route point at (0, 0) and drawn
+the forest band along a line to the equator. It now reads waypoints only.
+
+**The MVP mission is `demo_ao/mission_mvp.yaml`** (radius 1500, density 200):
+**5180 m, 1166 m below canopy at 3.0 m/s, 19.0 min, energy 0.82 → REVIEW (was
+NO-GO at 47.6 min).** Its world: `gz-world --stems-per-ha 200 --forest-radius
+1500` → `worlds/forest_mvp.*` (1562 trunks over 7.8 ha, median NN 3.4 m).
+⚠️ `demo_ao/dtm.tif` is 220×220 since the AO was enlarged; the older worlds were
+built from the 160×160 version. Terrain in the overlap is identical (a constant
+7.2 m zero-basing offset the world pose absorbs), so both are valid.
+
+## ✅ STEM DETECTION FROM LIDAR (2026-09-14) — `forest/stem_detect.py`
+`layers.point_cloud` → `pipeline._load_stems` → detected `StemMap` → the stem
+router below. A supplied `layers.stem_map` manifest wins over detection, because an
+explicit statement of where the stems are should not be overridden by a detector's
+opinion.
+
+**Pipeline:** height-normalize against the DTM → slice 1.5–5.0 m AGL → single-
+linkage cluster in plan view (union-find over a KD-tree, not an O(n²) linkage) →
+reject clusters that are sparse / vertically thin / too wide → **algebraic circle
+fit** for centre and radius.
+
+🔑 **The circle fit removes a SYSTEMATIC error.** An arc's centroid sits `2r/π` =
+0.64r in front of the axis, toward the scanner (measured 0.096 m for a 0.15 m
+trunk, analytic 0.095 m). Every stem is displaced toward wherever it was seen
+from, so a centroid map is **shifted, not noisy** — it does not average out.
+Fitting took RMSE to **0.017–0.029 m**.
+🔑 **Rejecting a merged cluster is the safe direction.** A *missed* stem is an
+obstacle the planner ignores; a *merged* one is a phantom centre sitting in the gap
+between two real trunks, so the planner routes confidently into a trunk it believes
+is clear. Hence `max_radius_m`.
+🔴 **Accuracy, not detection rate, is the requirement** — the stem-routed sortie
+flew with **0.708 m** of clearance, so a 1–2 m ALS-style position error eats the
+whole budget. `match_stems` scores a map against known truth for exactly this.
+⚠️ Everything measured so far used `forest/synthetic_scan.py`, a **validation
+fixture** (no beam, no traced occlusion, no registration error) — an upper bound
+that can falsify a detector but cannot validate one. **No real `.laz` has ever been
+ingested; that is the remaining gap** (SHORTFALLS M2).
+
+## ✅ STEM ROUTING IS BUILT (2026-09-14) — the route now threads the trunks
+`fields/stems.py` (the map) + `planner/stem_route.py` (the refinement), switched on
+by `layers.stem_map` pointing at a `*_trunks.csv` manifest. Measured on the demo
+route against the manifests B2 actually flew:
+
+| | dense (2500 stems, 4.6 m spacing) | sparse (1166 stems, 6.8 m) |
+|---|---|---|
+| min clearance **before** | **−0.033 m** (through a trunk) | −0.083 m |
+| sub-clearance samples before | **37** / 10501 | 35 / 10501 |
+| min clearance **after** | **+1.387 m** | **+1.769 m** |
+| sub-clearance samples after | **0** | **0** |
+| route length | **×1.0225** | ×1.0214 |
+
+🔑 **The before-number is the point:** the concealment search runs on 25 m cells and
+cannot see a 2.4 m gap, so its centreline was laid straight through a trunk — and
+its **37 sub-clearance samples match the 37 strikes B2 flew** at that density.
+The +2.25 % cost lands exactly on N4's predicted +1.6–2.9 %.
+
+**How it works, and why it is a separate pass rather than a cost term.** Both are
+needed and answer different questions: a coarse term can only say "this cell is
+cluttered" (that is `fields/stem_density.py`, and N3 showed density routing cannot
+rescue the mission), while threading a *specific* gap is geometry at 0.5 m. The
+refinement keeps the coarse route's shape and re-lays the line inside the lateral
+freedom A1 already granted — it runs **before** the altitude solve, so clearance,
+kinematics and endurance all score the line that is actually emitted. A windowed
+A* (a local 0.5 m grid per few vertices, pinned at window boundaries) keeps it to
+~1.4 s for the whole route instead of a 42 M-cell global grid.
+
+🔴 **Three bugs the first run exposed, all worth keeping in mind:**
+1. **Given A1's median 50 m corridor the A* SHORTCUTS instead of refining** — it
+   took the straight chord across every bend, collapsed 287 vertices to 25, lost
+   the concealment shape, and sub-clearance samples went **UP** (37 → 52). The
+   search gets `max_half_width_m` (8 m) — enough to dodge, not enough to re-plan.
+2. **Collinearity-based simplification is not error-bounded.** Dropping a vertex
+   within tolerance of its *already thinned* neighbours compounds, and it put the
+   simplified line back through the trunks the A* had just avoided. It is now
+   Douglas-Peucker against the original, **and the result is re-checked against
+   the stems**, falling back to a denser polyline if it does not clear.
+3. **A* only tests cell CENTRES** while the vehicle flies the segment between
+   them, which can pass closer. Passability is inflated by the cell half-diagonal.
+
+🔴 **`stem_vertices_snapped` = 2 on the demo AO — that is N4's composition failure,
+now measured by the product.** Two waypoints sat inside the clearance requirement
+of a trunk (N4 found exactly 2 of the 32 zero-freedom vertices with a trunk within
+0.86 m) and had to be moved. The concealment search places vertices without seeing
+trunks, so **the most concealed vertices are the least flyable** — reported as
+`stem_vertex_moved`, never papered over.
+
+⚠️ **Every stem map is SYNTHETIC** and generated in a band around the route planned
+*without* it, so a refined route that wandered outside that band would find open
+space a real forest would have filled — `stem_mapped_fraction` (88.8 % here) is
+reported next to every clearance claim. This shows **the planner can use a stem
+map**; it does not show one can be built. That remains SHORTFALLS M2.
+
 ## 🟢 NEXT ARCHITECTURE: route between mapped stems (TEST-PLAN N4, 2026-08-11)
 Reactive avoidance is dead in the flight stack (four independent negatives). The
 surviving option is a planner that routes *through* the stem gaps. Measured on the
@@ -333,21 +504,27 @@ closed, because a pre-planned path has nothing to react to.
    manifest flown so far is *synthetic*.
 
 ## Top gaps (SHORTFALLS.md, before sims)
-0. 🔴 **The concealed route does not fit the battery.** 57.1 min against a 30 min
-   airframe once the forest's speed cap is priced (TEST-PLAN N1/N3). Not a planner
-   bug — an infeasibility the planner now *reports* instead of hiding. The four
-   ways out (shorter route / more endurance / less concealment / map the stems)
-   are in TEST-PLAN.md; all four are decisions, not fixes.
-1. 🔴 **The new low route is unflown.** 6.6 m min AGL (was 24) and 282 waypoints
-   (was 145). PX4's vertical acceptance stalled two missions in the CFIT campaign
-   at 87 waypoints and 30 m; nothing about this configuration is verified.
-2. 🔴 **The M2 navigable band is not AGL** — it is height above the point
-   cloud's global min z, added to the local DTM as if it were AGL (SHORTFALLS
-   1b). Identical forest over 0/30/70 m ground reports `nav_floor` 26/56/3 m.
-   Masked today because no real lidar has been run; it bites the first one, and
-   a voxel window *overrides* the canopy-derived altitude band, so it bounds the
-   below-canopy posture too. (Without a point cloud, the canopy path is fine —
-   `DSM - DTM` is terrain-relative by construction.)
+0. 🟢 **The concealed route does not fit the battery — but 3 relay legs do
+   (2026-09-14).** 47.6 min against a 30 min airframe as one sortie; `planner/relay.py`
+   splits it into **3 balanced legs of 16.1 min at 0.67–0.69 of usable endurance**,
+   with both relay points on ground at `ground_los` **0.000**. Same route, so the
+   concealment is untouched. Cost is a CONOPS change (ground stops, fiber splices —
+   both unstated). 🔴 Relay fixes **endurance only**; below-canopy's avoidance
+   blocker is untouched. The other three ways out are still decisions, not fixes.
+1. ✅ **The low route is FLOWN — 287/287, 2026-09-14** (`sim-logs/mvp/16_53_04.ulg`,
+   RUNBOOK §4.12). 947.8 s, min AGL **7.05 m** against 6.59 predicted, 0 samples
+   under 5 m, no stalls. The predicted vertical-acceptance stall did not happen at
+   287 waypoints and ~12 m AGL. ⚠️ No trees in that world and the plan commands
+   6.0 m/s, so it tests altitude tracking and sequencing only.
+2. ✅ **The M2 navigable band is AGL as of 2026-09-14** (was 🔴 SHORTFALLS 1b).
+   `VoxelGrid.ground_level(dtm)` gives segmentation and flyability a per-column
+   height datum; identical forest over 0/30/70 m ground now reports one band
+   instead of three, and a raised column no longer mistakes the void beneath its
+   own terrain for the tallest free window. No route changes (no mission has a
+   point cloud). 🟠 Still open and now characterised: **which** free window wins
+   is an artifact of the voxel grid's vertical extent — open sky above a stand
+   runs to `cloud.z.max()`, so low ground prefers flying *over* the canopy.
+   Bounding the window at each column's canopy top changes routes → user's call.
 3. 🔴 **Below-canopy flight assumes onboard obstacle avoidance that does not
    exist yet** on this hardware (Track B, x86+RTX). The report says so per route.
 4. Forest voxelized at corridor grid res, not 0.25–0.5 m (flyability optimistic).
@@ -362,6 +539,8 @@ Plus land cover unwired; OMPL 3D refinement deferred; no real-AO validation yet.
 Theta\* + corridor + kinematics + `terrain_profile.py` (CFIT) +
 `corridor_width.py` (lateral freedom) + `endurance.py` (does the mission close?)
 + `gates.py` (route reduction — analysis only, deliberately not wired into
-`.plan` emission; see TEST-PLAN A2).
+`.plan` emission; see TEST-PLAN A2)
++ `relay.py` (split a route into legs one battery can fly — analysis only; the
+`.plan` still carries a single sortie, because a relay is a CONOPS decision).
 `crossings/` roads. `report/` GO/REVIEW/NO-GO. `demo.py` procedural AO.
 `viz.py`/`serve.py` visualization. `pipeline.py` orchestration. `cli.py`.
