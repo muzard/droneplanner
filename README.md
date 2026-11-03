@@ -4,12 +4,30 @@ Offline **preflight route planner** for the autonomous fiber-laying drone. It
 turns a mission — start, end, map layers, threat model, drone/spool geometry —
 into a 3D flight-and-laydown plan plus a **human-in-the-loop risk report**. It is
 the only pure-software subsystem of the larger program; the flight/navigation
-stack is a separate, hardware-dependent effort (see `../Software-Spec.md` §1, §8).
+stack is a separate, hardware-dependent effort:
+[droneflight](https://github.com/muzard/droneflight).
 
-This repository implements the module specified in **`../Software-Spec.md`** with
-algorithmic rationale in **`../Preflight-Planning-Module-Design.md`**.
+This repository implements the module described in the program's Software Spec,
+with algorithmic rationale in a Preflight-Planning design note. Both are
+unpublished design notes and are not part of this repository.
 
-## Status — through milestone M2 (forest flyability)
+## Results (simulation)
+
+- **Flying the whole route under the canopy does not fit the battery.** The fully concealed demo route needs **47.6 min against a 30 min airframe**, so it is NO-GO as one sortie.
+- **So cover is limited to where it matters: within 1500 m of launch.** `Mission.covered_radius_m` plans below-canopy flight inside that radius and over the canopy beyond it. `tools/concealment_zone_study.py` sweeps radius × stand density, and 1500 m is the largest radius that still closes at every density the onboard planner has been shown to fly (binding case: 400 stems/ha at 2.0 m/s).
+- **The resulting mission closes:** `demo_ao/mission_mvp.yaml` is 5180 m with 1166 m below the canopy and a planned **19.0 min** (energy 0.82 of usable), which gives REVIEW.
+- **Flown GPS-denied in PX4 SITL + Gazebo** with [droneflight](https://github.com/muzard/droneflight) (RUNBOOK §4.14): 200 stems/ha, **0 tree strikes, 18.6 min**.
+
+**Limits:**
+- The forests are synthetic.
+- Stem densities come from forestry literature, not a survey. The demo canopy implies 520–1290 stems/ha, beyond the 400 stems/ha the 1500 m zone was sized for.
+- The endurance model is calibrated on a single flown log.
+- In simulation, obstacle sensing is an oracle fed from the world's trunk positions, and GPS-denied navigation is ground truth plus injected error.
+- No real lidar has been ingested.
+
+See [SHORTFALLS.md](SHORTFALLS.md).
+
+## Status — M0–M2 and kinematic feasibility, plus the one-sortie MVP mission (2026-09-23)
 
 `droneplanner plan` runs end-to-end. Given a DTM+DSM it plans a **concealment-
 and defilade-aware route** (in-house viewshed + terrain TPI/slope/drainage +
@@ -53,13 +71,18 @@ live — the fastest way to build intuition for the cost function.
 | **M1.1** | road crossings (open-terrain fly-over stub) | ✅ |
 | **M2** | `forest/` voxel flyability (2.5D navigability + non-navigable mask + altitude band) | ✅ |
 | **Kinematics** | turn-radius filleting + climb-limited altitude + reversal flagging | ✅ this repo |
+| **MVP mission** | covered-radius concealment zone, onboard-planner speed envelope, per-leg speed in the `.plan`, stem-map routing, relay-leg costing | ✅ 2026-09-23 (see Results) |
 | M2 (3D) | OMPL BIT\*/RRT\* refinement (full 3D kinodynamic) | ⏳ see SHORTFALLS.md |
 | M3 | laydown + k-diverse survivability routing | later |
-| M4 | PX4 SITL / Isaac Sim validation | later |
+| M4 | PX4 SITL validation (flown from [droneflight](https://github.com/muzard/droneflight), RUNBOOK §4.12–4.14) | ✅ in simulation |
+| M4 | Isaac Sim validation | later |
 
-> **Before sims:** fly the new low route (it is 3× denser and a third of the
-> altitude, and unflown), fix the M2 navigable-altitude band datum (it is not
-> AGL), wire land cover, and voxelize at fine resolution — see
+> **Open gaps:** the low route was flown in SITL on 2026-09-14 (287/287
+> waypoints) — in a world with no trees, at 6.0 m/s — and the M2 navigable-band
+> datum was fixed the same day. Still open: land cover is not wired, the forest
+> is voxelized at corridor resolution rather than 0.25–0.5 m, below-canopy flight
+> assumes onboard obstacle avoidance that exists only against an oracle sensor in
+> simulation, and there is no real-AO validation — see
 > [SHORTFALLS.md](SHORTFALLS.md) for the prioritized list. (Threat sectors landed
 > 2026-08-15; `threat.sectors` in the mission YAML now shapes the route.)
 

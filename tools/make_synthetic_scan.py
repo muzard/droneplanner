@@ -18,6 +18,7 @@ it cannot validate one. Only real lidar over a field-surveyed plot does that.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
@@ -83,9 +84,11 @@ def main() -> int:
     print(f"{len(cloud):,} returns from {len(stems)} stems -> {out} ({size_mb:.1f} MB)")
 
     mission = dict(home_mission)
-    mission["layers"] = {**mission["layers"], "point_cloud": str(out.resolve())}
-    mission["name"] = "demo-ao-lidar-stems"
     mission_path = args.ao / "mission_lidar.yaml"
+    # Relative to the mission file (the loader's anchor), so the YAML stays portable.
+    cloud_ref = Path(os.path.relpath(out, mission_path.parent)).as_posix()
+    mission["layers"] = {**mission["layers"], "point_cloud": cloud_ref}
+    mission["name"] = "demo-ao-lidar-stems"
     mission_path.write_text(yaml.safe_dump(mission, sort_keys=False))
     print(f"wrote {mission_path} — plan it with:")
     print(f"  droneplanner plan --mission {mission_path} --out out/lidar")

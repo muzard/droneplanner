@@ -85,3 +85,38 @@ def test_invalid_mission_values_raise(tmp_path: Path) -> None:
     )
     with pytest.raises(MissionLoadError, match="invalid mission"):
         load_mission(path)
+
+
+_MINIMAL = """
+name: layers-ao
+crs: EPSG:32633
+start: {x: 500000.0, y: 5200000.0}
+end: {x: 501000.0, y: 5200800.0}
+drone: {rotor_span_m: 0.9, mass_kg: 6.5, min_turn_radius_m: 8.0,
+        climb_rate_max_ms: 3.0, descent_rate_max_ms: 2.0}
+spool: {length_m: 5000.0, mass_kg: 1.2}
+"""
+
+
+def test_relative_layer_paths_resolve_against_the_mission_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ao = tmp_path / "ao"
+    ao.mkdir()
+    (ao / "m.yaml").write_text(_MINIMAL + "layers: {dtm: dtm.tif, stem_map: ../worlds/t.csv}\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    layers = load_mission(ao / "m.yaml").layers
+
+    assert layers.dtm == (ao / "dtm.tif")
+    assert layers.stem_map == (ao / ".." / "worlds" / "t.csv")
+
+
+def test_absolute_layer_paths_are_left_alone(tmp_path: Path) -> None:
+    absolute = tmp_path / "somewhere" / "dtm.tif"
+    path = tmp_path / "m.yaml"
+    path.write_text(_MINIMAL + f"layers: {{dtm: {absolute}}}\n")
+
+    assert load_mission(path).layers.dtm == absolute
