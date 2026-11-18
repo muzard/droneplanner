@@ -40,7 +40,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 380 tests, ~95% cov
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 449 tests
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -327,7 +327,7 @@ UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot delibe
 - **Reversals allowed** (user): low payout speed mitigates snag → reversal is an
   INFO finding, not NO-GO; only turn-radius/climb violations break feasibility.
 - **Ingested today:** DTM, DSM, threat observers, threat *sectors*, weights,
-  lidar point cloud, roads. **Not yet:** land cover (snag/veg terms are 0).
+  lidar point cloud, roads, Metsäkeskus stand data, canopy gaps / gap fraction. **Not yet:** land cover (snag/veg terms are 0).
 
 ## What ingests what (cost surface)
 `fields/composite.py` blends: base move cost + drone exposure (viewshed over the
