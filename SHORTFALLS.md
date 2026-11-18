@@ -520,6 +520,51 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   adversary-favouring direction. Fixing it means choosing whether an observer
   stands on the terrain (DTM) or on the surface, per observer — a mission-contract
   question, and it moves every historical exposure figure.
+  ⚠️ **Checked 2026-09-25: it is NOT a simple eye-height toggle.** The viewshed marches
+  over the DSM and treats the canopy as a solid wall, so an eye moved down into a
+  stand would be blind to everything — including a drone flying through the same
+  stand's trunk space 50 m away, which a real dismount could see. A ground-eye
+  switch would trade an adversary-favouring bias for a friendly-favouring one. The
+  fix needs a trunk-space sightline model (stem density x distance transmittance
+  below the crown base), not a different eye elevation.
+  ✅ **Built (opt-in) 2026-09-25 for observers on OPEN ground:**
+  `CanopyOcclusion.trunk_space_sightlines` — a sightline under the crown base is
+  attenuated by trunks (exp(−n·d·L)), blocked in the crown layer, ≤ 300 m; raster and
+  flown re-score share one builder (`composite.trunk_space_for`) and a test pins them
+  equal. Measured: **zero effect on the demo MVP** (its concealed stretch has no open
+  ground within 300 m) and on Askola at 10.5-12 m AGL (that flight is in the crown
+  layer, which blocks side views); with **crown-aware flight (5-7 m) and an observer
+  on open ground 112 m away: peak exposure 0.21**, route mean 0.003. So it matters
+  exactly when flying in trunk space near an edge — enable it together with
+  `AltitudePolicy.crown_ratio`. Observers standing INSIDE a stand are still not
+  covered (their eye sits on the crowns).
+  ✅ **Closed under crown transmission (2026-09-26, opt-in, PR #4):** with
+  `CanopyOcclusion.crown_transmission` the canopy is a medium, not a wall, so the
+  eye can go where the observer stands — **`dtm + observer_height_m`**
+  (`viewshed._eye_elev`). A dismount inside a stand now sees a drone in the same
+  trunk space through the stems (exp(−n·d·L)) and a canopy-top drone up through the
+  crowns. Without crown transmission the eye stays on the DSM, for the reason above.
+  Note it moves elevated sensors too: a "300 m" sensor is now 300 m above the
+  terrain, not above the canopy (≤ ~25 m difference).
+  🟠 **Every fixture observer stands in vegetation (checked 2026-09-26).** Demo AO: inside
+  18.3 m and 15.5 m stands, no opening within 200 m. Askola: one inside a 25.2 m stand
+  (74 open cells within ~100 m), one in 3.4 m growth. They were placed with the eye on the
+  DSM, where cover underfoot did not matter; under crown transmission it does (demo AO
+  exposed cells 1335 → 6). `observer_vantage_m` (opt-in) steps them out to the nearest
+  opening, and `observers_in_vegetation` WARNs. Placing fixture observers at deliberate
+  vantage points is the prerequisite for making crown transmission the default — for the
+  demo AO it runs into the open observer-relocation decision (moving the hills).
+- 🟠 **The binary sub-canopy rule is optimistic for a drone INSIDE the crown layer
+  (found 2026-09-26).** It credits a target under its own crown with that cell's full
+  vertical gap fraction wherever the target sits — but at 12 m AGL in Askola's ~16 m
+  stands (crown base ~8 m) only ~4 m of crown is overhead. Crown transmission integrates
+  just the crown actually crossed; against a 300 m sensor 300 m out it takes the worst
+  bearing **0.120 → 0.200** and fails the 0.15 cap on 2/12 bearings, where the binary
+  model passed all 12. Crown-aware flight (under the crown base) passes everywhere (worst
+  0.059). Not fixed in the binary model: the fix *is* crown transmission (opt-in), and
+  `crown_ratio` stays opt-in per the user — so with both off, reports on tall-crowned
+  stands understate exposure at the default 12 m. The measured gap map is also cut at
+  8 m, i.e. for the trunk band, not for 12 m.
 - ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
   at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
   median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the
@@ -553,6 +598,18 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   an observer — disturbed ground, a corridor through vegetation, a trench line —
   so `ground_los` answers "could someone see this patch of ground", which is a
   proxy for cable survivability and not a measurement of it.
+- ✅ **FIXED 2026-09-25 (`planner/corridor._debounce_bands`) — decided under the
+  "decide and document" rule, reversible with `MIN_DWELL_M = 0`:** along the route,
+  a run OUT of the canopy shorter than 50 m between two under-canopy runs is flown
+  under too (if every cell is within 2 m of `min_canopy_m`, in the enterable zone,
+  and has room under its crowns — this *adds* concealment), and a run UNDER the
+  canopy shorter than 50 m between two out-of-canopy runs is flown over (costs a
+  little concealment; each such island would also need two canopy openings). Demo
+  AO size=120: peak climb 16.9 → **1.41 m/s**; the test is now a real test (no
+  excursion < `MIN_DWELL_M`, climb inside the airframe) and fails with the
+  debounce off. Residual: one over→under transition needs 2.1 m/s of descent on a
+  2.46 m leg against 2.0 — a transition-length issue, still counted in
+  `climb_violations`. Original entry:
 - 🔴 **`min_canopy_m` is a hard band threshold with no hysteresis, and a stand
   sitting at it makes the aircraft porpoise.** Under-canopy and over-canopy
   altitudes are ~5 m apart with **no admissible altitude between them** (the crowns
@@ -844,9 +901,13 @@ concealment-then-stems has no admissible path in dense forest).
   corner-speed prior** (measurable directly from `sim-logs/4.7/23_40_58.ulg`),
   then re-derive whether a planner-side trigger buys anything at all. Full result:
   droneflight CLAUDE.md → tether plugin §3, and RUNBOOK §4.7.
-- 🔴 **No real-AO validation.** Everything is exercised on synthetic fixtures and
-  the procedural demo. The spec's small real lidar tile + DEM (§6.1) is not yet
-  wired in, so field correctness on real data is unverified.
+- 🟠 **Real-AO validation — PARTLY DONE 2026-09-25 (Askola, open Finnish data).**
+  `tools/build_finnish_ao.py`: MML 10 m terrain, Metsäkeskus 1 m canopy model (p95
+  per 16 m cell, plus canopy openings) and stand polygons (measured stems/ha,
+  species strata). Planned, flown GPS-denied in SITL (4/4 on the 600 m zone, 4/4 on
+  the measured-density zone, 2/2 crown-aware, 2/2 over-canopy) — see CLAUDE.md →
+  Askola. Still missing: a real lidar tile (§6.1) and any field ground truth — the
+  forest in SITL is still generated from the data, not surveyed.
 - 🟠 **Reference-data fidelity is assumed, not modeled — the corridor and the
   flight-time fixes share one shaky input.** The whole corridor is built from
   geospatial reference (DTM/DSM, lidar, land cover). That reference is **uneven in
@@ -862,9 +923,12 @@ concealment-then-stems has no admissible path in dense forest).
   concealment against staying in reach of trustworthy optical fixes — otherwise a
   maximally-concealed route is a maximally-blind one. Ties into the M2 "lidar
   currency / DSM-vs-canopy coupling" 🟡 and land-cover (currently unwired) items.
-- 🟠 **Cable-laydown prediction (M3) is absent** — where the fiber settles, and
-  its per-segment survivability, are not modeled; the report's survivability is a
-  placement heuristic, not a laydown result.
+- 🟠 **Cable laydown — MINIMAL MODEL BUILT 2026-09-25** (`laydown/settle.py`,
+  roadmap C7): each metre is classed trunk space / crowns / open ground and the
+  report gives the lengths (`cable_on_crowns` WARNING; the demo MVP lays 58 % on
+  crowns). Still absent: settle physics (wind drift, crown closure), hanging spans
+  at climbs/descents, and feeding the class into `snag.py`/`survivability.py` — the
+  report's survivability is still a placement heuristic.
 - 🟢 Determinism, CRS discipline, license hygiene, kinematic feasibility, and the
   human-in-the-loop REVIEW-cap all hold.
 
