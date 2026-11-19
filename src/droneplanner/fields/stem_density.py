@@ -244,7 +244,10 @@ stand / speed   clean seed sets (min air)     contact
 ==============  ============================  =============================
 
 ¶ 2026-09-26, `forest_mvp1200n` / `forest_mvp1500n` (MVP route, stand over the first
-~550 m, ±15 m band), memory clearing + escape climb + sensing at target height on.
+~550 m, ±15 m band; tracked in ``worlds/`` since 2026-11-19, rebuilt with ``gz-world
+--stems-per-ha 1200|1500 --forest-band 15 --forest-radius 1000`` on the mvp400 plan —
+the recipe that reproduces ``forest_mvp800n`` byte for byte at radius 900),
+memory clearing + escape climb + sensing at target height on.
 1200/ha air +0.33 / +0.50 / +0.48 / **+0.07 m** — the thin one (seed set 6/7) is in
 ordinary flight at 11.4 m AGL and 0.95 m/s, approaching the dead end that then
 triggered its escape. The pre-registered bar was 4/4 with > 0.15 m of air, so **the
