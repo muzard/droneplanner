@@ -23,6 +23,7 @@ unpublished design notes and are not part of this repository.
 - **Flown GPS-denied in SITL over real MML terrain:** the measured 300 m zone (1702 trunks, forest legs at 0.5 m/s) is **clean on 4/4 seed sets**, 21.2–21.5 min against 20.9 planned. The 600 m zone also flew 4/4 clean, but at 23.3 of 24 usable minutes; the planner now prices it NO-GO (energy 1.06).
 - **In spruce-heavy managed forest the trunk space is a ~5–7 m band** under the crown base (`AltitudePolicy.crown_ratio`, opt-in). Flying it needs a 4 m floor, which rests on understory data the stand inventory does not have.
 - **Where the fiber lands is a concept-level problem.** Flying over the canopy outside the zone leaves the fiber on the crowns: 58 % of the demo MVP route, 1322 m of Askola's 600 m route. `weights.cable_on_crowns` (opt-in) cuts Askola's figure by 84 % for +2.5 % route length.
+- **The launch and end sites are scored for the crew standing there**, not only the route: the report warns when a person at the launch site is detectable, and says when a site is hidden only by range (a magnified optic would see it). On the demo AO both endpoints sit in scrub and score 0.
 - **Unpassable stands are flown over, and the operator is told first** (`over_canopy_when_unpassable`, default on): every planned climb is listed in the report, led by any within 200 m of launch.
 
 **Limits:**
@@ -82,6 +83,7 @@ live — the fastest way to build intuition for the cost function.
 | **MVP mission** | covered-radius concealment zone, onboard-planner speed envelope, per-leg speed in the `.plan`, stem-map routing, relay-leg costing | ✅ 2026-09-23 (see Results) |
 | **Real AO** | Finnish open data (`tools/build_finnish_ao.py`, `layers.stand_data`, `canopy_gaps`, `canopy_gap_fraction`, MML roads), over-canopy fallback with launch-climb briefing, opt-in crown base (`crown_ratio`) and crown transmission | ✅ 2026-09-26 (Askola, flown in SITL) |
 | **C7 laydown (minimal)** | `laydown/settle.py`: fiber in trunk space / on crowns / on open ground, `cable_on_crowns` warning and opt-in weight | ✅ 2026-09-25 (no settle physics) |
+| **P3 ground points** | `planner/ground_points.py`: a standing person at launch and end is scored with the route's own adversary (`launch_crew_exposure` / `launch_crew_los`, same for the end), `launch_site_exposed` WARNING above 0.15, INFO when the site is hidden only by range; relay points scored the same way in `tools/relay_study.py` | ✅ 2026-11-19 (no dwell, vehicles, thermal or RF) |
 | M2 (3D) | OMPL BIT\*/RRT\* refinement (full 3D kinodynamic) | ⏳ see SHORTFALLS.md |
 | M3 | laydown + k-diverse survivability routing | later |
 | M4 | PX4 SITL validation (flown from [droneflight](https://github.com/muzard/droneflight), RUNBOOK §4.12–4.14) | ✅ in simulation |

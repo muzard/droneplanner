@@ -35,6 +35,7 @@ from droneplanner.model.report import (
     Severity,
 )
 from droneplanner.planner.corridor import OPENING_SEARCH_M
+from droneplanner.planner.ground_points import GROUND_POINT_EXPOSED
 
 
 def _decide(findings: list[Finding]) -> Recommendation:
@@ -656,6 +657,39 @@ def build_report(
                 ),
             )
         )
+
+    # --- Ground points: where people stand (roadmap P3) ---
+    for key, label in (("launch", "LAUNCH SITE"), ("end", "END POINT")):
+        crew = plan.objective_scores.get(f"{key}_crew_exposure")
+        if crew is None:
+            continue
+        los = plan.objective_scores.get(f"{key}_crew_los", 0.0)
+        if crew > GROUND_POINT_EXPOSED:
+            findings.append(
+                Finding(
+                    severity=Severity.WARNING,
+                    code=f"{key}_site_exposed",
+                    message=(
+                        f"{label} is exposed: a standing person there scores {crew:.2f} "
+                        f"detection exposure (cap {GROUND_POINT_EXPOSED:.2f}; in line of sight "
+                        f"of {los:.2f} of observers). The crew stands "
+                        "there for minutes, not seconds — a concealed route from an exposed "
+                        "site gives the site away. Move the point into cover or defilade."
+                    ),
+                )
+            )
+        elif los >= 0.01:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    code=f"{key}_site_in_line_of_sight",
+                    message=(
+                        f"{label}: crew detection exposure {crew:.2f}, but a person there is "
+                        f"in line of sight of {los:.2f} of observers — hidden by range today, "
+                        "not by cover; a magnified optic on that bearing would see it."
+                    ),
+                )
+            )
 
     hidden_eyes = int(plan.objective_scores.get("observers_in_vegetation", 0.0))
     if hidden_eyes:

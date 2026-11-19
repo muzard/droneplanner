@@ -57,6 +57,7 @@ from droneplanner.model.plan import (
 )
 from droneplanner.planner.corridor_width import assess_corridor
 from droneplanner.planner.endurance import route_budget
+from droneplanner.planner.ground_points import CREW_TARGET_SPAN_M, ground_point_scores
 from droneplanner.planner.kinematics import (
     KinematicLimits,
     amsl_vertical_rates,
@@ -486,26 +487,11 @@ def plan_corridor(
     )
     # The same vantage points build_cost_surface used (crown transmission only).
     placed = vantage_mission(mission, chm, grid)
-    flown_exposure = point_exposure(
-        surface.dsm,
-        grid,
-        list(placed.threat.observers),
-        flown_samples,
-        observer_height_m=mission.threat.observer_height_m,
-        canopy=mission.threat.canopy_occlusion,
-        detection=mission.threat.detection,
-        target_span_m=mission.drone.rotor_span_m,
-        sectors=placed.threat.sectors,
-        # Must match build_cost_surface, or the flown re-score grades the route
-        # against a different adversary than the one it was planned for.
-        off_axis_vigilance=mission.threat.off_axis_vigilance,
-        trunk_space=trunk_space_for(
-            mission, surface.dtm, chm, surface.components["stem_density_per_ha"]
-        ),
-        gap_map=gap_map_for(mission, grid),
-        medium=crown_medium_for(
-            mission, surface.dtm, surface.dsm, surface.components["stem_density_per_ha"], grid
-        ),
+    _score = point_scorer(mission, surface)
+
+    flown_exposure = _score(flown_samples, mission.drone.rotor_span_m, True)
+    ground_scores = ground_point_scores(
+        mission, surface.dtm, grid, lambda pts, det: _score(pts, CREW_TARGET_SPAN_M, det)
     )
     mean_exposure_flown = _track_weighted_mean(flown_samples, flown_exposure)
     max_exposure_flown = float(np.max(flown_exposure)) if flown_exposure.size else 0.0
@@ -595,10 +581,53 @@ def plan_corridor(
             # and CFIT densification, so it grades what is emitted — not what the
             # refinement pass happened to hand back.
             **stem_scores,
+            **ground_scores,
         },
         kinematics=kinematics,
         endurance=endurance,
     )
+
+
+def point_scorer(
+    mission: Mission, surface: CostSurface
+) -> Callable[[list[tuple[float, float, float]], float, bool], np.ndarray]:
+    """``point_exposure`` bound to this mission's adversary and this surface.
+
+    ``(points, target_span_m, with_detection) -> weights``. One construction for
+    the flown re-score, the ground points and any study tool (relay points), so
+    none of them can grade against a different adversary than the route was
+    planned for.
+    """
+    grid = surface.grid
+    chm = canopy_height(surface.dtm, surface.dsm)
+    placed = vantage_mission(mission, chm, grid)
+    density = surface.components["stem_density_per_ha"]
+    trunk_space = trunk_space_for(mission, surface.dtm, chm, density)
+    gap_map = gap_map_for(mission, grid)
+    medium = crown_medium_for(mission, surface.dtm, surface.dsm, density, grid)
+
+    def score(
+        points: list[tuple[float, float, float]], span_m: float, with_detection: bool = True
+    ) -> np.ndarray:
+        return point_exposure(
+            surface.dsm,
+            grid,
+            list(placed.threat.observers),
+            points,
+            observer_height_m=mission.threat.observer_height_m,
+            canopy=mission.threat.canopy_occlusion,
+            detection=mission.threat.detection if with_detection else None,
+            target_span_m=span_m,
+            sectors=placed.threat.sectors,
+            # Must match build_cost_surface, or the flown re-score grades the route
+            # against a different adversary than the one it was planned for.
+            off_axis_vigilance=mission.threat.off_axis_vigilance,
+            trunk_space=trunk_space,
+            gap_map=gap_map,
+            medium=medium,
+        )
+
+    return score
 
 
 def plan_over_terrain(

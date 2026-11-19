@@ -915,6 +915,33 @@ plot for detection rate and position error; (3) only then feed it into the plann
 **as a cost-surface term rather than a post-filter** (N4 measured that composing
 concealment-then-stems has no admissible path in dense forest).
 
+## Ground points — launch, end, relay (roadmap P3, 2026-11-19)
+
+✅ **Built minimally.** `planner/ground_points.py` scores a standing person
+(1.7 m target, centre 1 m above the DTM) at the launch and end points with the
+adversary the route was planned against (`corridor.point_scorer`, shared with the
+flown re-score), twice: with the detection model (`*_crew_exposure`) and as line
+of sight only (`*_crew_los`). WARNING `launch_site_exposed` / `end_site_exposed`
+above 0.15; INFO `*_site_in_line_of_sight` when the site is hidden by range alone.
+`tools/relay_study.py` scores relay points the same way.
+🐛 **Fixed in passing:** `relay_study.py` scored relay points on the `ground_los`
+raster, which is line of sight to the **DSM surface** — the top of the scrub or
+canopy the site sits in, not a person standing in it. On the demo AO both
+endpoints read `ground_los` **1.0** (fully open) while a person there scores
+**0.0** (hidden by 2-4 m of vegetation).
+⚠️ **Open:**
+- Under the default occlusion model vegetation over the site is a solid wall to a
+  distant ground observer (shallow sightline), so "in scrub" reads as fully
+  hidden; crown transmission (opt-in) is the more honest model there.
+- No dwell time, movement, vehicles, thermal, acoustic or RF (the operator's
+  radio). A standing person is scored like a still object — a floor on
+  findability, not a ceiling.
+- The aircraft's own climb-out over the launch site is in the flown re-score but
+  not attributed to the site.
+- Not a cost term: the planner does not move the endpoints (they are mission
+  inputs). Choosing sites is the operator's call; this tells them which ones are
+  bad.
+
 ## Cross-cutting
 
 - 🟠 **Planner output geometry defeats the flight stack's tether speed policy.**

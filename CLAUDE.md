@@ -40,7 +40,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 459 tests
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 464 tests
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -786,6 +786,17 @@ a large part of it is talousmetsää."* Detail and sources in the
 * 🔧 **The canopy-height relation was 29 % low** against those stands. Refitted:
   **730 stems/ha at 20 m, exponent 1.36** (was 600 / 1.5 from literature) —
   `fields/stem_density.py`. One municipality; use stand data where it exists.
+
+## 🧍 GROUND POINTS — LAUNCH / END / RELAY (2026-11-19, roadmap P3)
+`planner/ground_points.py`: a standing person (1.7 m, centre 1 m AGL) at the
+launch and end points, scored by `corridor.point_scorer` — **the one construction
+of `point_exposure` bound to the mission's adversary**, shared with the flown
+re-score so they cannot disagree. Scores `launch_crew_exposure` / `launch_crew_los`
+(+ `end_*`); WARNING `*_site_exposed` > 0.15, INFO `*_site_in_line_of_sight` when
+only range hides it. Report-only: endpoints are mission inputs.
+🐛 Do not score a ground site on the `ground_los` raster — it is LOS to the **DSM
+surface** (the scrub top): demo endpoints read 1.0 there and 0.0 for a person in
+the scrub. `relay_study.py` did exactly that; fixed.
 
 ## ✅ STEM DETECTION FROM LIDAR (2026-09-14) — `forest/stem_detect.py`
 `layers.point_cloud` → `pipeline._load_stems` → detected `StemMap` → the stem
