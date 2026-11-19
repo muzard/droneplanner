@@ -13,7 +13,9 @@ So altitude is now **surface-relative, and as low as the constraints allow**:
 * **target** — ``Mission.cruise_agl_m``, a height to be clamped, not held;
 * **floor** — ``AltitudePolicy.min_agl_m``: understory, rotor wash, DTM error;
 * **ceiling** — ``canopy_top - canopy_clearance_m`` wherever the canopy is tall
-  enough to be worth flying under, so the drone stays *inside* the stand.
+  enough to be worth flying under, so the drone stays *inside* the stand — and,
+  with ``AltitudePolicy.crown_ratio``, under the crown base too
+  (:func:`under_canopy_ceiling`).
 
 Three bands come out of it, and they mean different things to the risk report:
 ``BELOW_CANOPY`` (concealed, and betting on onboard obstacle avoidance),
@@ -30,6 +32,8 @@ a measured free window (and see SHORTFALLS 1b — that band's datum is wrong tod
 """
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 
@@ -58,8 +62,49 @@ def concealment_mask(grid: Grid, start: Coordinate, radius_m: float | None) -> n
     return mask
 
 
+def under_canopy_ceiling(chm: np.ndarray, policy: AltitudePolicy) -> np.ndarray:
+    """Highest AGL that stays under the crowns: the canopy top less its clearance,
+    and — with ``policy.crown_ratio`` — under the crown BASE less its clearance.
+
+    🔴 Why (2026-09-25, Askola measured zone): with the canopy-top ceiling alone
+    the route flew 10.5-12 m AGL in a 15 m stand that is 57 % spruce, 24 % pine
+    and 18 % broadleaf by stems (Metsäkeskus strata). Every one of those trees
+    has live crown at that height unless its crown ratio is under ~0.25 — so the
+    "below canopy" leg ran through the crown layer, where the obstacles are
+    branches metres wide, not 0.15 m trunks, and which no simulator here models.
+    ``min_canopy_m`` was always a stand-in for crown base; this states it.
+    """
+    ceil = np.asarray(chm, dtype=np.float64) - policy.canopy_clearance_m
+    if policy.crown_ratio is not None:
+        base = np.asarray(chm, dtype=np.float64) * (1.0 - policy.crown_ratio)
+        ceil = np.minimum(ceil, base - policy.crown_clearance_m)
+    return ceil
+
+
+OVER_HEADROOM_M = 40.0
+"""How far above its preferred height an over-canopy / open-ground leg may be held
+(to bridge a short gap without diving into it)."""
+
+
+def skim_canopy(chm: np.ndarray, policy: AltitudePolicy, cell_size_m: float) -> np.ndarray:
+    """Tallest canopy within ``policy.skim_lookahead_m`` of each cell — the surface an
+    over-canopy leg clears (``AltitudePolicy.skim_lookahead_m``)."""
+    from scipy.ndimage import maximum_filter
+
+    if policy.skim_lookahead_m <= 0.0:
+        return np.asarray(chm)
+    radius = max(1, math.ceil(policy.skim_lookahead_m / max(cell_size_m, 1e-6)))
+    out: np.ndarray = maximum_filter(np.asarray(chm, dtype=np.float32), size=2 * radius + 1)
+    return out
+
+
 def _band_from_canopy(
-    chm_m: float, target_agl_m: float, policy: AltitudePolicy, *, covered: bool = True
+    chm_m: float,
+    target_agl_m: float,
+    policy: AltitudePolicy,
+    *,
+    covered: bool = True,
+    skim_m: float | None = None,
 ) -> tuple[float, float, float, FlightBand]:
     """``(preferred, floor, ceil, band)`` AGL for one cell, from its canopy height.
 
@@ -73,7 +118,7 @@ def _band_from_canopy(
     # Outside the concealment zone there is no reason to be among the stems:
     # going over is faster (no clutter speed limit) and needs no avoidance.
     if covered and chm_m >= policy.min_canopy_m:
-        ceil = chm_m - policy.canopy_clearance_m
+        ceil = float(under_canopy_ceiling(np.asarray(chm_m), policy))
         if ceil >= floor:  # room to get under it and still clear the ground
             return min(target, ceil), floor, ceil, FlightBand.BELOW_CANOPY
 
@@ -81,10 +126,14 @@ def _band_from_canopy(
     # The vegetation raises the *floor* here — leaving it at ``min_agl_m`` let the
     # altitude smoother pick a height inside the crowns of a stand it had already
     # decided not to enter.
-    over_floor = max(floor, chm_m + policy.canopy_clearance_m)
+    over_floor = max(floor, (chm_m if skim_m is None else skim_m) + policy.canopy_clearance_m)
     pref = max(target, over_floor)
     band = FlightBand.CANOPY_TOP if pref > target else FlightBand.OPEN
-    return pref, over_floor, pref, band
+    # No crowns above: the ceiling is headroom, not physics. 🔴 It was ``pref``, so a
+    # 24 m clearing between two skimmed 25 m stands pinned the aircraft to 12 m and
+    # demanded a dive-and-climb of ~15 m each way on 24 m legs at cruise (Askola,
+    # 2026-09-25: 8 climb violations). The smoother still pulls toward ``pref``.
+    return pref, over_floor, pref + OVER_HEADROOM_M, band
 
 
 def altitude_band_at(
@@ -95,6 +144,7 @@ def altitude_band_at(
     policy: AltitudePolicy,
     flyability: FlyabilityField | None = None,
     covered: np.ndarray | None = None,
+    skim: np.ndarray | None = None,
 ) -> tuple[float, float, float, FlightBand]:
     """Return ``(preferred, floor, ceil, band)`` altitude AGL for one cell.
 
@@ -109,7 +159,13 @@ def altitude_band_at(
             floor = float(flyability.nav_floor_m[rc])
             pref = float(flyability.max_flyable_altitude_m[rc])
             return min(max(pref, floor), ceil), floor, ceil, FlightBand.UPPER_TRUNK
-    return _band_from_canopy(float(chm[rc]), target_agl_m, policy, covered=in_zone)
+    return _band_from_canopy(
+        float(chm[rc]),
+        target_agl_m,
+        policy,
+        covered=in_zone,
+        skim_m=None if skim is None else float(skim[rc]),
+    )
 
 
 def planned_flight_agl(
@@ -118,6 +174,7 @@ def planned_flight_agl(
     policy: AltitudePolicy,
     flyability: FlyabilityField | None = None,
     covered: np.ndarray | None = None,
+    skim: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-cell height AGL the planner would fly — :func:`altitude_band_at`, rastered.
 
@@ -127,13 +184,13 @@ def planned_flight_agl(
     """
     floor = policy.min_agl_m
     target = max(target_agl_m, floor)
-    ceil = chm - policy.canopy_clearance_m
+    ceil = under_canopy_ceiling(chm, policy)
     enterable = (chm >= policy.min_canopy_m) & (ceil >= floor)
     zone = np.ones(chm.shape, dtype=bool) if covered is None else covered
     enterable = enterable & zone
 
     under_alt = np.minimum(target, ceil)
-    over_alt = np.maximum(target, chm + policy.canopy_clearance_m)
+    over_alt = np.maximum(target, (chm if skim is None else skim) + policy.canopy_clearance_m)
     agl = np.where(enterable, under_alt, over_alt)
     if flyability is not None:
         banded = np.minimum(
@@ -150,6 +207,7 @@ def band_raster(
     policy: AltitudePolicy,
     flyability: FlyabilityField | None = None,
     covered: np.ndarray | None = None,
+    skim: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-cell :class:`FlightBand` as an int code, for reporting and viz.
 
@@ -159,11 +217,11 @@ def band_raster(
     zone = np.ones(chm.shape, dtype=bool) if covered is None else covered
     enterable = (
         (chm >= policy.min_canopy_m)
-        & ((chm - policy.canopy_clearance_m) >= policy.min_agl_m)
+        & (under_canopy_ceiling(chm, policy) >= policy.min_agl_m)
         & zone
     )
     # "Skim" means the canopy is what sets the altitude, not the target.
-    skimming = ~enterable & ((chm + policy.canopy_clearance_m) > target)
+    skimming = ~enterable & (((chm if skim is None else skim) + policy.canopy_clearance_m) > target)
     codes = np.where(enterable, 2, np.where(skimming, 1, 0)).astype(np.int32)
     if flyability is not None:
         codes = np.where((flyability.nav_ceil_m > 0.0) & zone, 3, codes).astype(np.int32)

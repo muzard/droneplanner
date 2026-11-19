@@ -141,6 +141,7 @@ def _build_forest(
     max_stems: int,
     trunk_radius_m: float,
     radius_m: float | None = None,
+    stand_data: Path | None = None,
 ) -> str:
     """Generate trunks along the plan's route and write the perception manifest.
 
@@ -173,6 +174,19 @@ def _build_forest(
         crs=dsm_raster.crs,
     )
     chm = canopy_height(dtm_raster.data, dsm_raster.data)  # type: ignore[attr-defined]
+    density = None
+    if stand_data is not None:
+        # The density the planner prices on: measured stems/ha where a stand covers
+        # a treed cell, the canopy-height relation elsewhere (fields/stem_density).
+        from droneplanner.fields.stem_density import build_stem_clutter
+        from droneplanner.io.stand_data import stand_density_raster
+
+        density = build_stem_clutter(
+            chm,
+            cruise_speed_ms=6.0,
+            min_canopy_m=12.0,
+            measured_per_ha=stand_density_raster(stand_data, grid),
+        )["stem_density_per_ha"]
 
     items = json.loads(plan.read_text())["mission"]["items"]
     to_crs = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
@@ -201,6 +215,7 @@ def _build_forest(
         trunk_radius_m=trunk_radius_m,
         max_stems=max_stems,
         within_m=radius_m,
+        density_per_ha=density,
     )
 
     manifest = out.parent / f"{out.stem}_trunks.csv"
@@ -293,6 +308,15 @@ def gz_world(
             "droneflight's perception is 2D (it would dodge trunks far beneath it)."
         ),
     ),
+    stand_data: Path | None = typer.Option(
+        None,
+        "--stand-data",
+        help=(
+            "Metsäkeskus stand GeoPackage: place trunks at each cell's own density "
+            "(measured where a stand covers it, canopy-height relation elsewhere) "
+            "instead of the uniform --stems-per-ha — the forest the plan was priced on."
+        ),
+    ),
 ) -> None:
     """Generate a Gazebo world whose heightmap is the planned terrain.
 
@@ -363,6 +387,7 @@ def gz_world(
             max_stems=max_stems,
             trunk_radius_m=trunk_radius_m,
             radius_m=forest_radius_m,
+            stand_data=stand_data,
         )
 
     out.write_text(

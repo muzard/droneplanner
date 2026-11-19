@@ -16,9 +16,9 @@ import numpy as np
 
 from droneplanner.crossings.roads import rasterize_roads
 from droneplanner.fields.stems import StemMap, load_stem_manifest
-from droneplanner.forest.navigability import FlyabilityConfig, FlyabilityField, build_flyability
+from droneplanner.forest.fine import build_flyability_fine
+from droneplanner.forest.navigability import FlyabilityConfig, FlyabilityField
 from droneplanner.forest.stem_detect import detect_stems
-from droneplanner.forest.voxelize import voxelize
 from droneplanner.io.mavlink import write_plan
 from droneplanner.io.mission import load_mission
 from droneplanner.io.pointcloud import read_pointcloud
@@ -91,18 +91,15 @@ def _load_flyability(mission: Mission, grid: Grid, dtm: np.ndarray) -> Flyabilit
     pc = read_pointcloud(mission.layers.point_cloud)
     if pc.count == 0:
         return None
-    z = pc.xyz[:, 2]
-    voxels = voxelize(
+    # Fine voxels, aggregated to the corridor grid: voxelizing on the corridor
+    # grid itself fills a 25 m column at every trunk height from one trunk and
+    # makes the whole forest an obstacle (forest/fine.py, SHORTFALLS item 2).
+    return build_flyability_fine(
         pc.xyz,
         grid,
-        z_min=float(z.min()),
-        z_max=float(z.max()) + VOXEL_SIZE_Z,
-        voxel_size_z=VOXEL_SIZE_Z,
-    )
-    return build_flyability(
-        voxels,
+        dtm,
         FlyabilityConfig.from_drone(mission.drone),
-        ground_level=voxels.ground_level(dtm),
+        voxel_size_z=VOXEL_SIZE_Z,
     )
 
 

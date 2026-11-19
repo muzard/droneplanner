@@ -23,10 +23,12 @@ import numpy as np
 import rasterio
 import yaml
 
+from droneplanner.model.geometry import Coordinate
 from droneplanner.model.grid import Grid
 from droneplanner.model.mission import Mission
-from droneplanner.planner.corridor import plan_over_terrain
+from droneplanner.planner.corridor import plan_over_terrain, point_scorer
 from droneplanner.planner.endurance import model_from_mission
+from droneplanner.planner.ground_points import CREW_TARGET_SPAN_M, score_ground_points
 from droneplanner.planner.relay import (
     balance_legs,
     legs_required_for_endurance,
@@ -116,24 +118,33 @@ def main() -> int:
                 f"{e.effective_speed_ms:>9.2f}{e.speed_capped_legs:>8}"
             )
 
-        # A relay point is a place a person has to stand. Score that ground with
-        # the same field the cable is scored on: ground_los is "can an observer
-        # see this surface point", which is exactly the question for a ground site.
+        # A relay point is a place a person has to stand. Score a standing person
+        # there with the same adversary the route was planned against
+        # (planner/ground_points.py): detection-weighted and line of sight only.
+        # The old column read the ground_los RASTER, which scores the DSM surface —
+        # the top of the scrub, not the person standing in it.
         if rp.relay_indices:
-            ground_los = surface.components["ground_los"]
             exposure = surface.components["exposure"]
+            score = point_scorer(mission, surface)
+            sites = [Coordinate(x=pts[i][0], y=pts[i][1]) for i in rp.relay_indices]
+            crew = score_ground_points(
+                sites, dtm, grid, lambda p, det, f=score: f(p, CREW_TARGET_SPAN_M, det)
+            )
             print(f"\n  relay points ({len(rp.relay_indices)}):")
-            print(f"  {'#':>3}{'x':>12}{'y':>12}{'along':>9}{'grnd LOS':>10}{'drone exp':>11}")
+            print(
+                f"  {'#':>3}{'x':>12}{'y':>12}{'along':>9}"
+                f"{'crew exp':>10}{'crew LOS':>10}{'drone exp':>11}"
+            )
             cum = np.concatenate(
                 [[0.0], np.cumsum([math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1)])]
             )
-            for k, idx in enumerate(rp.relay_indices, 1):
-                from droneplanner.model.geometry import Coordinate
-
-                rc = grid.world_to_pixel(Coordinate(x=pts[idx][0], y=pts[idx][1]))
+            for k, (idx, site, (ce, cl)) in enumerate(
+                zip(rp.relay_indices, sites, crew, strict=True), 1
+            ):
+                rc = grid.world_to_pixel(site)
                 print(
                     f"  {k:>3}{pts[idx][0]:>12.0f}{pts[idx][1]:>12.0f}{cum[idx]:>9.0f}"
-                    f"{float(ground_los[rc]):>10.3f}{float(exposure[rc]):>11.3f}"
+                    f"{ce:>10.3f}{cl:>10.3f}{float(exposure[rc]):>11.3f}"
                 )
 
         print("\n  what a bigger battery buys instead:")
