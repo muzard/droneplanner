@@ -150,3 +150,20 @@ def test_spacing_reports_the_gap_the_airframe_has_to_fly_through() -> None:
     sparse, _ = _generate(stems_per_ha=100.0)
     assert nearest_trunk_spacing_m(dense) < nearest_trunk_spacing_m(sparse)
     assert nearest_trunk_spacing_m([]) == float("inf")
+
+
+def test_per_cell_density_places_the_measured_forest() -> None:
+    """Stand data: each cell gets its own density, so the world carries the forest
+    the plan was priced on — dense stand on one side of the route, sparse on the other."""
+    density = np.zeros((SIZE, SIZE), dtype=np.float32)
+    density[:, :20] = 800.0
+    density[:, 20:] = 100.0
+    trunks, stats = _generate(density_per_ha=density)
+    grid = _grid()
+    west = sum(
+        1 for t in trunks if grid.world_to_pixel(Coordinate(x=t.east_m, y=t.north_m))[1] < 20
+    )
+    east = len(trunks) - west
+    assert west > 5 * east  # 8x expected, Poisson noise aside
+    assert 400.0 < stats.requested_stems_per_ha < 500.0  # the band's mean of 800 and 100
+    assert not stats.subsampled

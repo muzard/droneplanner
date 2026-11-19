@@ -18,16 +18,24 @@ unpublished design notes and are not part of this repository.
 - **The resulting mission closes:** `demo_ao/mission_mvp.yaml` is 5180 m with 1166 m below the canopy and a planned **19.0 min** (energy 0.82 of usable), which gives REVIEW.
 - **Flown GPS-denied in PX4 SITL + Gazebo** with [droneflight](https://github.com/muzard/droneflight) (RUNBOOK §4.14): 200 stems/ha, **0 tree strikes, 18.6 min**.
 
+**On a real Finnish AO the zone is much smaller (Askola, 2026-09-25/26).** `tools/build_finnish_ao.py` builds an AO from open data: MML 10 m terrain, Metsäkeskus 1 m canopy model and measured stand polygons, plus MML roads.
+- **One battery buys ~300–450 m of below-canopy flight** on Askola's measured stands (~1000–1200 stems/ha in the zone). The largest concealment zone that closes is **300 m** on the measured block and **400 m** from the original start. The 1500 m MVP zone is NO-GO there.
+- **Flown GPS-denied in SITL over real MML terrain:** the measured 300 m zone (1702 trunks, forest legs at 0.5 m/s) is **clean on 4/4 seed sets**, 21.2–21.5 min against 20.9 planned. The 600 m zone also flew 4/4 clean, but at 23.3 of 24 usable minutes; the planner now prices it NO-GO (energy 1.06).
+- **In spruce-heavy managed forest the trunk space is a ~5–7 m band** under the crown base (`AltitudePolicy.crown_ratio`, opt-in). Flying it needs a 4 m floor, which rests on understory data the stand inventory does not have.
+- **Where the fiber lands is a concept-level problem.** Flying over the canopy outside the zone leaves the fiber on the crowns: 58 % of the demo MVP route, 1322 m of Askola's 600 m route. `weights.cable_on_crowns` (opt-in) cuts Askola's figure by 84 % for +2.5 % route length.
+- **Unpassable stands are flown over, and the operator is told first** (`over_canopy_when_unpassable`, default on): every planned climb is listed in the report, led by any within 200 m of launch.
+
 **Limits:**
 - The forests are synthetic.
-- Stem densities come from forestry literature, not a survey. The demo canopy implies 520–1290 stems/ha, beyond the 400 stems/ha the 1500 m zone was sized for.
+- On the demo AO, stem densities come from forestry literature (refitted to Askola's measured stands). The demo canopy implies 520–1290 stems/ha, beyond the 400 stems/ha the 1500 m zone was sized for. On Askola they come from the Metsäkeskus inventory, which is derived (roughly ±30 % on stem count) and misses most state and company forest.
+- The Gazebo forests are generated from that data, not surveyed: trunks are bare cylinders with no crowns or understory.
 - The endurance model is calibrated on a single flown log.
 - In simulation, obstacle sensing is an oracle fed from the world's trunk positions, and GPS-denied navigation is ground truth plus injected error.
 - No real lidar has been ingested.
 
 See [SHORTFALLS.md](SHORTFALLS.md).
 
-## Status — M0–M2 and kinematic feasibility, plus the one-sortie MVP mission (2026-09-23)
+## Status — M0–M2, kinematic feasibility, the one-sortie MVP mission, and the first real AO (2026-09-26)
 
 `droneplanner plan` runs end-to-end. Given a DTM+DSM it plans a **concealment-
 and defilade-aware route** (in-house viewshed + terrain TPI/slope/drainage +
@@ -72,6 +80,8 @@ live — the fastest way to build intuition for the cost function.
 | **M2** | `forest/` voxel flyability (2.5D navigability + non-navigable mask + altitude band) | ✅ |
 | **Kinematics** | turn-radius filleting + climb-limited altitude + reversal flagging | ✅ this repo |
 | **MVP mission** | covered-radius concealment zone, onboard-planner speed envelope, per-leg speed in the `.plan`, stem-map routing, relay-leg costing | ✅ 2026-09-23 (see Results) |
+| **Real AO** | Finnish open data (`tools/build_finnish_ao.py`, `layers.stand_data`, `canopy_gaps`, `canopy_gap_fraction`, MML roads), over-canopy fallback with launch-climb briefing, opt-in crown base (`crown_ratio`) and crown transmission | ✅ 2026-09-26 (Askola, flown in SITL) |
+| **C7 laydown (minimal)** | `laydown/settle.py`: fiber in trunk space / on crowns / on open ground, `cable_on_crowns` warning and opt-in weight | ✅ 2026-09-25 (no settle physics) |
 | M2 (3D) | OMPL BIT\*/RRT\* refinement (full 3D kinodynamic) | ⏳ see SHORTFALLS.md |
 | M3 | laydown + k-diverse survivability routing | later |
 | M4 | PX4 SITL validation (flown from [droneflight](https://github.com/muzard/droneflight), RUNBOOK §4.12–4.14) | ✅ in simulation |
@@ -82,7 +92,9 @@ live — the fastest way to build intuition for the cost function.
 > datum was fixed the same day. Still open: land cover is not wired, the forest
 > is voxelized at corridor resolution rather than 0.25–0.5 m, below-canopy flight
 > assumes onboard obstacle avoidance that exists only against an oracle sensor in
-> simulation, and there is no real-AO validation — see
+> simulation, no real lidar tile has been ingested, and real-AO validation is
+> partial (Askola is built from open data, but nothing has been checked in the
+> field) — see
 > [SHORTFALLS.md](SHORTFALLS.md) for the prioritized list. (Threat sectors landed
 > 2026-08-15; `threat.sectors` in the mission YAML now shapes the route.)
 
@@ -187,6 +199,29 @@ The two visibility layers are **not** in the same currency and must not be compa
 `exposure` is the drone, weighted by crown occlusion and detection range;
 `ground_los` is plain line of sight to the surface the cable lies on, with no
 detection model, because a 0.28 mm fiber is not optically resolvable at any range.
+
+### A real Finnish AO from open data
+
+```bash
+python tools/build_finnish_ao.py --bounds 412968 6707620 417464 6712116 \
+    --chm data/metsakeskus/latvusmalli/*.tif --out data/askola_ao
+```
+
+Writes `dtm.tif`, `chm.tif`, `dsm.tif`, `gaps.tif` and `roads.gpkg` in EPSG:3067 on
+a 16 m grid. Downloads go under `data/`, which is gitignored, so the Askola
+missions are not in the repository. Sources, all CC BY 4.0:
+
+- Terrain and roads: © National Land Survey of Finland (MML), 10 m elevation
+  model and the topographic database, read through the CSC/Funet mirror.
+- Canopy height model (*Latvusmalli*) and stand data (*Metsävarakuviot*):
+  © Finnish Forest Centre (Metsäkeskus).
+
+Mission keys this path adds: `layers.stand_data`, `layers.canopy_gaps`,
+`layers.canopy_gap_fraction`, `AltitudePolicy.crown_ratio` and
+`over_canopy_when_unpassable`, `threat.canopy_occlusion.crown_transmission`, and
+`weights.cable_on_crowns`. Everything that moves historical results is opt-in;
+see the field descriptions in `model/mission.py` and the Askola sections of
+`CLAUDE.md`.
 
 ## Design invariants (do not regress)
 

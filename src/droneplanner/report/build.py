@@ -18,9 +18,12 @@ reach GO. This keeps the human in the loop.
 
 from __future__ import annotations
 
+import itertools
+import math
 from datetime import datetime
 
 from droneplanner.fields.sectors import describe_threat_sectors
+from droneplanner.fields.stem_density import ONBOARD_PLANNING_ENVELOPE
 from droneplanner.model.mission import Mission
 from droneplanner.model.plan import CrossingMethod, FlightBand, FlyabilityClass, Plan
 from droneplanner.model.report import (
@@ -31,6 +34,7 @@ from droneplanner.model.report import (
     SegmentReport,
     Severity,
 )
+from droneplanner.planner.corridor import OPENING_SEARCH_M
 
 
 def _decide(findings: list[Finding]) -> Recommendation:
@@ -40,6 +44,17 @@ def _decide(findings: list[Finding]) -> Recommendation:
     if Severity.WARNING in severities:
         return Recommendation.REVIEW
     return Recommendation.GO
+
+
+ESCAPE_AFTER_S = 20.0
+ESCAPE_HOLD_M = 50.0
+"""Mirrors of droneflight ``LocalOffboardConfig.escape_after_s`` / ``escape_hold_m``
+— the report describes the onboard policy the plan will be flown under."""
+
+LAUNCH_CLIMB_M = 200.0
+"""A canopy climb starting this close to launch is called out first in the report:
+the aircraft would rise to canopy height right after take-off, over its own
+launch site (user, 2026-09-25: "so no surprises happen")."""
 
 
 def build_report(
@@ -118,9 +133,20 @@ def build_report(
         for s in plan.segments
         if s.flight_band in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
     ]
-    below_canopy_length = sum(s.length_m for s in below_canopy)
-    if below_canopy:
-        lidar_verified = all(s.flight_band is FlightBand.UPPER_TRUNK for s in below_canopy)
+    # Length from the VERTICES — where the aircraft actually flies. Segment bands
+    # take a segment's least concealed cell, so once stands are flown over
+    # (over_canopy_when_unpassable, padded by a cell) a segment merely touching one
+    # read as "over" and Askola's 400 m plan reported 0 m under the canopy with 19
+    # vertices under it (2026-09-25).
+    under_bands = (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+    below_canopy_length = sum(
+        math.dist((a.x, a.y), (b.x, b.y))
+        for a, b in itertools.pairwise(plan.vertices)
+        if a.flight_band in under_bands and b.flight_band in under_bands
+    )
+    under_vertices = [v for v in plan.vertices if v.flight_band in under_bands]
+    if below_canopy_length > 0.0 or below_canopy:
+        lidar_verified = all(v.flight_band is FlightBand.UPPER_TRUNK for v in under_vertices)
         findings.append(
             Finding(
                 severity=Severity.WARNING,
@@ -476,6 +502,13 @@ def build_report(
     # canopy height model — not a stem inventory, which this program has never
     # ingested. It is stated next to the verdict it produces, not buried.
     if end is not None and end.speed_capped_legs > 0:
+        measured_m = float(plan.objective_scores.get("below_canopy_density_measured_m", 0.0))
+        measured_note = (
+            f"{measured_m:.0f} m of below-canopy flight is priced from MEASURED stand "
+            "data (layers.stand_data, Metsäkeskus stemcount). "
+            if measured_m > 0.0
+            else ""
+        )
         findings.append(
             Finding(
                 severity=Severity.WARNING,
@@ -483,10 +516,11 @@ def build_report(
                 message=(
                     f"{end.speed_capped_legs} leg(s) are slowed below cruise by stem density, "
                     f"giving an effective {end.effective_speed_ms:.2f} m/s against a "
-                    f"{plan.vertices[0].speed_hint_ms:.2f} m/s airframe cruise, at the speeds "
-                    "the onboard local planner flew clean in the harness. Unless the "
-                    "mission states stem.density_per_ha, density is inferred from canopy "
-                    "height by a self-thinning relation (fields/stem_density.py), NOT "
+                    f"{mission.drone.cruise_speed_ms:.2f} m/s airframe cruise, at the speeds "
+                    "the onboard local planner flew clean in the harness. "
+                    f"{measured_note}Unless the "
+                    "mission states stem.density_per_ha, density elsewhere is inferred from "
+                    "canopy height by a self-thinning relation (fields/stem_density.py), NOT "
                     "measured; the ordering (taller stands are sparser) is more "
                     "trustworthy than the absolute density"
                 ),
@@ -501,11 +535,161 @@ def build_report(
                 code="stem_density_beyond_envelope",
                 message=(
                     f"{beyond_m:.0f} m of the route is flown below the canopy through stands "
-                    "denser than the onboard planner has been shown to fly (400 stems/ha, "
-                    "fields/stem_density.ONBOARD_PLANNING_ENVELOPE — at 800 it stalls or "
-                    "strikes at every speed tried). The flight time charged there is an "
-                    "extrapolation. Shrink the concealment zone (covered_radius_m), route "
-                    "round the stand, or state a measured density (stem.density_per_ha)"
+                    "denser than the onboard planner has been shown to fly "
+                    f"({ONBOARD_PLANNING_ENVELOPE[-1][0]:.0f} stems/ha at "
+                    f"{ONBOARD_PLANNING_ENVELOPE[-1][1]:.1f} m/s, "
+                    "fields/stem_density.ONBOARD_PLANNING_ENVELOPE). The flight time charged "
+                    "there is an extrapolation. Shrink the concealment zone "
+                    "(covered_radius_m), route round the stand, or state a measured density "
+                    "(stem.density_per_ha, layers.stand_data)"
+                ),
+            )
+        )
+
+    climbs = plan.canopy_climbs
+    if climbs:
+        why = {
+            "dense_stand": "stand denser than the onboard envelope",
+            "crowns_too_low": "crowns reach the floor, no trunk space",
+            "stand_too_short": "stand too short to fly under",
+        }
+        first = climbs[0]
+        lead = ""
+        if first.start_m <= LAUNCH_CLIMB_M:
+            lead = (
+                f"FIRST CLIMB {first.start_m:.0f} m FROM LAUNCH: the aircraft rises to "
+                f"{first.max_agl_m:.0f} m AGL over {first.max_canopy_m:.0f} m canopy almost "
+                "immediately after take-off, which exposes the launch site. "
+            )
+        listed = "; ".join(
+            f"{c.start_m:.0f} m from launch, {c.length_m:.0f} m long, up to "
+            f"{c.max_agl_m:.0f} m AGL ({why.get(c.reason, c.reason)})"
+            for c in climbs[:6]
+        )
+        more = (
+            f"; and {len(climbs) - 6} more (report.json canopy_climbs)" if len(climbs) > 6 else ""
+        )
+        total = sum(c.length_m for c in climbs)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="canopy_climb_in_zone",
+                message=(
+                    f"{lead}Inside the concealment zone the route leaves cover and flies over "
+                    f"the canopy {len(climbs)} time(s), {total:.0f} m in all: {listed}{more}. "
+                    "Where flying under is unpassable the planner goes over rather than "
+                    "through (AltitudePolicy.over_canopy_when_unpassable); exposure there is "
+                    "costed at the over-canopy altitude. To avoid a climb, move the launch "
+                    "site, shrink covered_radius_m, or route round the stand."
+                ),
+            )
+        )
+
+    unopened = int(plan.objective_scores.get("canopy_transitions_without_opening", 0.0))
+    if unopened:
+        at = plan.objective_scores.get("canopy_transition_no_opening_first_m", 0.0)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="canopy_transition_no_opening",
+                message=(
+                    f"{unopened} climb(s) out of or descent(s) into the canopy have no "
+                    f"canopy opening within {OPENING_SEARCH_M:.0f} m of route (first at "
+                    f"{at:.0f} m from launch): the aircraft would have to push through "
+                    "closed crowns there. Openings come from layers.canopy_gaps (the 1 m "
+                    "canopy model's open columns) or open ground. Re-route, move the "
+                    "concealment zone, or accept the risk."
+                ),
+            )
+        )
+
+    crowns = plan.objective_scores.get("cable_on_crowns_m", 0.0)
+    if crowns > 0.0:
+        zone_crowns = plan.objective_scores.get("cable_on_crowns_in_zone_m", 0.0)
+        trunk = plan.objective_scores.get("cable_in_trunk_space_m", 0.0)
+        ground = plan.objective_scores.get("cable_on_ground_m", 0.0)
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="cable_on_crowns",
+                message=(
+                    f"{crowns:.0f} m of fiber is laid OVER treed canopy with no opening to "
+                    f"fall through ({zone_crowns:.0f} m of it inside the concealment zone): "
+                    "it settles on the crowns, not the ground — wind-exposed, abrading on "
+                    "branches as payout continues (snag is the tether's real break "
+                    "mechanism) and easy to cut. The rest: "
+                    f"{trunk:.0f} m dropped through trunk space, {ground:.0f} m on open "
+                    f"ground; it hangs off a crown edge into a stand at "
+                    f"{plan.objective_scores.get('cable_crown_hangs', 0.0):.0f} place(s) "
+                    "(snag points). Bounded model (laydown/settle.py, roadmap C7): the crown "
+                    "length is what certainly does not reach the ground, not a calibrated "
+                    "prediction."
+                ),
+            )
+        )
+
+    esc = plan.objective_scores.get("escape_max_agl_m")
+    if esc is not None:
+        esc_from = plan.objective_scores.get("escape_first_m", 0.0)
+        span = plan.objective_scores.get("escape_exposed_length_m", 0.0)
+        likely = plan.objective_scores.get("escape_likely_length_m", 0.0)
+        where = (
+            f" {likely:.0f} m of that runs through stands denser than 1000 stems/ha, "
+            "where SITL hit a genuine dead end on one traverse in eight — be ready for one."
+            if likely > 0.0
+            else ""
+        )
+        findings.append(
+            Finding(
+                severity=Severity.INFO,
+                code="escape_climb_policy",
+                message=(
+                    f"In flight, if the aircraft is blocked under the canopy for "
+                    f"{ESCAPE_AFTER_S:.0f} s it climbs STRAIGHT UP over the trees "
+                    f"(droneflight fly-local --escape-after), holds that height for "
+                    f"{ESCAPE_HOLD_M:.0f} m of route, then descends. On this route that can "
+                    f"happen anywhere along the {span:.0f} m flown under the canopy, from "
+                    f"{esc_from:.0f} m after launch, and would take it up to {esc:.0f} m AGL "
+                    "(tallest nearby canopy + 3 m) — visible above the crowns."
+                    + where
+                    + " Turn it off with --escape-after 0 to stop and report instead."
+                ),
+            )
+        )
+
+    hidden_eyes = int(plan.objective_scores.get("observers_in_vegetation", 0.0))
+    if hidden_eyes:
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="observers_in_vegetation",
+                message=(
+                    f"{hidden_eyes} observer(s) stand in vegetation taller than their eye "
+                    f"({mission.threat.observer_height_m:.0f} m). Under crown transmission the "
+                    "eye is on the ground and looks out THROUGH it, so these observers see "
+                    "little (demo AO: exposed cells 1335 -> 6 — its observers stand inside "
+                    "15-18 m stands, where the old model put their eye on the crowns). A real "
+                    "observer picks a vantage point (threat.canopy_occlusion.observer_vantage_m) — "
+                    "place observers where they would actually stand to look."
+                ),
+            )
+        )
+
+    in_crowns = plan.objective_scores.get("below_canopy_in_crown_layer_m", 0.0)
+    if in_crowns > 0.0 and mission.altitude.crown_ratio is None:
+        default_ratio = mission.threat.canopy_occlusion.trunk_space_crown_ratio
+        findings.append(
+            Finding(
+                severity=Severity.WARNING,
+                code="flight_in_crown_layer",
+                message=(
+                    f"{in_crowns:.0f} m of below-canopy flight is planned above the estimated "
+                    f"crown base (canopy x {1.0 - default_ratio:.2f}) — inside live crowns: "
+                    "branches the SITL trunks "
+                    "do not have, and only part of the crown overhead for cover (Askola: 12 m "
+                    "AGL exceeded the 0.15 exposure cap against a close airborne sensor on "
+                    "2 of 12 bearings; under the crown base it passed all 12). Set "
+                    "altitude.crown_ratio to fly under the crown base."
                 ),
             )
         )
@@ -562,6 +746,7 @@ def build_report(
         below_canopy_length_m=below_canopy_length,
         corridor_half_width_min_m=corridor_min,
         corridor_half_width_median_m=corridor_median,
+        canopy_climbs=plan.canopy_climbs,
         threat_sectors=threat_sectors,
         non_navigable_count=len(non_navigable),
         marginal_count=len(marginal),
