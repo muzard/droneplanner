@@ -1,5 +1,6 @@
 {
   "below_canopy_length_m": 0.0,
+  "canopy_climbs": [],
   "corridor_half_width_median_m": 0.0,
   "corridor_half_width_min_m": 0.0,
   "crossings": [],

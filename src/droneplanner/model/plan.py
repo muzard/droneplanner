@@ -268,6 +268,28 @@ class EnduranceBudget(BaseModel):
         return self.endurance_s is not None and self.energy_time_s > self.endurance_s
 
 
+class CanopyClimb(BaseModel):
+    """A stretch inside the concealment zone flown OVER the canopy, not under it.
+
+    The operator must know these before launch: the aircraft leaves cover and
+    climbs to canopy height there, and a climb in the first few hundred metres
+    exposes the launch site itself."""
+
+    model_config = ConfigDict(frozen=True)
+
+    start_m: float = Field(ge=0, description="Along-route distance from launch.")
+    length_m: float = Field(ge=0)
+    max_agl_m: float = Field(description="Highest planned AGL in the stretch.")
+    max_canopy_m: float = Field(ge=0, description="Tallest canopy under the stretch.")
+    reason: str = Field(
+        description=(
+            "'dense_stand' (denser than the onboard envelope), 'crowns_too_low' "
+            "(crown base leaves no trunk space above the floor, AltitudePolicy.crown_ratio) "
+            "or 'stand_too_short' (below AltitudePolicy.min_canopy_m, or no room under it)."
+        )
+    )
+
+
 class Plan(BaseModel):
     """A single planned route (one of ``k`` for redundancy)."""
 
@@ -285,6 +307,7 @@ class Plan(BaseModel):
     objective_scores: dict[str, float] = Field(default_factory=dict)
     kinematics: KinematicReport | None = None
     endurance: EnduranceBudget | None = None
+    canopy_climbs: tuple[CanopyClimb, ...] = ()
 
     @property
     def start(self) -> Coordinate:
@@ -293,3 +316,29 @@ class Plan(BaseModel):
     @property
     def end(self) -> Coordinate:
         return self.vertices[-1].coordinate
+
+
+SPEED_STEP_MS = 0.5
+"""Commanded leg speeds are floored to this step, so a speed that wobbles by
+centimetres per second along a stand does not emit a change item at every vertex."""
+
+SLOW_SPEED_STEP_MS = 0.1
+"""Below one ``SPEED_STEP_MS`` the step is this instead."""
+
+
+def commanded_speed_ms(cap_ms: float) -> float:
+    """The speed the ``.plan`` commands for a leg whose cap is ``cap_ms`` — never
+    above the cap.
+
+    🔴 Two defects this closes (2026-09-25, Askola measured zone). The emitter
+    floored to 0.5 m/s while the endurance model charged the raw cap, so a
+    0.76 m/s leg was flown at 0.5 and charged at 0.76 (SITL: 21.3 min flown vs
+    17.5 planned). And ``max(0.5, ...)`` turned a 0.4 m/s cap (1200 stems/ha)
+    into 0.5 — faster than the planner's own limit. Both the emitter and the
+    endurance budget now call this.
+    """
+    if cap_ms >= SPEED_STEP_MS:
+        return math.floor(cap_ms / SPEED_STEP_MS + 1e-9) * SPEED_STEP_MS
+    return max(
+        SLOW_SPEED_STEP_MS, math.floor(cap_ms / SLOW_SPEED_STEP_MS + 1e-9) * SLOW_SPEED_STEP_MS
+    )

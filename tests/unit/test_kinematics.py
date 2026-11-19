@@ -155,3 +155,33 @@ def test_amsl_rates_combine_terrain_and_altitude_change() -> None:
 def test_amsl_rates_ignore_zero_length_segments() -> None:
     climb, descent = amsl_vertical_rates([0.0, 0.0], [10.0, 20.0], [0.0], cruise_speed_ms=6.0)
     assert climb == 0.0 and descent == 0.0
+
+
+def test_climb_limits_are_per_metre_at_the_speed_each_leg_is_flown() -> None:
+    """A 20 m climb over 10 m of ground is impossible at 6 m/s (3 m/s would need
+    40 m) and easy at 0.5 m/s — the leg into an over-canopy climb is flown slow."""
+    from droneplanner.planner.kinematics import KinematicLimits, smooth_altitudes
+
+    lim = KinematicLimits(
+        min_turn_radius_m=8.0, cruise_speed_ms=6.0, max_climb_rate_ms=3.0, max_descent_rate_ms=2.0
+    )
+    prefs, floors, ceils = [5.0, 25.0], [5.0, 25.0], [5.0, 25.0]
+    _, fast, _, _ = smooth_altitudes(prefs, floors, ceils, [10.0], lim)
+    _, slow, _, _ = smooth_altitudes(prefs, floors, ceils, [10.0], lim, [0.5])
+    assert fast == 1 and slow == 0
+
+
+def test_the_smoother_climbs_early_for_a_stand_it_can_see_coming() -> None:
+    """Backward pass (2026-09-25): hold height across a short clearing rather than
+    dive into it and find the next stand out of reach."""
+    from droneplanner.planner.kinematics import KinematicLimits, smooth_altitudes
+
+    lim = KinematicLimits(
+        min_turn_radius_m=8.0, cruise_speed_ms=6.0, max_climb_rate_ms=3.0, max_descent_rate_ms=2.0
+    )
+    prefs = [25.0, 12.0, 27.5]
+    floors = [25.0, 5.0, 27.5]
+    ceils = [65.0, 52.0, 67.5]  # over canopy / open ground: headroom, not a ceiling
+    alts, violations, _, _ = smooth_altitudes(prefs, floors, ceils, [24.0, 24.0], lim)
+    assert violations == 0
+    assert alts[1] >= 27.5 - 3.0 / 6.0 * 24.0 - 1e-9  # stayed high enough to make it

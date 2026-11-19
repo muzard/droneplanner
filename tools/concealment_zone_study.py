@@ -33,6 +33,21 @@ from droneplanner.planner.corridor import plan_over_terrain
 
 RADII_M: tuple[float | None, ...] = (500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0, None)
 DENSITIES: tuple[float | None, ...] = (107.0, 200.0, 400.0, None)
+SOLVE_DENSITIES: tuple[float, ...] = (
+    200.0,
+    300.0,
+    400.0,
+    500.0,
+    600.0,
+    700.0,
+    800.0,
+    900.0,
+    1000.0,
+    1200.0,
+    1500.0,
+)
+SOLVE_STEP_M = 100.0
+SOLVE_MAX_M = 5000.0
 
 
 def load_ao(ao: Path) -> tuple[dict[str, object], np.ndarray, np.ndarray, Grid]:
@@ -51,10 +66,187 @@ def load_ao(ao: Path) -> tuple[dict[str, object], np.ndarray, np.ndarray, Grid]:
     return base, dtm, dsm, grid
 
 
+def _plan(
+    ao: Path, density: float | None, radius: float | None, mission_file: str
+) -> dict[str, float]:
+    _, dtm, dsm, grid = load_ao(ao)
+    m = yaml.safe_load((ao / mission_file).read_text())
+    m["covered_radius_m"] = radius
+    stem = dict(m.get("stem", {}) or {})
+    stem["density_per_ha"] = density
+    m["stem"] = stem
+    _no_overfly(m)
+    plan, _ = plan_over_terrain(Mission.model_validate(m), dtm, dsm, grid, route_index=0)
+    end = plan.endurance
+    assert end is not None
+    return {
+        "radius": radius or 0.0,
+        "energy": end.energy_fraction,
+        "time_min": end.flight_time_s / 60.0,
+        "closes": float(end.closes),
+        "beyond": plan.objective_scores.get("below_canopy_beyond_envelope_m", 0.0),
+    }
+
+
+def _no_overfly(m: dict[str, object]) -> None:
+    """The study asks how much can be flown UNDER cover. With the over-canopy
+    fallback on, a stand beyond the envelope is flown over and every radius
+    "closes" by giving the cover up (1500 stems/ha closed the whole route)."""
+    alt = dict(m.get("altitude", {}) or {})  # type: ignore[call-overload]
+    alt["over_canopy_when_unpassable"] = False
+    m["altitude"] = alt
+
+
+def solve_as_is(
+    ao: Path, mission_file: str, workers: int | None = None, max_radius: float = SOLVE_MAX_M
+) -> None:
+    """Largest covered radius that closes, with the mission's OWN density sources
+    (stand data / canopy inference) — the answer for a real AO."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    radii = [SOLVE_STEP_M * k for k in range(1, int(max_radius / SOLVE_STEP_M) + 1)]
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        rows = list(
+            ex.map(
+                _plan_as_is,
+                [ao] * len(radii),
+                radii,
+                [mission_file] * len(radii),
+            )
+        )
+    print(f"{'radius':>8}{'energy':>8}{'time':>7}{'below':>7}{'measured':>9}{'beyond':>7}  verdict")
+    largest = None
+    for row in rows:
+        verdict = "closes" if row["closes"] else "NO-GO"
+        if row["beyond"] > 0:
+            verdict += " (beyond envelope)" if row["closes"] else ""
+        print(
+            f"{row['radius']:>8.0f}{row['energy']:>8.2f}{row['time_min']:>6.1f}m"
+            f"{row['below']:>7.0f}{row['measured']:>9.0f}{row['beyond']:>7.0f}  {verdict}"
+        )
+    for row in rows:
+        # 🔴 A radius that closes only by flying stands denser than the onboard
+        # planner has been shown to fly is NOT a closing radius: the planner calls
+        # it CRITICAL (stem_density_beyond_envelope), and the flight time charged
+        # there is an extrapolation. The first version checked energy only and
+        # returned 400 m on Askola's measured zone — a NO-GO plan.
+        if not row["closes"] or row["beyond"] > 0:
+            break
+        largest = row["radius"]
+    print(
+        f"largest radius below which every step closes: {largest:.0f} m"
+        if largest is not None
+        else "not even an uncovered route closes"
+    )
+
+
+def _plan_as_is(ao: Path, radius: float, mission_file: str) -> dict[str, float]:
+    _, dtm, dsm, grid = _load(ao, mission_file)
+    m = yaml.safe_load((ao / mission_file).read_text())
+    m["covered_radius_m"] = radius
+    _no_overfly(m)
+    plan, _ = plan_over_terrain(Mission.model_validate(m), dtm, dsm, grid, route_index=0)
+    end = plan.endurance
+    assert end is not None
+    return {
+        "radius": radius,
+        "energy": end.energy_fraction,
+        "time_min": end.flight_time_s / 60.0,
+        "closes": float(end.closes),
+        "below": float(
+            sum(
+                float(np.hypot(b.x - a.x, b.y - a.y))
+                for a, b in zip(plan.vertices, plan.vertices[1:], strict=False)
+                if a.flight_band in (FlightBand.BELOW_CANOPY, FlightBand.UPPER_TRUNK)
+            )
+        ),
+        "measured": plan.objective_scores.get("below_canopy_density_measured_m", 0.0),
+        "beyond": plan.objective_scores.get("below_canopy_beyond_envelope_m", 0.0),
+    }
+
+
+def _load(ao: Path, mission_file: str) -> tuple[dict[str, object], np.ndarray, np.ndarray, Grid]:
+    """Rasters named by the mission's own layers (a real AO keeps its data elsewhere)."""
+    m = yaml.safe_load((ao / mission_file).read_text())
+    with rasterio.open(m["layers"]["dtm"]) as ds:
+        dtm = ds.read(1).astype(np.float64)
+        t = ds.transform
+    with rasterio.open(m["layers"]["dsm"]) as ds:
+        dsm = ds.read(1).astype(np.float64)
+    grid = Grid(
+        transform=(t.a, t.b, t.c, t.d, t.e, t.f),
+        rows=dtm.shape[0],
+        cols=dtm.shape[1],
+        crs=str(m["crs"]),
+    )
+    return m, dtm, dsm, grid
+
+
+def solve(ao: Path, mission_file: str, workers: int | None = None) -> None:
+    """Largest covered radius that closes one sortie, per density.
+
+    Radii are stepped, not bisected: the route changes with the radius, so energy
+    is not guaranteed monotone, and the answer reported is the largest radius
+    below which EVERY step closes.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+
+    radii = [SOLVE_STEP_M * k for k in range(1, int(SOLVE_MAX_M / SOLVE_STEP_M) + 1)]
+    print(f"{'stems/ha':>9}{'max radius':>12}{'energy':>8}{'time':>7}  at 1500 m  envelope")
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for density in SOLVE_DENSITIES:
+            rows = list(
+                ex.map(
+                    _plan,
+                    [ao] * len(radii),
+                    [density] * len(radii),
+                    radii,
+                    [mission_file] * len(radii),
+                )
+            )
+            best = None
+            for row in rows:
+                if not row["closes"]:
+                    break
+                best = row
+            at1500 = next(r for r in rows if r["radius"] == 1500.0)
+            max_r = f"{best['radius']:.0f} m" if best else "< 100 m"
+            if best is rows[-1]:
+                max_r = "whole route"
+            energy = f"{best['energy']:.2f}" if best else "-"
+            time_min = f"{best['time_min']:.1f}m" if best else "-"
+            verdict = "closes" if at1500["closes"] else "NO-GO"
+            envelope = "extrapolated" if at1500["beyond"] > 0 else "measured"
+            print(
+                f"{density:>9.0f}{max_r:>12}{energy:>8}{time_min:>7}"
+                f"  {at1500['energy']:.2f} {verdict:>6}  {envelope}"
+            )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ao", type=Path, default=Path("demo_ao"))
+    ap.add_argument(
+        "--solve",
+        action="store_true",
+        help="Per density, find the largest covered radius that closes one sortie.",
+    )
+    ap.add_argument("--mission", default="mission.yaml", help="Mission file in the AO for --solve.")
+    ap.add_argument(
+        "--as-is",
+        action="store_true",
+        help="With --solve: sweep the radius only, keeping the mission's own density "
+        "(stand data / canopy inference) — for a real AO.",
+    )
+    ap.add_argument("--workers", type=int, default=None, help="Processes (default: all cores).")
+    ap.add_argument("--max-radius", type=float, default=SOLVE_MAX_M, help="--as-is sweep ceiling.")
     args = ap.parse_args()
+    if args.solve and args.as_is:
+        solve_as_is(args.ao, args.mission, args.workers, args.max_radius)
+        return 0
+    if args.solve:
+        solve(args.ao, args.mission, args.workers)
+        return 0
     base, dtm, dsm, grid = load_ao(args.ao)
 
     hdr = (

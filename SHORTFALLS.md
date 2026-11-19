@@ -465,13 +465,30 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
    deliberately left open (which free window gets picked is still an artifact of
    the voxel grid's vertical extent). No current route changes: the fix is on the
    lidar path, and no point cloud has ever been ingested.
-2. 🟠 **Forest voxel resolution is tied to the corridor grid**
-   (`pipeline._load_flyability`). The spec wants **0.25–0.5 m** voxels for
-   clearance near the airframe scale; we voxelize at the DTM/DSM horizontal
-   resolution (often ≥1 m) co-registered to the corridor grid. Horizontal
-   clearance is therefore coarse — **flyability can read optimistic** (a gap
-   narrower than a cell is invisible). *Fix: voxelize at fine resolution, compute
-   clearance/navigability there, then aggregate to the corridor grid.*
+2. ✅ **FIXED 2026-11-19 — forest voxels are 0.5 m, aggregated to the corridor
+   grid** (`forest/fine.py`, wired in `pipeline._load_flyability`). 🔧 **The old
+   entry had the direction wrong.** It said a gap narrower than a cell is
+   invisible so flyability "can read optimistic"; but occupancy binning marks a
+   column occupied if *any* return falls in it, so one trunk fills a 25 m column
+   at every trunk-space level and the free window collapses. Measured on
+   synthetic stands (trunks + porous crowns + ground):
+
+   | stems/ha | 25 m columns | 5 m | 1 m | 0.5 m |
+   |---|---|---|---|---|
+   | 200 | **0 % flyable (100 % NON_NAVIGABLE)** | 58 % | 89 % | 90 % |
+   | 700 | **0 % flyable (100 % NON_NAVIGABLE)** | 10 % | 64 % | 74 % |
+
+   So the first real point cloud would have turned every treed cell into a
+   Theta\* obstacle. Each occupied corridor cell is now voxelized at 0.5 m with a
+   3 m halo from its neighbours; class = share of flyable fine columns (≥ 0.5 →
+   FLYABLE, < 0.2 navigable → NON_NAVIGABLE, else MARGINAL), band/clearance =
+   medians over navigable fine columns; cells with no returns are unchanged.
+   ⚠️ **Share, not connectivity** — a cell 90 % free can still be crossed by an
+   impassable line of trunks; threading is the stem router's and the onboard
+   planner's job. ⚠️ The shares are judgement, not calibration. ⚠️ Cost:
+   ~0.04 s per occupied cell, ~0.1 s on relief (the voxel column spans the whole
+   cloud's z range) — a full Askola-size cloud (~47 k treed cells) would take
+   30-80 min. Tile or restrict to a corridor band before running one.
 3. 🟠 **Performance will not scale to a real 5 km AO.** The viewshed
    (`O(observers × perimeter × ray_len)`) and Theta\* are pure Python, sized for
    the ~120–160-cell demo. The §6.7 budget (5 km route / 25 km² / 1 m raster /
@@ -520,6 +537,51 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   adversary-favouring direction. Fixing it means choosing whether an observer
   stands on the terrain (DTM) or on the surface, per observer — a mission-contract
   question, and it moves every historical exposure figure.
+  ⚠️ **Checked 2026-09-25: it is NOT a simple eye-height toggle.** The viewshed marches
+  over the DSM and treats the canopy as a solid wall, so an eye moved down into a
+  stand would be blind to everything — including a drone flying through the same
+  stand's trunk space 50 m away, which a real dismount could see. A ground-eye
+  switch would trade an adversary-favouring bias for a friendly-favouring one. The
+  fix needs a trunk-space sightline model (stem density x distance transmittance
+  below the crown base), not a different eye elevation.
+  ✅ **Built (opt-in) 2026-09-25 for observers on OPEN ground:**
+  `CanopyOcclusion.trunk_space_sightlines` — a sightline under the crown base is
+  attenuated by trunks (exp(−n·d·L)), blocked in the crown layer, ≤ 300 m; raster and
+  flown re-score share one builder (`composite.trunk_space_for`) and a test pins them
+  equal. Measured: **zero effect on the demo MVP** (its concealed stretch has no open
+  ground within 300 m) and on Askola at 10.5-12 m AGL (that flight is in the crown
+  layer, which blocks side views); with **crown-aware flight (5-7 m) and an observer
+  on open ground 112 m away: peak exposure 0.21**, route mean 0.003. So it matters
+  exactly when flying in trunk space near an edge — enable it together with
+  `AltitudePolicy.crown_ratio`. Observers standing INSIDE a stand are still not
+  covered (their eye sits on the crowns).
+  ✅ **Closed under crown transmission (2026-09-26, opt-in, PR #4):** with
+  `CanopyOcclusion.crown_transmission` the canopy is a medium, not a wall, so the
+  eye can go where the observer stands — **`dtm + observer_height_m`**
+  (`viewshed._eye_elev`). A dismount inside a stand now sees a drone in the same
+  trunk space through the stems (exp(−n·d·L)) and a canopy-top drone up through the
+  crowns. Without crown transmission the eye stays on the DSM, for the reason above.
+  Note it moves elevated sensors too: a "300 m" sensor is now 300 m above the
+  terrain, not above the canopy (≤ ~25 m difference).
+  🟠 **Every fixture observer stands in vegetation (checked 2026-09-26).** Demo AO: inside
+  18.3 m and 15.5 m stands, no opening within 200 m. Askola: one inside a 25.2 m stand
+  (74 open cells within ~100 m), one in 3.4 m growth. They were placed with the eye on the
+  DSM, where cover underfoot did not matter; under crown transmission it does (demo AO
+  exposed cells 1335 → 6). `observer_vantage_m` (opt-in) steps them out to the nearest
+  opening, and `observers_in_vegetation` WARNs. Placing fixture observers at deliberate
+  vantage points is the prerequisite for making crown transmission the default — for the
+  demo AO it runs into the open observer-relocation decision (moving the hills).
+- 🟠 **The binary sub-canopy rule is optimistic for a drone INSIDE the crown layer
+  (found 2026-09-26).** It credits a target under its own crown with that cell's full
+  vertical gap fraction wherever the target sits — but at 12 m AGL in Askola's ~16 m
+  stands (crown base ~8 m) only ~4 m of crown is overhead. Crown transmission integrates
+  just the crown actually crossed; against a 300 m sensor 300 m out it takes the worst
+  bearing **0.120 → 0.200** and fails the 0.15 cap on 2/12 bearings, where the binary
+  model passed all 12. Crown-aware flight (under the crown base) passes everywhere (worst
+  0.059). Not fixed in the binary model: the fix *is* crown transmission (opt-in), and
+  `crown_ratio` stays opt-in per the user — so with both off, reports on tall-crowned
+  stands understate exposure at the default 12 m. The measured gap map is also cut at
+  8 m, i.e. for the trunk band, not for 12 m.
 - ✅ **The viewshed has a range term** (roadmap C2, built 2026-08-11). It had none
   at all: a cell 3 km from an observer scored exactly like one at 300 m, while the
   median exposed sample on every study arm sat at **1.3–1.6 arcmin** against the
@@ -553,6 +615,18 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
   an observer — disturbed ground, a corridor through vegetation, a trench line —
   so `ground_los` answers "could someone see this patch of ground", which is a
   proxy for cable survivability and not a measurement of it.
+- ✅ **FIXED 2026-09-25 (`planner/corridor._debounce_bands`) — decided under the
+  "decide and document" rule, reversible with `MIN_DWELL_M = 0`:** along the route,
+  a run OUT of the canopy shorter than 50 m between two under-canopy runs is flown
+  under too (if every cell is within 2 m of `min_canopy_m`, in the enterable zone,
+  and has room under its crowns — this *adds* concealment), and a run UNDER the
+  canopy shorter than 50 m between two out-of-canopy runs is flown over (costs a
+  little concealment; each such island would also need two canopy openings). Demo
+  AO size=120: peak climb 16.9 → **1.41 m/s**; the test is now a real test (no
+  excursion < `MIN_DWELL_M`, climb inside the airframe) and fails with the
+  debounce off. Residual: one over→under transition needs 2.1 m/s of descent on a
+  2.46 m leg against 2.0 — a transition-length issue, still counted in
+  `climb_violations`. Original entry:
 - 🔴 **`min_canopy_m` is a hard band threshold with no hysteresis, and a stand
   sitting at it makes the aircraft porpoise.** Under-canopy and over-canopy
   altitudes are ~5 m apart with **no admissible altitude between them** (the crowns
@@ -762,6 +836,55 @@ of clearance the stem-routed sortie actually flew with. The acceptance test is a
 public forest-inventory dataset with **field-surveyed** stem positions, which is
 what `match_stems` was written to score against.
 
+### 🔴 The national ALS cannot feed the detector — measured by geometry (2026-11-19)
+
+The open MML *Laserkeilausaineisto* (~5 pulses/m² in the current programme, 0.5 in
+the old one) was the obvious free source for a stem map, and Askola is covered.
+The cloud session cannot reach MML (network policy), so the question was answered
+with the one mechanism that decides it: **near-nadir pulses against a vertical
+cylinder under a crown.** `forest/als_model.py` gives the closed form
+
+    E[slice returns] = D · T · 2r · h · E[tan θ]      (E[tan θ] = 0.178 at ±20°)
+
+and a Monte-Carlo ray trace (`simulate_als_scan`: crown survival, first-trunk
+shadowing, ground returns) that agrees with it to within a few per cent (unit
+tests pin both). `tools/als_stem_study.py` runs the detector on the traced clouds.
+700 stems/ha stand, r 0.10–0.20 m, crown base 8 m, detector slice 1.5–5.0 m,
+`match_stems` tolerance 0.5 m:
+
+| pulses/m² | T = 0.1 | T = 0.2 | T = 0.4 | E[returns/stem] at T = 0.2 |
+|---|---|---|---|---|
+| 0.5 (old MML) | 0 % / 0 % | 0 % / 0 % | 0 % / 0 % | 0.02 |
+| **5 (MML now)** | 0 % / 0 % | **0 % / 1 %** | 0 % / 0 % | **0.19** |
+| 20 | 0 % / 1 % | 0 % / 3 % | 0 % / 20 % | 0.75 |
+| 50 | 0 % / 4 % | 1 % / 22 % | 8 % / 67 % | 1.9 |
+| 100 | 0 % / 28 % | 4 % / 66 % | 46 % / 99 % | 3.8 |
+| 300 (UAV lidar) | 19 % / 86 % | 82 % / 100 % | 100 % / 100 % | 11 |
+| 1000 | 98 % / 100 % | 100 % / 100 % | 100 % / 100 % | 38 |
+
+(each cell: default detector `min_points` 8 / relaxed `min_points` 3, 0.5 m
+vertical extent; position RMSE of what *is* found is 0.01–0.12 m, 0 spurious.)
+
+🔑 **At MML density a trunk receives ~0.2 returns in the detector's slice — 40×
+short of the 8 it needs — and lowering the threshold does not rescue it** (1 %).
+The mean stem reaches 8 returns at **~210 p/m² at T = 0.2** (107 at T = 0.4,
+426 at T = 0.1): UAV-lidar territory. The reason is not the detector: a vertical
+surface intercepts a near-vertical flux only in proportion to `tan θ`, so a
+5 p/m² survey puts **~0.18 returns/m² on the trunk face** — against the ~4–10
+returns/m² below which the synthetic-scan sweep above already showed detection
+collapsing. The two studies agree from opposite directions.
+⚠️ **Upper bound, so this can say "no", not "yes":** no footprint (a 0.3–0.5 m
+ALS footprint on a 0.3 m trunk returns a mixed echo whose range is not the trunk
+surface), no branches, no understory, no waveform, a single per-pulse crown
+transmission. Every omission makes a real trunk return rarer. What MML ALS *is*
+good for here is unchanged: DTM, canopy height, gaps — the layers Askola already
+uses via Metsäkeskus' derived products.
+➡️ **Consequence for the plan (roadmap P1):** the stem map needs the programme's
+own canopy-penetrating survey (UAV lidar at ≳200 p/m² with off-nadir angles, or
+under-canopy scanning), not a download. Running `stem_detect` on a real MML tile
+is still worth doing once data access exists — as a **falsification check of this
+model** (it predicts essentially zero detections), not as a route to a map.
+
 ### 🔴 (superseded above) No stem-map capability at all — TEST-PLAN N4's critical path
 
 Routing *between mapped stems* is now the only surviving architecture for
@@ -809,6 +932,61 @@ plot for detection rate and position error; (3) only then feed it into the plann
 **as a cost-surface term rather than a post-filter** (N4 measured that composing
 concealment-then-stems has no admissible path in dense forest).
 
+## GPS-denied fix availability (roadmap P2, 2026-11-19)
+
+✅ **Built as a report-only layer.** `planner/nav_risk.py` samples the final
+route every 5 m and marks where a fix is possible: open ground (canopy < 3 m,
+terrain matching has texture) or within 10 m of a mapped stem (stem localiser).
+Drift grows at 2 % of distance between fixes, from a fix at launch; a stretch
+whose drift exceeds 15 m (the droneflight acceptance corridor) raises WARNING
+`nav_fix_gap`, otherwise INFO `nav_fix_availability`.
+
+| mission | unfixed share | longest unfixed | drift there |
+|---|---|---|---|
+| demo MVP (`mission_mvp.yaml`) | 92 % | **3277 m from launch** | **65.5 m** |
+| demo (`mission.yaml`) | 90 % | 3202 m | 64.0 m |
+| demo + stem map (`mission_stems.yaml`) | 69 % | 1242 m | 24.8 m |
+
+🔑 **Concealment and navigation pull opposite ways, now in the same report.**
+The route the cost surface prefers is the one terrain matching cannot see under.
+A stem map is the fix, and `forest/als_model.py` shows it must be surveyed.
+⚠️ Bounded on both sides: open ground is assumed to give a fix (a stale or
+featureless basemap declines it, and an accepted fix can be wrong), and
+textured canopy flown over is assumed to give none. The demo AO's canopy is
+synthetic and covers most of the AO with scrub ≥ 3 m, so its 92 % is a property
+of the fixture as much as of the route. Not a cost term (a run length is a
+property of the path, not of a cell); re-run on Askola, where real openings and
+roads exist.
+⚠️ The SITL GPS-denied arms (droneflight) used a synthetic basemap that is not
+derived from the CHM, so they neither confirm nor contradict these numbers.
+
+## Ground points — launch, end, relay (roadmap P3, 2026-11-19)
+
+✅ **Built minimally.** `planner/ground_points.py` scores a standing person
+(1.7 m target, centre 1 m above the DTM) at the launch and end points with the
+adversary the route was planned against (`corridor.point_scorer`, shared with the
+flown re-score), twice: with the detection model (`*_crew_exposure`) and as line
+of sight only (`*_crew_los`). WARNING `launch_site_exposed` / `end_site_exposed`
+above 0.15; INFO `*_site_in_line_of_sight` when the site is hidden by range alone.
+`tools/relay_study.py` scores relay points the same way.
+🐛 **Fixed in passing:** `relay_study.py` scored relay points on the `ground_los`
+raster, which is line of sight to the **DSM surface** — the top of the scrub or
+canopy the site sits in, not a person standing in it. On the demo AO both
+endpoints read `ground_los` **1.0** (fully open) while a person there scores
+**0.0** (hidden by 2-4 m of vegetation).
+⚠️ **Open:**
+- Under the default occlusion model vegetation over the site is a solid wall to a
+  distant ground observer (shallow sightline), so "in scrub" reads as fully
+  hidden; crown transmission (opt-in) is the more honest model there.
+- No dwell time, movement, vehicles, thermal, acoustic or RF (the operator's
+  radio). A standing person is scored like a still object — a floor on
+  findability, not a ceiling.
+- The aircraft's own climb-out over the launch site is in the flown re-score but
+  not attributed to the site.
+- Not a cost term: the planner does not move the endpoints (they are mission
+  inputs). Choosing sites is the operator's call; this tells them which ones are
+  bad.
+
 ## Cross-cutting
 
 - 🟠 **Planner output geometry defeats the flight stack's tether speed policy.**
@@ -844,9 +1022,13 @@ concealment-then-stems has no admissible path in dense forest).
   corner-speed prior** (measurable directly from `sim-logs/4.7/23_40_58.ulg`),
   then re-derive whether a planner-side trigger buys anything at all. Full result:
   droneflight CLAUDE.md → tether plugin §3, and RUNBOOK §4.7.
-- 🔴 **No real-AO validation.** Everything is exercised on synthetic fixtures and
-  the procedural demo. The spec's small real lidar tile + DEM (§6.1) is not yet
-  wired in, so field correctness on real data is unverified.
+- 🟠 **Real-AO validation — PARTLY DONE 2026-09-25 (Askola, open Finnish data).**
+  `tools/build_finnish_ao.py`: MML 10 m terrain, Metsäkeskus 1 m canopy model (p95
+  per 16 m cell, plus canopy openings) and stand polygons (measured stems/ha,
+  species strata). Planned, flown GPS-denied in SITL (4/4 on the 600 m zone, 4/4 on
+  the measured-density zone, 2/2 crown-aware, 2/2 over-canopy) — see CLAUDE.md →
+  Askola. Still missing: a real lidar tile (§6.1) and any field ground truth — the
+  forest in SITL is still generated from the data, not surveyed.
 - 🟠 **Reference-data fidelity is assumed, not modeled — the corridor and the
   flight-time fixes share one shaky input.** The whole corridor is built from
   geospatial reference (DTM/DSM, lidar, land cover). That reference is **uneven in
@@ -862,9 +1044,12 @@ concealment-then-stems has no admissible path in dense forest).
   concealment against staying in reach of trustworthy optical fixes — otherwise a
   maximally-concealed route is a maximally-blind one. Ties into the M2 "lidar
   currency / DSM-vs-canopy coupling" 🟡 and land-cover (currently unwired) items.
-- 🟠 **Cable-laydown prediction (M3) is absent** — where the fiber settles, and
-  its per-segment survivability, are not modeled; the report's survivability is a
-  placement heuristic, not a laydown result.
+- 🟠 **Cable laydown — MINIMAL MODEL BUILT 2026-09-25** (`laydown/settle.py`,
+  roadmap C7): each metre is classed trunk space / crowns / open ground and the
+  report gives the lengths (`cable_on_crowns` WARNING; the demo MVP lays 58 % on
+  crowns). Still absent: settle physics (wind drift, crown closure), hanging spans
+  at climbs/descents, and feeding the class into `snag.py`/`survivability.py` — the
+  report's survivability is still a placement heuristic.
 - 🟢 Determinism, CRS discipline, license hygiene, kinematic feasibility, and the
   human-in-the-loop REVIEW-cap all hold.
 
