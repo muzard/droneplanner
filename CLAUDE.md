@@ -40,7 +40,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 470 tests
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 474 tests
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -937,7 +937,15 @@ closed, because a pre-planned path has nothing to react to.
    Bounding the window at each column's canopy top changes routes → user's call.
 3. 🔴 **Below-canopy flight assumes onboard obstacle avoidance that does not
    exist yet** on this hardware (Track B, x86+RTX). The report says so per route.
-4. Forest voxelized at corridor grid res, not 0.25–0.5 m (flyability optimistic).
+4. ✅ **Forest voxelized at 0.5 m, aggregated to the corridor grid (2026-11-19,
+   `forest/fine.py`).** It was voxelized ON the corridor grid, and that was not
+   "optimistic": one trunk fills a 25 m column at every trunk-space level, so a
+   synthetic 200 or 700 stems/ha stand read **100 % NON_NAVIGABLE** (fine: 90 / 74 %
+   flyable). Any real cloud would have made the forest an obstacle. Aggregate =
+   share of flyable fine columns (≥ 0.5 FLYABLE, < 0.2 navigable → NON_NAVIGABLE),
+   medians for the band; cells without returns keep the coarse values. ⚠️ Share,
+   not connectivity; ~0.04-0.1 s per occupied cell (a full Askola-size cloud would
+   take tens of minutes).
 5. Performance won't scale to a real 5 km AO (pure-Python viewshed/Theta\*).
 Plus land cover unwired; OMPL 3D refinement deferred; no real-AO validation yet.
 (Threat sectors were on this list until 2026-08-15 — see the C3 entry above.)

@@ -79,7 +79,7 @@ live — the fastest way to build intuition for the cost function.
 | **M0** | scaffold, data contracts, I/O, CLI, straight-line stub + report | ✅ |
 | **M1** | `fields/` (viewshed, terrain, survivability, snag) + cost-aware Theta\* corridor + viz | ✅ |
 | **M1.1** | road crossings (open-terrain fly-over stub) | ✅ |
-| **M2** | `forest/` voxel flyability (2.5D navigability + non-navigable mask + altitude band) | ✅ |
+| **M2** | `forest/` voxel flyability (2.5D navigability + non-navigable mask + altitude band); voxelized at 0.5 m and aggregated to the corridor grid since 2026-11-19 | ✅ |
 | **Kinematics** | turn-radius filleting + climb-limited altitude + reversal flagging | ✅ this repo |
 | **MVP mission** | covered-radius concealment zone, onboard-planner speed envelope, per-leg speed in the `.plan`, stem-map routing, relay-leg costing | ✅ 2026-09-23 (see Results) |
 | **Real AO** | Finnish open data (`tools/build_finnish_ao.py`, `layers.stand_data`, `canopy_gaps`, `canopy_gap_fraction`, MML roads), over-canopy fallback with launch-climb briefing, opt-in crown base (`crown_ratio`) and crown transmission | ✅ 2026-09-26 (Askola, flown in SITL) |
@@ -93,8 +93,9 @@ live — the fastest way to build intuition for the cost function.
 
 > **Open gaps:** the low route was flown in SITL on 2026-09-14 (287/287
 > waypoints) — in a world with no trees, at 6.0 m/s — and the M2 navigable-band
-> datum was fixed the same day. Still open: land cover is not wired, the forest
-> is voxelized at corridor resolution rather than 0.25–0.5 m, below-canopy flight
+> datum was fixed the same day. Still open: land cover is not wired, fine-voxel
+> flyability (0.5 m, `forest/fine.py`) is a share-based aggregate with no
+> connectivity check and costs ~0.04–0.1 s per corridor cell, below-canopy flight
 > assumes onboard obstacle avoidance that exists only against an oracle sensor in
 > simulation, no real lidar tile has been ingested, and real-AO validation is
 > partial (Askola is built from open data, but nothing has been checked in the

@@ -465,13 +465,30 @@ Severity: 🔴 blocks trustworthy sim results · 🟠 material accuracy gap · �
    deliberately left open (which free window gets picked is still an artifact of
    the voxel grid's vertical extent). No current route changes: the fix is on the
    lidar path, and no point cloud has ever been ingested.
-2. 🟠 **Forest voxel resolution is tied to the corridor grid**
-   (`pipeline._load_flyability`). The spec wants **0.25–0.5 m** voxels for
-   clearance near the airframe scale; we voxelize at the DTM/DSM horizontal
-   resolution (often ≥1 m) co-registered to the corridor grid. Horizontal
-   clearance is therefore coarse — **flyability can read optimistic** (a gap
-   narrower than a cell is invisible). *Fix: voxelize at fine resolution, compute
-   clearance/navigability there, then aggregate to the corridor grid.*
+2. ✅ **FIXED 2026-11-19 — forest voxels are 0.5 m, aggregated to the corridor
+   grid** (`forest/fine.py`, wired in `pipeline._load_flyability`). 🔧 **The old
+   entry had the direction wrong.** It said a gap narrower than a cell is
+   invisible so flyability "can read optimistic"; but occupancy binning marks a
+   column occupied if *any* return falls in it, so one trunk fills a 25 m column
+   at every trunk-space level and the free window collapses. Measured on
+   synthetic stands (trunks + porous crowns + ground):
+
+   | stems/ha | 25 m columns | 5 m | 1 m | 0.5 m |
+   |---|---|---|---|---|
+   | 200 | **0 % flyable (100 % NON_NAVIGABLE)** | 58 % | 89 % | 90 % |
+   | 700 | **0 % flyable (100 % NON_NAVIGABLE)** | 10 % | 64 % | 74 % |
+
+   So the first real point cloud would have turned every treed cell into a
+   Theta\* obstacle. Each occupied corridor cell is now voxelized at 0.5 m with a
+   3 m halo from its neighbours; class = share of flyable fine columns (≥ 0.5 →
+   FLYABLE, < 0.2 navigable → NON_NAVIGABLE, else MARGINAL), band/clearance =
+   medians over navigable fine columns; cells with no returns are unchanged.
+   ⚠️ **Share, not connectivity** — a cell 90 % free can still be crossed by an
+   impassable line of trunks; threading is the stem router's and the onboard
+   planner's job. ⚠️ The shares are judgement, not calibration. ⚠️ Cost:
+   ~0.04 s per occupied cell, ~0.1 s on relief (the voxel column spans the whole
+   cloud's z range) — a full Askola-size cloud (~47 k treed cells) would take
+   30-80 min. Tile or restrict to a corridor band before running one.
 3. 🟠 **Performance will not scale to a real 5 km AO.** The viewshed
    (`O(observers × perimeter × ray_len)`) and Theta\* are pure Python, sized for
    the ~120–160-cell demo. The §6.7 budget (5 km route / 25 km² / 1 m raster /
