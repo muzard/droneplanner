@@ -31,7 +31,7 @@ unpublished design notes and are not part of this repository.
 - The Gazebo forests are generated from that data, not surveyed: trunks are bare cylinders with no crowns or understory.
 - The endurance model is calibrated on a single flown log.
 - In simulation, obstacle sensing is an oracle fed from the world's trunk positions, and GPS-denied navigation is ground truth plus injected error.
-- No real lidar has been ingested.
+- No real lidar has been ingested. A geometry model of airborne lidar (`forest/als_model.py`, `tools/als_stem_study.py`) shows the open national ALS (~5 pulses/m²) puts about 0.2 returns on a trunk where the stem detector needs 8: a stem map needs the programme's own UAV lidar at roughly 200 pulses/m² or more.
 
 See [SHORTFALLS.md](SHORTFALLS.md).
 

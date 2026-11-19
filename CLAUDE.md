@@ -40,7 +40,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 449 tests
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 459 tests
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -814,6 +814,14 @@ whole budget. `match_stems` scores a map against known truth for exactly this.
 fixture** (no beam, no traced occlusion, no registration error) — an upper bound
 that can falsify a detector but cannot validate one. **No real `.laz` has ever been
 ingested; that is the remaining gap** (SHORTFALLS M2).
+🔴 **The open MML ALS cannot supply it (2026-11-19, `forest/als_model.py`).** A
+near-nadir pulse meets a vertical trunk only in proportion to tan θ, so
+`E[slice returns] = D·T·2r·h·E[tan θ]` (0.178 at ±20°): **~0.19 returns per stem at
+5 p/m², T 0.2** against `min_points` 8. Ray-traced clouds through `detect_stems`
+(`tools/als_stem_study.py`, 700/ha): **0-1 % detected at 5 p/m²** even with the
+threshold relaxed to 3; ~80-100 % needs **≳300 p/m²** (≈210 for the mean stem to
+expect 8 at T 0.2). Upper bound (no footprint/branches/waveform), so it is a firm
+"no", not a "yes" at 300. The stem map is a UAV-lidar acquisition, not a download.
 
 ## ✅ STEM ROUTING IS BUILT (2026-09-14) — the route now threads the trunks
 `fields/stems.py` (the map) + `planner/stem_route.py` (the refinement), switched on

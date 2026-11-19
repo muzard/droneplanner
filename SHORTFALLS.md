@@ -819,6 +819,55 @@ of clearance the stem-routed sortie actually flew with. The acceptance test is a
 public forest-inventory dataset with **field-surveyed** stem positions, which is
 what `match_stems` was written to score against.
 
+### 🔴 The national ALS cannot feed the detector — measured by geometry (2026-11-19)
+
+The open MML *Laserkeilausaineisto* (~5 pulses/m² in the current programme, 0.5 in
+the old one) was the obvious free source for a stem map, and Askola is covered.
+The cloud session cannot reach MML (network policy), so the question was answered
+with the one mechanism that decides it: **near-nadir pulses against a vertical
+cylinder under a crown.** `forest/als_model.py` gives the closed form
+
+    E[slice returns] = D · T · 2r · h · E[tan θ]      (E[tan θ] = 0.178 at ±20°)
+
+and a Monte-Carlo ray trace (`simulate_als_scan`: crown survival, first-trunk
+shadowing, ground returns) that agrees with it to within a few per cent (unit
+tests pin both). `tools/als_stem_study.py` runs the detector on the traced clouds.
+700 stems/ha stand, r 0.10–0.20 m, crown base 8 m, detector slice 1.5–5.0 m,
+`match_stems` tolerance 0.5 m:
+
+| pulses/m² | T = 0.1 | T = 0.2 | T = 0.4 | E[returns/stem] at T = 0.2 |
+|---|---|---|---|---|
+| 0.5 (old MML) | 0 % / 0 % | 0 % / 0 % | 0 % / 0 % | 0.02 |
+| **5 (MML now)** | 0 % / 0 % | **0 % / 1 %** | 0 % / 0 % | **0.19** |
+| 20 | 0 % / 1 % | 0 % / 3 % | 0 % / 20 % | 0.75 |
+| 50 | 0 % / 4 % | 1 % / 22 % | 8 % / 67 % | 1.9 |
+| 100 | 0 % / 28 % | 4 % / 66 % | 46 % / 99 % | 3.8 |
+| 300 (UAV lidar) | 19 % / 86 % | 82 % / 100 % | 100 % / 100 % | 11 |
+| 1000 | 98 % / 100 % | 100 % / 100 % | 100 % / 100 % | 38 |
+
+(each cell: default detector `min_points` 8 / relaxed `min_points` 3, 0.5 m
+vertical extent; position RMSE of what *is* found is 0.01–0.12 m, 0 spurious.)
+
+🔑 **At MML density a trunk receives ~0.2 returns in the detector's slice — 40×
+short of the 8 it needs — and lowering the threshold does not rescue it** (1 %).
+The mean stem reaches 8 returns at **~210 p/m² at T = 0.2** (107 at T = 0.4,
+426 at T = 0.1): UAV-lidar territory. The reason is not the detector: a vertical
+surface intercepts a near-vertical flux only in proportion to `tan θ`, so a
+5 p/m² survey puts **~0.18 returns/m² on the trunk face** — against the ~4–10
+returns/m² below which the synthetic-scan sweep above already showed detection
+collapsing. The two studies agree from opposite directions.
+⚠️ **Upper bound, so this can say "no", not "yes":** no footprint (a 0.3–0.5 m
+ALS footprint on a 0.3 m trunk returns a mixed echo whose range is not the trunk
+surface), no branches, no understory, no waveform, a single per-pulse crown
+transmission. Every omission makes a real trunk return rarer. What MML ALS *is*
+good for here is unchanged: DTM, canopy height, gaps — the layers Askola already
+uses via Metsäkeskus' derived products.
+➡️ **Consequence for the plan (roadmap P1):** the stem map needs the programme's
+own canopy-penetrating survey (UAV lidar at ≳200 p/m² with off-nadir angles, or
+under-canopy scanning), not a download. Running `stem_detect` on a real MML tile
+is still worth doing once data access exists — as a **falsification check of this
+model** (it predicts essentially zero detections), not as a route to a map.
+
 ### 🔴 (superseded above) No stem-map capability at all — TEST-PLAN N4's critical path
 
 Routing *between mapped stems* is now the only surviving architecture for
