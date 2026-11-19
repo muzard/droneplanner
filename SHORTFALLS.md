@@ -915,6 +915,34 @@ plot for detection rate and position error; (3) only then feed it into the plann
 **as a cost-surface term rather than a post-filter** (N4 measured that composing
 concealment-then-stems has no admissible path in dense forest).
 
+## GPS-denied fix availability (roadmap P2, 2026-11-19)
+
+✅ **Built as a report-only layer.** `planner/nav_risk.py` samples the final
+route every 5 m and marks where a fix is possible: open ground (canopy < 3 m,
+terrain matching has texture) or within 10 m of a mapped stem (stem localiser).
+Drift grows at 2 % of distance between fixes, from a fix at launch; a stretch
+whose drift exceeds 15 m (the droneflight acceptance corridor) raises WARNING
+`nav_fix_gap`, otherwise INFO `nav_fix_availability`.
+
+| mission | unfixed share | longest unfixed | drift there |
+|---|---|---|---|
+| demo MVP (`mission_mvp.yaml`) | 92 % | **3277 m from launch** | **65.5 m** |
+| demo (`mission.yaml`) | 90 % | 3202 m | 64.0 m |
+| demo + stem map (`mission_stems.yaml`) | 69 % | 1242 m | 24.8 m |
+
+🔑 **Concealment and navigation pull opposite ways, now in the same report.**
+The route the cost surface prefers is the one terrain matching cannot see under.
+A stem map is the fix, and `forest/als_model.py` shows it must be surveyed.
+⚠️ Bounded on both sides: open ground is assumed to give a fix (a stale or
+featureless basemap declines it, and an accepted fix can be wrong), and
+textured canopy flown over is assumed to give none. The demo AO's canopy is
+synthetic and covers most of the AO with scrub ≥ 3 m, so its 92 % is a property
+of the fixture as much as of the route. Not a cost term (a run length is a
+property of the path, not of a cell); re-run on Askola, where real openings and
+roads exist.
+⚠️ The SITL GPS-denied arms (droneflight) used a synthetic basemap that is not
+derived from the CHM, so they neither confirm nor contradict these numbers.
+
 ## Ground points — launch, end, relay (roadmap P3, 2026-11-19)
 
 ✅ **Built minimally.** `planner/ground_points.py` scores a standing person

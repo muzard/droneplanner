@@ -64,6 +64,7 @@ from droneplanner.planner.kinematics import (
     fillet_path,
     smooth_altitudes,
 )
+from droneplanner.planner.nav_risk import assess_fix_availability
 from droneplanner.planner.stem_route import refine_through_stems
 from droneplanner.planner.terrain_profile import (
     FlownProfile,
@@ -582,6 +583,7 @@ def plan_corridor(
             # refinement pass happened to hand back.
             **stem_scores,
             **ground_scores,
+            **assess_fix_availability(fpts, chm, grid, stems=stems),
         },
         kinematics=kinematics,
         endurance=endurance,

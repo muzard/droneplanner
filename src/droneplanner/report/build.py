@@ -658,6 +658,31 @@ def build_report(
             )
         )
 
+    # --- GPS-denied fix availability (roadmap P2) ---
+    longest = plan.objective_scores.get("nav_max_unfixed_m")
+    if longest is not None and longest > 0.0:
+        drift = plan.objective_scores.get("nav_max_drift_m", 0.0)
+        budget = plan.objective_scores.get("nav_drift_budget_m", 0.0)
+        at = plan.objective_scores.get("nav_max_unfixed_start_m", 0.0)
+        frac = plan.objective_scores.get("nav_unfixed_fraction", 0.0)
+        runs = int(plan.objective_scores.get("nav_runs_over_budget", 0.0))
+        over = drift > budget
+        findings.append(
+            Finding(
+                severity=Severity.WARNING if over else Severity.INFO,
+                code="nav_fix_gap" if over else "nav_fix_availability",
+                message=(
+                    f"Longest stretch with no position-fix opportunity: {longest:.0f} m, "
+                    f"from {at:.0f} m after launch — about {drift:.1f} m of GPS-denied "
+                    f"drift at 2 % of distance (budget {budget:.0f} m"
+                    + (f"; {runs} stretch(es) exceed it" if over else "")
+                    + f"). {100 * frac:.0f} % of the route is over or under vegetation >= 3 m, "
+                    "where terrain matching starves, and no stem map covers it. Bounded model "
+                    "(planner/nav_risk.py): open ground is assumed to give a fix."
+                ),
+            )
+        )
+
     # --- Ground points: where people stand (roadmap P3) ---
     for key, label in (("launch", "LAUNCH SITE"), ("end", "END POINT")):
         crew = plan.objective_scores.get(f"{key}_crew_exposure")

@@ -40,7 +40,7 @@ droneplanner gz-world --dtm demo_ao/dtm.tif --plan out_demo/mission.plan \
                         #   work at all — see io/forest_models.py.
 droneplanner viz   --out route.png     # demo AO: fields + flyability + route (static PNG)
 droneplanner serve                     # interactive explorer, http://127.0.0.1:8765
-ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 464 tests
+ruff check . && ruff format --check . && mypy --strict src && pytest -q   # 470 tests
 UPDATE_GOLDEN=1 pytest tests/regression -q   # regenerate golden snapshot deliberately
 ```
 
@@ -786,6 +786,13 @@ a large part of it is talousmetsää."* Detail and sources in the
 * 🔧 **The canopy-height relation was 29 % low** against those stands. Refitted:
   **730 stems/ha at 20 m, exponent 1.36** (was 600 / 1.5 from literature) —
   `fields/stem_density.py`. One municipality; use stand data where it exists.
+
+## 🧭 GPS-DENIED FIX AVAILABILITY (2026-11-19, roadmap P2)
+`planner/nav_risk.py` (report-only): fix possible on open ground (canopy < 3 m)
+or within 10 m of a mapped stem; drift 2 %/m between fixes from launch; WARNING
+`nav_fix_gap` when the longest unfixed run's drift > 15 m. **Demo MVP: 3277 m
+from launch, 65.5 m drift, 92 % unfixed**; with the demo stem map 1242 m / 24.8 m.
+The concealed route is the blind one. Coarse on purpose — see SHORTFALLS.
 
 ## 🧍 GROUND POINTS — LAUNCH / END / RELAY (2026-11-19, roadmap P3)
 `planner/ground_points.py`: a standing person (1.7 m, centre 1 m AGL) at the
